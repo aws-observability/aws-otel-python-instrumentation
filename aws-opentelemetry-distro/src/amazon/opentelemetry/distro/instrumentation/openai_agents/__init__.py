@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import sys
 from typing import Any, Collection
 
 from typing_extensions import override
@@ -33,25 +34,45 @@ class OpenAIAgentsInstrumentor(BaseInstrumentor):  # type: ignore
             set_trace_processors,
         )
 
-        from ._gen_ai_context_capture import GenAIContextCapture  # pylint: disable=import-outside-toplevel
+        from ._gen_ai_context_capture import GenAICapturingContext  # pylint: disable=import-outside-toplevel
         from ._processor import OpenTelemetryTracingProcessor  # pylint: disable=import-outside-toplevel
 
         tracer_provider = kwargs.get("tracer_provider") or trace.get_tracer_provider()
         tracer = trace.get_tracer(__name__, __version__, tracer_provider=tracer_provider)
         self._processor = OpenTelemetryTracingProcessor(tracer)
 
-        try_wrap("openai.resources.responses.responses", "Responses.create", GenAIContextCapture.record_request)
-        try_wrap("openai.resources.responses.responses", "AsyncResponses.create", GenAIContextCapture.record_request)
         try_wrap(
-            "openai.resources.chat.completions.completions", "Completions.create", GenAIContextCapture.record_request
+            "openai.resources.responses.responses",
+            "Responses.create",
+            GenAICapturingContext.capture_openai_request_attributes,
+        )
+        try_wrap(
+            "openai.resources.responses.responses",
+            "AsyncResponses.create",
+            GenAICapturingContext.capture_openai_request_attributes,
+        )
+        try_wrap(
+            "openai.resources.chat.completions.completions",
+            "Completions.create",
+            GenAICapturingContext.capture_openai_completion_attributes,
         )
         try_wrap(
             "openai.resources.chat.completions.completions",
             "AsyncCompletions.create",
-            GenAIContextCapture.record_request,
+            GenAICapturingContext.capture_openai_completion_attributes,
         )
-        try_wrap("agents.items", "ItemHelpers.tool_call_output_item", GenAIContextCapture.record_tool_call)
-        try_wrap("agents.tool_context", "ToolContext.from_agent_context", GenAIContextCapture.record_tool_call)
+        try_wrap("litellm", "completion", GenAICapturingContext.capture_litellm_completion_attributes)
+        try_wrap("litellm", "acompletion", GenAICapturingContext.capture_litellm_completion_attributes)
+        try_wrap(
+            "agents.items",
+            "ItemHelpers.tool_call_output_item",
+            GenAICapturingContext.capture_tool_call_attributes,
+        )
+        try_wrap(
+            "agents.tool_context",
+            "ToolContext.from_agent_context",
+            GenAICapturingContext.capture_tool_call_attributes,
+        )
         # disables http spans created from spans sent OpenAI's tracing backend
         try_wrap("agents.tracing.processors", "BackendSpanExporter.export", _suppress_http_instrumentation)
 
@@ -70,18 +91,17 @@ class OpenAIAgentsInstrumentor(BaseInstrumentor):  # type: ignore
 
         from agents.tracing import get_trace_provider, set_trace_processors  # pylint: disable=import-outside-toplevel
 
-        from ._gen_ai_context_capture import GenAIContextCapture  # pylint: disable=import-outside-toplevel
-
         try_unwrap("openai.resources.responses.responses.Responses", "create")
         try_unwrap("openai.resources.responses.responses.AsyncResponses", "create")
         try_unwrap("openai.resources.chat.completions.completions.Completions", "create")
         try_unwrap("openai.resources.chat.completions.completions.AsyncCompletions", "create")
+        litellm_module = sys.modules.get("litellm")
+        if litellm_module is not None:
+            try_unwrap(litellm_module, "completion")
+            try_unwrap(litellm_module, "acompletion")
         try_unwrap("agents.items.ItemHelpers", "tool_call_output_item")
         try_unwrap("agents.tool_context.ToolContext", "from_agent_context")
         try_unwrap("agents.tracing.processors.BackendSpanExporter", "export")
-        GenAIContextCapture.reset_request_params()
-        GenAIContextCapture.reset_tool_call()
-
         processor = self._processor
         try:
             if self._previous_processors is not None:

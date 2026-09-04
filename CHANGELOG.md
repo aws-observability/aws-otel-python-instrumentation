@@ -12,6 +12,12 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- Only demote duplicate nested GenAI client spans
+  ([#872](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/872))
+- (fix): Align and capture missing GenAI request attributes from framework LLM calls
+  ([#871](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/871))
+- fix: align LlamaIndex tools with the OTel GenAI schema and expand GenAI contract coverage
+  ([#866](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/866))
 - feat(openai-agents): [BREAKING CHANGE] add native ADOT OpenAI Agents instrumentation and remove the
   `opentelemetry-instrumentation-openai-agents-v2` dependency
   ([#865](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/865))

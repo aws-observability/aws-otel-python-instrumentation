@@ -7,7 +7,7 @@ import unittest
 from unittest import TestCase
 from unittest.mock import patch
 
-from conftest import validate_otel_genai_schema
+from conftest import call_mock_llm, validate_otel_genai_schema
 
 if sys.version_info < (3, 10):
     raise unittest.SkipTest("langchain requires >=3.10")
@@ -45,10 +45,14 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_OPERATION_NAME,
     GEN_AI_OUTPUT_MESSAGES,
     GEN_AI_PROVIDER_NAME,
+    GEN_AI_REQUEST_CHOICE_COUNT,
     GEN_AI_REQUEST_FREQUENCY_PENALTY,
     GEN_AI_REQUEST_MAX_TOKENS,
     GEN_AI_REQUEST_MODEL,
     GEN_AI_REQUEST_PRESENCE_PENALTY,
+    GEN_AI_REQUEST_SEED,
+    GEN_AI_REQUEST_STOP_SEQUENCES,
+    GEN_AI_REQUEST_STREAM,
     GEN_AI_REQUEST_TEMPERATURE,
     GEN_AI_REQUEST_TOP_K,
     GEN_AI_REQUEST_TOP_P,
@@ -61,8 +65,11 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_TOOL_DESCRIPTION,
     GEN_AI_TOOL_NAME,
     GEN_AI_TOOL_TYPE,
+    GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS,
+    GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS,
     GEN_AI_USAGE_INPUT_TOKENS,
     GEN_AI_USAGE_OUTPUT_TOKENS,
+    GEN_AI_USAGE_REASONING_OUTPUT_TOKENS,
     GenAiOperationNameValues,
     GenAiProviderNameValues,
 )
@@ -80,6 +87,7 @@ class TestLangChainInstrumentor(TestCase):
         max_tokens: int = 100
         frequency_penalty: float = 0.5
         presence_penalty: float = 0.3
+        stop: tuple[str, ...] = ("STOP",)
 
         @property
         def _default_params(self) -> dict:
@@ -91,6 +99,7 @@ class TestLangChainInstrumentor(TestCase):
                 "max_tokens": self.max_tokens,
                 "frequency_penalty": self.frequency_penalty,
                 "presence_penalty": self.presence_penalty,
+                "stop": self.stop,
             }
 
         @classmethod
@@ -182,6 +191,7 @@ class TestLangChainInstrumentor(TestCase):
         self.assertEqual(span.attributes[GEN_AI_REQUEST_MAX_TOKENS], 100)
         self.assertEqual(span.attributes[GEN_AI_REQUEST_FREQUENCY_PENALTY], 0.5)
         self.assertEqual(span.attributes[GEN_AI_REQUEST_PRESENCE_PENALTY], 0.3)
+        self.assertEqual(span.attributes[GEN_AI_REQUEST_STOP_SEQUENCES], ("STOP",))
 
         self.assertIsNotNone(span.attributes.get(GEN_AI_INPUT_MESSAGES))
         input_messages = json.loads(span.attributes[GEN_AI_INPUT_MESSAGES])
@@ -388,9 +398,29 @@ class TestLangChainInstrumentor(TestCase):
                 "token_usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
             },
         )
+        messages = [
+            SystemMessage(content="You are a helpful assistant."),
+            HumanMessage(content="Hello"),
+        ]
 
         cases = [
-            (ChatBedrock, {"model_id": "test", "region_name": "us-east-1"}, GenAiProviderNameValues.AWS_BEDROCK.value),
+            (
+                ChatBedrock,
+                {
+                    "model_id": "anthropic.claude-v2",
+                    "region_name": "us-east-1",
+                    "temperature": 0.7,
+                    "max_tokens": 100,
+                    "stop": ["STOP"],
+                    "streaming": False,
+                    "beta_use_converse_api": True,
+                    "model_kwargs": {
+                        "top_p": 0.9,
+                        "additional_model_request_fields": {"top_k": 40},
+                    },
+                },
+                GenAiProviderNameValues.AWS_BEDROCK.value,
+            ),
             (
                 ChatBedrockConverse,
                 {"model": "test", "region_name": "us-east-1"},
@@ -399,7 +429,21 @@ class TestLangChainInstrumentor(TestCase):
             (ChatOpenAI, {"api_key": "fake"}, GenAiProviderNameValues.OPENAI.value),
             (
                 AzureChatOpenAI,
-                {"api_key": "fake", "azure_endpoint": "https://fake.openai.azure.com", "api_version": "2024-01-01"},
+                {
+                    "api_key": "fake",
+                    "azure_endpoint": "https://fake.openai.azure.com",
+                    "api_version": "2024-01-01",
+                    "model": "gpt-4o",
+                    "temperature": 0.0,
+                    "top_p": 0.9,
+                    "max_completion_tokens": 100,
+                    "frequency_penalty": 0.0,
+                    "presence_penalty": 0.0,
+                    "seed": 0,
+                    "streaming": False,
+                    "n": 2,
+                    "stop": ["STOP"],
+                },
                 GenAiProviderNameValues.AZURE_AI_OPENAI.value,
             ),
             (
@@ -409,23 +453,266 @@ class TestLangChainInstrumentor(TestCase):
             ),
             (
                 ChatGoogleGenerativeAI,
-                {"google_api_key": "fake", "model": "gemini-pro"},
+                {
+                    "google_api_key": "fake",
+                    "model": "gemini-pro",
+                    "temperature": 0.0,
+                    "top_p": 0.9,
+                    "top_k": 40,
+                    "max_tokens": 100,
+                    "n": 2,
+                    "stop": ["STOP"],
+                    "streaming": False,
+                },
                 GenAiProviderNameValues.GCP_GEN_AI.value,
             ),
-            (ChatMistralAI, {"api_key": "fake", "model": "test"}, GenAiProviderNameValues.MISTRAL_AI.value),
-            (ChatGroq, {"api_key": "fake", "model": "test"}, GenAiProviderNameValues.GROQ.value),
-            (ChatCohere, {"cohere_api_key": "fake", "model": "test"}, GenAiProviderNameValues.COHERE.value),
-            (ChatDeepSeek, {"api_key": "fake", "model": "test"}, GenAiProviderNameValues.DEEPSEEK.value),
-            (ChatXAI, {"api_key": "fake", "model": "test"}, GenAiProviderNameValues.X_AI.value),
+            (
+                ChatMistralAI,
+                {
+                    "api_key": "fake",
+                    "model": "mistral-large-latest",
+                    "temperature": 0.0,
+                    "top_p": 0.9,
+                    "max_tokens": 100,
+                    "random_seed": 0,
+                    "streaming": True,
+                },
+                GenAiProviderNameValues.MISTRAL_AI.value,
+            ),
+            (
+                ChatGroq,
+                {
+                    "api_key": "fake",
+                    "model": "llama-3.3-70b-versatile",
+                    "temperature": 0.5,
+                    "max_tokens": 100,
+                    "streaming": True,
+                    "n": 1,
+                    "stop": ["STOP"],
+                    "model_kwargs": {
+                        "seed": 0,
+                        "top_p": 0.0,
+                        "frequency_penalty": 0.0,
+                        "presence_penalty": 0.0,
+                    },
+                },
+                GenAiProviderNameValues.GROQ.value,
+            ),
+            (
+                ChatCohere,
+                {"cohere_api_key": "fake", "model": "command-a-03-2025", "temperature": 0.0},
+                GenAiProviderNameValues.COHERE.value,
+            ),
+            (
+                ChatDeepSeek,
+                {
+                    "api_key": "fake",
+                    "model": "deepseek-chat",
+                    "temperature": 0.0,
+                    "top_p": 0.9,
+                    "max_tokens": 100,
+                    "frequency_penalty": 0.0,
+                    "presence_penalty": 0.0,
+                    "seed": 0,
+                    "streaming": False,
+                    "n": 2,
+                    "stop": ["STOP"],
+                },
+                GenAiProviderNameValues.DEEPSEEK.value,
+            ),
+            (
+                ChatXAI,
+                {
+                    "api_key": "fake",
+                    "model": "grok-4",
+                    "temperature": 0.0,
+                    "top_p": 0.9,
+                    "max_tokens": 100,
+                    "frequency_penalty": 0.0,
+                    "presence_penalty": 0.0,
+                    "seed": 0,
+                    "streaming": False,
+                    "n": 2,
+                    "stop": ["STOP"],
+                },
+                GenAiProviderNameValues.X_AI.value,
+            ),
         ]
 
         for model_cls, init_kwargs, expected_provider in cases:
             with self.subTest(model=model_cls.__name__):
                 self.span_exporter.clear()
+                expected_request_attributes = {}
 
-                llm = model_cls(**init_kwargs)
-                with patch.object(type(llm), "_generate", return_value=fake_result):
-                    llm.invoke("test")
+                if model_cls is ChatOpenAI:
+
+                    def invoke_openai(client):
+                        ChatOpenAI(
+                            model="gpt-5.6-sol",
+                            api_key="fake-key",
+                            client=client.chat.completions,
+                            root_client=client,
+                            temperature=1.0,
+                            top_p=0.9,
+                            max_completion_tokens=100,
+                            frequency_penalty=0.5,
+                            presence_penalty=0.3,
+                            extra_body={"top_k": 40, "seed": 42},
+                            streaming=False,
+                            n=2,
+                            stop="STOP",
+                        ).invoke(messages)
+
+                    call_mock_llm("openai", invoke_llm_callback=invoke_openai)
+                    expected_request_attributes = {
+                        GEN_AI_REQUEST_MODEL: "gpt-5.6-sol",
+                        GEN_AI_REQUEST_TEMPERATURE: 1.0,
+                        GEN_AI_REQUEST_TOP_P: 0.9,
+                        GEN_AI_REQUEST_TOP_K: 40,
+                        GEN_AI_REQUEST_MAX_TOKENS: 100,
+                        GEN_AI_REQUEST_FREQUENCY_PENALTY: 0.5,
+                        GEN_AI_REQUEST_PRESENCE_PENALTY: 0.3,
+                        GEN_AI_REQUEST_STOP_SEQUENCES: ("STOP",),
+                        GEN_AI_REQUEST_SEED: 42,
+                        GEN_AI_REQUEST_CHOICE_COUNT: 2,
+                        GEN_AI_REQUEST_STREAM: False,
+                    }
+                elif model_cls is ChatAnthropic:
+
+                    def invoke_anthropic(client):
+                        llm = ChatAnthropic(
+                            model="claude-opus-5",
+                            api_key="fake-key",
+                            max_tokens=100,
+                            temperature=1.0,
+                            top_p=0.9,
+                            top_k=40,
+                            stop=["STOP"],
+                        )
+                        # LangChain has no public seam for replacing this provider client with the mock transport.
+                        llm._client = client
+                        llm.invoke(messages)
+
+                    call_mock_llm("anthropic", invoke_llm_callback=invoke_anthropic)
+                    expected_request_attributes = {
+                        GEN_AI_REQUEST_MODEL: "claude-opus-5",
+                        GEN_AI_REQUEST_TEMPERATURE: 1.0,
+                        GEN_AI_REQUEST_TOP_P: 0.9,
+                        GEN_AI_REQUEST_TOP_K: 40,
+                        GEN_AI_REQUEST_MAX_TOKENS: 100,
+                        GEN_AI_REQUEST_STOP_SEQUENCES: ("STOP",),
+                        GEN_AI_REQUEST_STREAM: False,
+                    }
+                elif model_cls is ChatBedrockConverse:
+
+                    def invoke_bedrock(client):
+                        ChatBedrockConverse(
+                            model="anthropic.claude-fable-5",
+                            client=client,
+                            temperature=0.7,
+                            top_p=0.9,
+                            max_tokens=100,
+                            stop=["STOP"],
+                            additional_model_request_fields={"top_k": 40},
+                        ).invoke(messages)
+
+                    call_mock_llm("bedrock", invoke_llm_callback=invoke_bedrock)
+                    expected_request_attributes = {
+                        GEN_AI_REQUEST_MODEL: "anthropic.claude-fable-5",
+                        GEN_AI_REQUEST_TEMPERATURE: 0.7,
+                        GEN_AI_REQUEST_TOP_P: 0.9,
+                        GEN_AI_REQUEST_TOP_K: 40,
+                        GEN_AI_REQUEST_MAX_TOKENS: 100,
+                        GEN_AI_REQUEST_STOP_SEQUENCES: ("STOP",),
+                    }
+                else:
+                    llm = model_cls(**init_kwargs)
+                    with (
+                        patch.object(type(llm), "_generate", return_value=fake_result),
+                        patch.object(type(llm), "_should_stream", return_value=False),
+                    ):
+                        if model_cls is ChatMistralAI:
+                            llm.invoke("test", stop=["STOP"])
+                        elif model_cls is ChatCohere:
+                            llm.invoke(
+                                "test",
+                                stop=["STOP"],
+                                max_tokens=100,
+                                p=0.0,
+                                k=0,
+                                seed=0,
+                                num_generations=2,
+                            )
+                        else:
+                            llm.invoke("test")
+                    if model_cls is ChatMistralAI:
+                        expected_request_attributes = {
+                            GEN_AI_REQUEST_MODEL: "mistral-large-latest",
+                            GEN_AI_REQUEST_TEMPERATURE: 0.0,
+                            GEN_AI_REQUEST_TOP_P: 0.9,
+                            GEN_AI_REQUEST_MAX_TOKENS: 100,
+                            GEN_AI_REQUEST_STOP_SEQUENCES: ("STOP",),
+                            GEN_AI_REQUEST_SEED: 0,
+                            GEN_AI_REQUEST_STREAM: True,
+                        }
+                    elif model_cls is ChatBedrock:
+                        expected_request_attributes = {
+                            GEN_AI_REQUEST_MODEL: "anthropic.claude-v2",
+                            GEN_AI_REQUEST_TEMPERATURE: 0.7,
+                            GEN_AI_REQUEST_TOP_P: 0.9,
+                            GEN_AI_REQUEST_TOP_K: 40,
+                            GEN_AI_REQUEST_MAX_TOKENS: 100,
+                            GEN_AI_REQUEST_STOP_SEQUENCES: ("STOP",),
+                            GEN_AI_REQUEST_STREAM: False,
+                        }
+                    elif model_cls is ChatGoogleGenerativeAI:
+                        expected_request_attributes = {
+                            GEN_AI_REQUEST_MODEL: llm.model,
+                            GEN_AI_REQUEST_TEMPERATURE: 0.0,
+                            GEN_AI_REQUEST_TOP_P: 0.9,
+                            GEN_AI_REQUEST_TOP_K: 40,
+                            GEN_AI_REQUEST_MAX_TOKENS: 100,
+                            GEN_AI_REQUEST_STOP_SEQUENCES: ("STOP",),
+                            GEN_AI_REQUEST_CHOICE_COUNT: 2,
+                            GEN_AI_REQUEST_STREAM: False,
+                        }
+                    elif model_cls is ChatGroq:
+                        expected_request_attributes = {
+                            GEN_AI_REQUEST_MODEL: "llama-3.3-70b-versatile",
+                            GEN_AI_REQUEST_TEMPERATURE: 0.5,
+                            GEN_AI_REQUEST_TOP_P: 0.0,
+                            GEN_AI_REQUEST_MAX_TOKENS: 100,
+                            GEN_AI_REQUEST_FREQUENCY_PENALTY: 0.0,
+                            GEN_AI_REQUEST_PRESENCE_PENALTY: 0.0,
+                            GEN_AI_REQUEST_STOP_SEQUENCES: ("STOP",),
+                            GEN_AI_REQUEST_SEED: 0,
+                            GEN_AI_REQUEST_CHOICE_COUNT: 1,
+                            GEN_AI_REQUEST_STREAM: True,
+                        }
+                    elif model_cls is ChatCohere:
+                        expected_request_attributes = {
+                            GEN_AI_REQUEST_MODEL: "command-a-03-2025",
+                            GEN_AI_REQUEST_TEMPERATURE: 0.0,
+                            GEN_AI_REQUEST_TOP_P: 0.0,
+                            GEN_AI_REQUEST_TOP_K: 0,
+                            GEN_AI_REQUEST_MAX_TOKENS: 100,
+                            GEN_AI_REQUEST_STOP_SEQUENCES: ("STOP",),
+                            GEN_AI_REQUEST_SEED: 0,
+                            GEN_AI_REQUEST_CHOICE_COUNT: 2,
+                        }
+                    elif model_cls in (AzureChatOpenAI, ChatDeepSeek, ChatXAI):
+                        expected_request_attributes = {
+                            GEN_AI_REQUEST_MODEL: init_kwargs["model"],
+                            GEN_AI_REQUEST_TEMPERATURE: 0.0,
+                            GEN_AI_REQUEST_TOP_P: 0.9,
+                            GEN_AI_REQUEST_MAX_TOKENS: 100,
+                            GEN_AI_REQUEST_FREQUENCY_PENALTY: 0.0,
+                            GEN_AI_REQUEST_PRESENCE_PENALTY: 0.0,
+                            GEN_AI_REQUEST_STOP_SEQUENCES: ("STOP",),
+                            GEN_AI_REQUEST_SEED: 0,
+                            GEN_AI_REQUEST_CHOICE_COUNT: 2,
+                            GEN_AI_REQUEST_STREAM: False,
+                        }
 
                 spans = self.span_exporter.get_finished_spans()
                 chat_spans = [s for s in spans if "chat" in s.name or "text_completion" in s.name]
@@ -438,6 +725,8 @@ class TestLangChainInstrumentor(TestCase):
                 validate_otel_genai_schema(json.loads(attrs[GEN_AI_INPUT_MESSAGES]), "gen-ai-input-messages")
                 validate_otel_genai_schema(json.loads(attrs[GEN_AI_OUTPUT_MESSAGES]), "gen-ai-output-messages")
                 self.assertEqual(attrs.get(GEN_AI_RESPONSE_FINISH_REASONS), ("stop",))
+                for attribute, value in expected_request_attributes.items():
+                    self.assertEqual(attrs.get(attribute), value)
 
     def test_provider_extracted_from_serialized_id(self):
         FakeChatModel = self.FakeChatModel
@@ -819,10 +1108,13 @@ class TestLangChainInstrumentor(TestCase):
         from langchain_aws import ChatBedrock, ChatBedrockConverse
         from langchain_openai import ChatOpenAI
 
-        def result_with_llm_output(usage):
+        def result_with_llm_output(usage, usage_metadata=None):
             return ChatResult(
                 generations=[
-                    ChatGeneration(message=AIMessage(content="Hello!"), generation_info={"finish_reason": "stop"})
+                    ChatGeneration(
+                        message=AIMessage(content="Hello!", usage_metadata=usage_metadata),
+                        generation_info={"finish_reason": "stop"},
+                    )
                 ],
                 llm_output={"model_name": "test", "token_usage": usage},
             )
@@ -843,23 +1135,59 @@ class TestLangChainInstrumentor(TestCase):
             (
                 ChatOpenAI,
                 {"api_key": "fake"},
-                result_with_llm_output({"prompt_tokens": 11, "completion_tokens": 22}),
+                result_with_llm_output(
+                    {"prompt_tokens": 11, "completion_tokens": 22},
+                    {
+                        "input_tokens": 11,
+                        "output_tokens": 22,
+                        "total_tokens": 33,
+                        "input_token_details": {"cache_read": 3},
+                        "output_token_details": {"reasoning": 4},
+                    },
+                ),
                 11,
                 22,
+                {
+                    GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS: 3,
+                    GEN_AI_USAGE_REASONING_OUTPUT_TOKENS: 4,
+                },
             ),
             (
                 ChatBedrock,
                 {"model_id": "test", "region_name": "us-east-1"},
-                result_with_llm_output({"prompt_tokens": 33, "completion_tokens": 44}),
+                result_with_llm_output(
+                    {"prompt_tokens": 33, "completion_tokens": 44},
+                    {
+                        "input_tokens": 33,
+                        "output_tokens": 44,
+                        "total_tokens": 77,
+                        "input_token_details": {"cache_read": 5, "cache_creation": 6},
+                    },
+                ),
                 33,
                 44,
+                {
+                    GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS: 5,
+                    GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS: 6,
+                },
             ),
             (
                 ChatBedrockConverse,
                 {"model": "test", "region_name": "us-east-1"},
-                result_with_usage_metadata({"input_tokens": 55, "output_tokens": 66, "total_tokens": 121}),
+                result_with_usage_metadata(
+                    {
+                        "input_tokens": 55,
+                        "output_tokens": 66,
+                        "total_tokens": 121,
+                        "input_token_details": {"cache_read": 7, "cache_creation": 8},
+                    }
+                ),
                 55,
                 66,
+                {
+                    GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS: 7,
+                    GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS: 8,
+                },
             ),
         ]
 
@@ -878,12 +1206,13 @@ class TestLangChainInstrumentor(TestCase):
                     result_with_llm_output({"input_token_count": 77, "generated_token_count": 88}),
                     77,
                     88,
+                    {},
                 )
             )
         except ImportError:
             pass
 
-        for model_cls, init_kwargs, fake_result, expected_input, expected_output in cases:
+        for model_cls, init_kwargs, fake_result, expected_input, expected_output, expected_details in cases:
             with self.subTest(model=model_cls.__name__):
                 self.span_exporter.clear()
                 llm = model_cls(**init_kwargs)
@@ -896,6 +1225,18 @@ class TestLangChainInstrumentor(TestCase):
                 attrs = chat_spans[0].attributes
                 self.assertEqual(attrs[GEN_AI_USAGE_INPUT_TOKENS], expected_input)
                 self.assertEqual(attrs[GEN_AI_USAGE_OUTPUT_TOKENS], expected_output)
+                self.assertEqual(
+                    attrs.get(GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS),
+                    expected_details.get(GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS),
+                )
+                self.assertEqual(
+                    attrs.get(GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS),
+                    expected_details.get(GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS),
+                )
+                self.assertEqual(
+                    attrs.get(GEN_AI_USAGE_REASONING_OUTPUT_TOKENS),
+                    expected_details.get(GEN_AI_USAGE_REASONING_OUTPUT_TOKENS),
+                )
 
 
 if __name__ == "__main__":

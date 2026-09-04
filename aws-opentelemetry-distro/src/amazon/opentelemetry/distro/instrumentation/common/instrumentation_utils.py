@@ -7,7 +7,7 @@ import threading
 from base64 import b64encode
 from contextvars import Token
 from functools import wraps
-from typing import Any, Callable, Dict, Optional, Union
+from typing import Any, Callable, Dict, Mapping, Optional, Union
 
 from wrapt import wrap_function_wrapper
 
@@ -32,6 +32,10 @@ PROVIDER_MAP = {
     "claude": GenAiProviderNameValues.ANTHROPIC.value,
     "azure": GenAiProviderNameValues.AZURE_AI_OPENAI.value,
     "azure_openai": GenAiProviderNameValues.AZURE_AI_OPENAI.value,
+    "azure_ai": GenAiProviderNameValues.AZURE_AI_INFERENCE.value,
+    "azure_ai_inference": GenAiProviderNameValues.AZURE_AI_INFERENCE.value,
+    "watsonx": GenAiProviderNameValues.IBM_WATSONX_AI.value,
+    "ibm_watsonx": GenAiProviderNameValues.IBM_WATSONX_AI.value,
     "google": GenAiProviderNameValues.GCP_GEN_AI.value,
     "langchain_google_genai": GenAiProviderNameValues.GCP_GEN_AI.value,
     "vertex": GenAiProviderNameValues.GCP_VERTEX_AI.value,
@@ -46,9 +50,18 @@ PROVIDER_MAP = {
     "deepseek": GenAiProviderNameValues.DEEPSEEK.value,
     "langchain_deepseek": GenAiProviderNameValues.DEEPSEEK.value,
     "perplexity": GenAiProviderNameValues.PERPLEXITY.value,
+    "moonshot": "moonshot_ai",
+    "moonshot_ai": "moonshot_ai",
     "xai": GenAiProviderNameValues.X_AI.value,
     "langchain_xai": GenAiProviderNameValues.X_AI.value,
 }
+
+
+class _JsonEncoder(json.JSONEncoder):
+    def default(self, o: Any) -> Any:
+        if isinstance(o, bytes):
+            return b64encode(o).decode()
+        return super().default(o)
 
 
 class DictWithLock:
@@ -87,6 +100,16 @@ class DictWithLock:
             return len(self._data)
 
 
+def first_not_none(*values: Any) -> Any:
+    # Return the first non-None value while preserving falsy values.
+    return next((value for value in values if value is not None), None)
+
+
+def get_value(source: Any, name: str) -> Any:
+    # Read a named value from either a mapping or an object.
+    return source.get(name) if isinstance(source, Mapping) else getattr(source, name, None)
+
+
 def serialize_to_json_string(value: Any, max_depth: int = 10) -> str:
     json_safe_types = (str, int, float, bool, bytes, dict, list, tuple, type(None))
 
@@ -110,7 +133,10 @@ def to_tool_attribute_value(value: Any) -> Union[str, int, float, bool, bytes, N
         return None
     if isinstance(value, (bool, str, bytes, int, float)):
         return value
-    return serialize_to_json_string(value)
+    try:
+        return json.dumps(value, separators=(",", ":"), cls=_JsonEncoder)
+    except (TypeError, ValueError):
+        return str(value)
 
 
 def content_to_parts(content: Any) -> list:  # pylint: disable=too-many-branches
