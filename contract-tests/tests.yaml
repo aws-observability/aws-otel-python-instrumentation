@@ -1,5 +1,9 @@
-#   name     - the application image to build AND the CI job label. Resolves to
-#              contract-tests/images/applications/<name>/Dockerfile.
+#   name     - the CI job label (must be unique) AND the application image to
+#              build: the part before the first "/" is the image, resolving to
+#              contract-tests/images/applications/<image>/Dockerfile. So "botocore"
+#              builds the botocore image, and "cloudwatch-plugin-otel/span_metrics"
+#              builds the cloudwatch-plugin-otel image -- letting sibling suites
+#              (e.g. cloudwatch-plugin-otel/logs) share one image as parallel jobs.
 #   paths    - pytest paths to run, relative to test_base.
 #   versions - the Python versions this entry runs on. Omit one the framework can't support.
 test_base: contract-tests/tests/test/amazon
@@ -137,6 +141,15 @@ tests:
   - name: serviceevents-django-uwsgi
     paths:
       - serviceevents/django_uwsgi_test.py
+    versions:
+      - "3.10"
+      - "3.11"
+      - "3.12"
+      - "3.13"
+      - "3.14"
+  - name: cloudwatch-plugin-otel/span_metrics
+    paths:
+      - cloudwatch_plugin_otel/span_metrics
     versions:
       - "3.10"
       - "3.11"

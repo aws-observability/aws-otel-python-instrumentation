@@ -12,6 +12,18 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- Only demote duplicate nested GenAI client spans
+  ([#872](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/872))
+- (fix): Align and capture missing GenAI request attributes from framework LLM calls
+  ([#871](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/871))
+- fix: align LlamaIndex tools with the OTel GenAI schema and expand GenAI contract coverage
+  ([#866](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/866))
+- feat(openai-agents): [BREAKING CHANGE] add native ADOT OpenAI Agents instrumentation and remove the
+  `opentelemetry-instrumentation-openai-agents-v2` dependency
+  ([#865](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/865))
+- feat: attribute presigned S3 URLs as `AWS::S3` dependencies in Application Signals, opt-in via
+  `OTEL_AWS_APPLICATION_SIGNALS_PRESIGNED_URL_ATTRIBUTION_ENABLED`
+  ([#841](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/841))
 - fix: redact AWS presigned URL credentials from span attributes
   ([#840](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/840))
 - fix(genai): capture per-call token usage for Amazon Bedrock (and Anthropic) in crewai and langchain by reading provider-specific usage keys — crewai's Converse `inputTokens`/`outputTokens` and langchain's `ChatBedrockConverse` message `usage_metadata`

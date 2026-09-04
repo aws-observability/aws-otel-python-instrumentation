@@ -12,6 +12,7 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
     PROVIDER_MAP,
     DictWithLock,
     content_to_parts,
+    first_not_none,
     serialize_to_json_string,
     skip_instrumentation_if_suppressed,
     to_tool_attribute_value,
@@ -25,14 +26,19 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_OPERATION_NAME,
     GEN_AI_OUTPUT_MESSAGES,
     GEN_AI_PROVIDER_NAME,
+    GEN_AI_REQUEST_CHOICE_COUNT,
     GEN_AI_REQUEST_FREQUENCY_PENALTY,
     GEN_AI_REQUEST_MAX_TOKENS,
     GEN_AI_REQUEST_MODEL,
     GEN_AI_REQUEST_PRESENCE_PENALTY,
+    GEN_AI_REQUEST_SEED,
     GEN_AI_REQUEST_STOP_SEQUENCES,
+    GEN_AI_REQUEST_STREAM,
     GEN_AI_REQUEST_TEMPERATURE,
+    GEN_AI_REQUEST_TOP_K,
     GEN_AI_REQUEST_TOP_P,
     GEN_AI_RESPONSE_FINISH_REASONS,
+    GEN_AI_RESPONSE_ID,
     GEN_AI_RESPONSE_MODEL,
     GEN_AI_SYSTEM_INSTRUCTIONS,
     GEN_AI_TOOL_CALL_ARGUMENTS,
@@ -41,8 +47,11 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_TOOL_DESCRIPTION,
     GEN_AI_TOOL_NAME,
     GEN_AI_TOOL_TYPE,
+    GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS,
+    GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS,
     GEN_AI_USAGE_INPUT_TOKENS,
     GEN_AI_USAGE_OUTPUT_TOKENS,
+    GEN_AI_USAGE_REASONING_OUTPUT_TOKENS,
     GenAiOperationNameValues,
 )
 from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
@@ -64,7 +73,7 @@ if TYPE_CHECKING:
     )
     from crewai.events.types.llm_events import LLMCallCompletedEvent, LLMCallFailedEvent, LLMCallStartedEvent
     from crewai.events.types.tool_usage_events import ToolUsageFinishedEvent, ToolUsageStartedEvent
-    from crewai.llm import LLM
+    from crewai.llms.base_llm import BaseLLM
     from crewai.tools.tool_usage import ToolUsage
     from crewai.types.usage_metrics import UsageMetrics
 
@@ -252,18 +261,7 @@ class OpenTelemetryEventHandler:
             if model:
                 attributes[GEN_AI_REQUEST_MODEL] = model
             if llm:
-                if getattr(llm, "temperature", None) is not None:
-                    attributes[GEN_AI_REQUEST_TEMPERATURE] = llm.temperature
-                if getattr(llm, "max_tokens", None) is not None:
-                    attributes[GEN_AI_REQUEST_MAX_TOKENS] = llm.max_tokens
-                if getattr(llm, "top_p", None) is not None:
-                    attributes[GEN_AI_REQUEST_TOP_P] = llm.top_p
-                if getattr(llm, "frequency_penalty", None) is not None:
-                    attributes[GEN_AI_REQUEST_FREQUENCY_PENALTY] = llm.frequency_penalty
-                if getattr(llm, "presence_penalty", None) is not None:
-                    attributes[GEN_AI_REQUEST_PRESENCE_PENALTY] = llm.presence_penalty
-                if getattr(llm, "stop", None):
-                    attributes[GEN_AI_REQUEST_STOP_SEQUENCES] = llm.stop
+                self._set_llm_request_span_attributes(attributes, llm)
 
         task_prompt = getattr(event, "task_prompt", None)
         if task_prompt:
@@ -330,7 +328,7 @@ class OpenTelemetryEventHandler:
             attrs[GEN_AI_TOOL_CALL_RESULT] = to_tool_attribute_value(output)
         self._end_span(event.started_event_id, attrs)
 
-    def _on_llm_start(self, source: "LLM", event: "LLMCallStartedEvent") -> None:
+    def _on_llm_start(self, source: "BaseLLM", event: "LLMCallStartedEvent") -> None:
         attributes: Dict[str, Any] = {
             GEN_AI_OPERATION_NAME: GenAiOperationNameValues.CHAT.value,
         }
@@ -340,9 +338,7 @@ class OpenTelemetryEventHandler:
             attributes[GEN_AI_PROVIDER_NAME] = provider
         if model_name:
             attributes[GEN_AI_REQUEST_MODEL] = model_name
-        temperature = getattr(source, "temperature", None)
-        if temperature is not None:
-            attributes[GEN_AI_REQUEST_TEMPERATURE] = temperature
+        self._set_llm_request_span_attributes(attributes, source, event)
 
         span_name = (
             f"{GenAiOperationNameValues.CHAT.value} {model_name}" if model_name else GenAiOperationNameValues.CHAT.value
@@ -367,13 +363,19 @@ class OpenTelemetryEventHandler:
 
         self._start_span(span_name, event.event_id, attributes, event.parent_event_id, kind=SpanKind.CLIENT)
 
-    def _on_llm_completed(self, source: "LLM", event: "LLMCallCompletedEvent") -> None:
+    def _on_llm_completed(  # pylint: disable=too-many-locals,too-many-branches
+        self, source: "BaseLLM", event: "LLMCallCompletedEvent"
+    ) -> None:
         attrs: Dict[str, Any] = {}
 
         from crewai.events.types.llm_events import LLMCallType  # pylint: disable=import-outside-toplevel
 
-        finish_reason = "tool_call" if event.call_type == LLMCallType.TOOL_CALL else "stop"
+        finish_reason = getattr(event, "finish_reason", None) or (
+            "tool_call" if event.call_type == LLMCallType.TOOL_CALL else "stop"
+        )
         attrs[GEN_AI_RESPONSE_FINISH_REASONS] = [finish_reason]
+        if response_id := getattr(event, "response_id", None):
+            attrs[GEN_AI_RESPONSE_ID] = response_id
 
         response = event.response
         if response:
@@ -401,6 +403,9 @@ class OpenTelemetryEventHandler:
         # cumulative summary, so diff it against the snapshot taken when the call started.
         prev_prompt_tokens, prev_completion_tokens = self._event_id_to_token_usage.pop(event.started_event_id) or (0, 0)
         event_usage = getattr(event, "usage", None)
+        cache_read_input_tokens = 0
+        cache_creation_input_tokens = 0
+        reasoning_output_tokens = 0
         if isinstance(event_usage, dict):
             input_tokens = (
                 event_usage.get("prompt_tokens")
@@ -414,6 +419,9 @@ class OpenTelemetryEventHandler:
                 or event_usage.get("output_tokens")
                 or 0
             )
+            cache_read_input_tokens = event_usage.get("cached_prompt_tokens") or 0
+            cache_creation_input_tokens = event_usage.get("cache_creation_tokens") or 0
+            reasoning_output_tokens = event_usage.get("reasoning_tokens") or 0
         else:
             usage: "UsageMetrics" = source.get_token_usage_summary()
             input_tokens = usage.prompt_tokens - prev_prompt_tokens
@@ -422,6 +430,12 @@ class OpenTelemetryEventHandler:
             attrs[GEN_AI_USAGE_INPUT_TOKENS] = input_tokens
         if output_tokens > 0:
             attrs[GEN_AI_USAGE_OUTPUT_TOKENS] = output_tokens
+        if cache_read_input_tokens > 0:
+            attrs[GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS] = cache_read_input_tokens
+        if cache_creation_input_tokens > 0:
+            attrs[GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS] = cache_creation_input_tokens
+        if reasoning_output_tokens > 0:
+            attrs[GEN_AI_USAGE_REASONING_OUTPUT_TOKENS] = reasoning_output_tokens
 
         self._end_span(event.started_event_id, attrs)
 
@@ -521,6 +535,95 @@ class OpenTelemetryEventHandler:
             "parts": parts,
             "finish_reason": finish_reason,
         }
+
+    @staticmethod
+    def _set_llm_request_span_attributes(
+        attributes: Dict[str, Any],
+        llm: "BaseLLM",
+        event: Optional["LLMCallStartedEvent"] = None,
+    ) -> None:
+        additional_params = getattr(llm, "additional_params", None) or {}
+        additional_model_request_fields = getattr(llm, "additional_model_request_fields", None) or {}
+        stop = first_not_none(
+            getattr(event, "stop_sequences", None),
+            getattr(event, "stop", None),
+            getattr(llm, "stop_sequences", None),
+            getattr(llm, "stop", None),
+            additional_params.get("stop_sequences"),
+            additional_params.get("stop"),
+            additional_model_request_fields.get("stop_sequences"),
+            additional_model_request_fields.get("stop"),
+        )
+        request_attributes = {
+            GEN_AI_REQUEST_TEMPERATURE: first_not_none(
+                getattr(event, "temperature", None),
+                getattr(llm, "temperature", None),
+                additional_params.get("temperature"),
+                additional_model_request_fields.get("temperature"),
+            ),
+            GEN_AI_REQUEST_TOP_P: first_not_none(
+                getattr(event, "top_p", None),
+                getattr(llm, "top_p", None),
+                additional_params.get("top_p"),
+                additional_model_request_fields.get("top_p"),
+            ),
+            GEN_AI_REQUEST_TOP_K: first_not_none(
+                getattr(event, "top_k", None),
+                getattr(llm, "top_k", None),
+                additional_params.get("top_k"),
+                additional_model_request_fields.get("top_k"),
+            ),
+            GEN_AI_REQUEST_MAX_TOKENS: first_not_none(
+                getattr(event, "max_tokens", None),
+                getattr(event, "max_output_tokens", None),
+                getattr(event, "max_completion_tokens", None),
+                getattr(llm, "max_tokens", None),
+                getattr(llm, "max_output_tokens", None),
+                getattr(llm, "max_completion_tokens", None),
+                additional_params.get("max_tokens"),
+                additional_params.get("max_output_tokens"),
+                additional_params.get("max_completion_tokens"),
+                additional_model_request_fields.get("max_tokens"),
+                additional_model_request_fields.get("max_output_tokens"),
+                additional_model_request_fields.get("max_completion_tokens"),
+            ),
+            GEN_AI_REQUEST_FREQUENCY_PENALTY: first_not_none(
+                getattr(event, "frequency_penalty", None),
+                getattr(llm, "frequency_penalty", None),
+                additional_params.get("frequency_penalty"),
+                additional_model_request_fields.get("frequency_penalty"),
+            ),
+            GEN_AI_REQUEST_PRESENCE_PENALTY: first_not_none(
+                getattr(event, "presence_penalty", None),
+                getattr(llm, "presence_penalty", None),
+                additional_params.get("presence_penalty"),
+                additional_model_request_fields.get("presence_penalty"),
+            ),
+            GEN_AI_REQUEST_SEED: first_not_none(
+                getattr(event, "seed", None),
+                getattr(llm, "seed", None),
+                additional_params.get("seed"),
+                additional_model_request_fields.get("seed"),
+            ),
+            GEN_AI_REQUEST_CHOICE_COUNT: first_not_none(
+                getattr(event, "choice_count", None),
+                getattr(event, "n", None),
+                getattr(llm, "choice_count", None),
+                getattr(llm, "n", None),
+                additional_params.get("choice_count"),
+                additional_params.get("n"),
+                additional_model_request_fields.get("choice_count"),
+                additional_model_request_fields.get("n"),
+            ),
+            GEN_AI_REQUEST_STREAM: first_not_none(
+                getattr(event, "stream", None),
+                getattr(llm, "stream", None),
+                additional_params.get("stream"),
+                additional_model_request_fields.get("stream"),
+            ),
+            GEN_AI_REQUEST_STOP_SEQUENCES: ([stop] if isinstance(stop, str) else stop) or None,
+        }
+        attributes.update({attribute: value for attribute, value in request_attributes.items() if value is not None})
 
     @staticmethod
     def _to_tool_call_parts(tool_calls: list) -> list:

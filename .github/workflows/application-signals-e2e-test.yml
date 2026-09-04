@@ -124,14 +124,31 @@ jobs:
       cpu-architecture: 'x86_64'
       staging-wheel-name: ${{ inputs.staging-wheel-name }}
 
-  #
-  # DOCKER DISTRIBUTION LANGUAGE VERSION COVERAGE
-  # DEFAULT SETTING: {Python Version}, EKS, AMD64, AL2
-  #
+
+  # --- Python EKS pipeline: service-events (first) -> setup -> parallel versions -> cleanup ------
+  # Service events has atomic setup and cleanup
+  service-events-eks:
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-service-events-test.yml@main
+    secrets: inherit
+    with:
+      aws-region: us-east-1
+      test-cluster-name: 'e2e-python-adot-test'
+      adot-image-name: ${{ inputs.adot-image-name }}
+      caller-workflow-name: 'main-build'
+      python-version: '3.10'
+
+  eks-setup:
+    needs: service-events-eks
+    if: ${{ !cancelled() }}
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/eks-setup-app-signals.yml@main
+    secrets: inherit
+    with:
+      test-cluster-name: 'e2e-python-adot-test'
+      aws-region: us-east-1
 
   eks-py310-amd64:
-    if: ${{ always() }}
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
+    needs: eks-setup
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-shared-cluster-test.yml@main
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -141,8 +158,8 @@ jobs:
       python-version: '3.10'
 
   eks-py311-amd64:
-    if: ${{ always() }}
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
+    needs: eks-setup
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-shared-cluster-test.yml@main
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -152,8 +169,8 @@ jobs:
       python-version: '3.11'
 
   eks-py312-amd64:
-    if: ${{ always() }}
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
+    needs: eks-setup
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-shared-cluster-test.yml@main
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -163,8 +180,8 @@ jobs:
       python-version: '3.12'
 
   eks-py313-amd64:
-    if: ${{ always() }}
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
+    needs: eks-setup
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-shared-cluster-test.yml@main
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -174,8 +191,8 @@ jobs:
       python-version: '3.13'
 
   eks-py314-amd64:
-    if: ${{ always() }}
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
+    needs: eks-setup
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-shared-cluster-test.yml@main
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -183,6 +200,18 @@ jobs:
       adot-image-name: ${{ inputs.adot-image-name }}
       caller-workflow-name: 'main-build'
       python-version: '3.14'
+
+  # Tear down cluster-wide App Signals state once, after ALL parallel eks-py* jobs finish.
+  # always() so a failed version job still triggers teardown; gated on eks-setup success so it never
+  # tries to clean up state that was never installed.
+  eks-cleanup:
+    if: ${{ always() }}
+    needs: [ eks-setup, eks-py310-amd64, eks-py311-amd64, eks-py312-amd64, eks-py313-amd64, eks-py314-amd64 ]
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/eks-cleanup-app-signals.yml@main
+    secrets: inherit
+    with:
+      test-cluster-name: 'e2e-python-adot-test'
+      aws-region: us-east-1
 
   #
   # PACKAGED DISTRIBUTION PLATFORM COVERAGE
@@ -302,23 +331,6 @@ jobs:
       caller-workflow-name: 'main-build'
       staging-wheel-name: ${{ inputs.staging-wheel-name }}
 
-  service-events-eks:
-    if: ${{ always() }}
-    # Runs LAST, after ALL parallel eks-py* jobs complete, so no parallel job is alive when it tears
-    # down and rebuilds shared cluster state. service-events uses the shared patch_image_and_check_diff
-    # action (asserts the operator ADOT image changed default -> staging) and its own teardown fully
-    # removes/reinstalls the amazon-cloudwatch-observability addon -- behavior that is only safe when it
-    # runs exclusively.
-    needs: [ eks-py310-amd64, eks-py311-amd64, eks-py312-amd64, eks-py313-amd64, eks-py314-amd64 ]
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-service-events-test.yml@main
-    secrets: inherit
-    with:
-      aws-region: us-east-1
-      test-cluster-name: 'e2e-python-adot-test'
-      adot-image-name: ${{ inputs.adot-image-name }}
-      caller-workflow-name: 'main-build'
-      python-version: '3.10'
-
   # This validation is to ensure that all test workflows relevant to this repo are actually
   # being used in this repo, which is referring to all the other jobs in this file.
   #
@@ -334,3 +346,5 @@ jobs:
   #   (see: https://github.com/aws-observability/aws-application-signals-test-framework/blob/main/.github/workflows/validate-e2e-tests-are-accounted-for.yml)
   validate-all-tests-are-accounted-for:
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/validate-e2e-tests-are-accounted-for.yml@main
+    with:
+      exclusions: 'python-eks-test.yml,eks-setup-app-signals.yml,eks-cleanup-app-signals.yml'
