@@ -7,6 +7,7 @@ import asyncio
 import json
 import os
 import sys
+import threading
 import unittest
 from typing import Any, Dict, Optional, Sequence
 from unittest import TestCase
@@ -827,6 +828,76 @@ class TestCrewAIInstrumentor(TestCase):
         self._assert_span_parent(a2_span, crew_span)
         self._assert_spans_all_ended()
 
+    def test_concurrent_crews_have_isolated_span_cleanup(self):
+        crew_a_entered_llm = threading.Event()
+        crew_b_entered_llm = threading.Event()
+        crew_a_completed = threading.Event()
+
+        shared_llm = LLM(model="openai/gpt-4o-mini", is_litellm=True)
+        agent_a = Agent(role="ConcurrentA", goal="Complete A", backstory="A.", llm=shared_llm, tools=[])
+        agent_b = Agent(role="ConcurrentB", goal="Complete B", backstory="B.", llm=shared_llm, tools=[])
+        crew_a = Crew(
+            name="ConcurrentCrewA",
+            agents=[agent_a],
+            tasks=[Task(description="Run A.", expected_output="A.", agent=agent_a)],
+        )
+        crew_b = Crew(
+            name="ConcurrentCrewB",
+            agents=[agent_b],
+            tasks=[Task(description="Run B.", expected_output="B.", agent=agent_b)],
+        )
+
+        def wait_for(event: threading.Event, description: str) -> None:
+            if not event.wait(timeout=10):
+                raise TimeoutError(f"Timed out waiting for {description}")
+
+        def coordinated_response(messages):
+            prompt = str(messages)
+            if "Run A." in prompt:
+                crew_a_entered_llm.set()
+                wait_for(crew_b_entered_llm, "Crew B to enter its LLM call")
+                return self._mock_response("Final Answer: A")
+            if "Run B." in prompt:
+                crew_b_entered_llm.set()
+                wait_for(crew_a_entered_llm, "Crew A to enter its LLM call")
+                wait_for(crew_a_completed, "Crew A to complete")
+                return self._mock_response("Final Answer: B")
+            raise AssertionError(f"Unexpected messages: {messages}")
+
+        async def mock_acompletion(*args, **kwargs):
+            return await asyncio.to_thread(coordinated_response, kwargs.get("messages"))
+
+        def mock_completion(*args, **kwargs):
+            return coordinated_response(kwargs.get("messages"))
+
+        async def run():
+            async def run_crew_a():
+                result = await crew_a.akickoff()
+                crew_a_completed.set()
+                return result
+
+            with patch("litellm.acompletion", side_effect=mock_acompletion), patch(
+                "litellm.completion", side_effect=mock_completion
+            ):
+                await asyncio.wait_for(
+                    asyncio.gather(run_crew_a(), crew_b.akickoff()),
+                    timeout=20,
+                )
+
+        asyncio.run(run())
+
+        workflow_a = self._find_span("invoke_workflow ConcurrentCrewA")
+        workflow_b = self._find_span("invoke_workflow ConcurrentCrewB")
+        agent_span_a = self._find_span("invoke_agent ConcurrentA")
+        agent_span_b = self._find_span("invoke_agent ConcurrentB")
+        self.assertIsNotNone(workflow_a)
+        self.assertIsNotNone(workflow_b)
+        self.assertIsNotNone(agent_span_a)
+        self.assertIsNotNone(agent_span_b)
+        self._assert_span_parent(agent_span_a, workflow_a)
+        self._assert_span_parent(agent_span_b, workflow_b)
+        self._assert_spans_all_ended()
+
     def _run_crew_kickoff_test(self, model: str, provider: str, model_id: str):
         test_tracer = self.tracer_provider.get_tracer("test")
         tc = self._mock_tool_call()
@@ -1018,6 +1089,11 @@ class TestCrewAIInstrumentor(TestCase):
             self.assertIsNotNone(span.end_time, f"Span {span.name} was not ended")
         self.assertEqual(
             len(self.instrumentor._handler._event_id_to_span._data), 0, "Leaked entries in event_id_to_span map"
+        )
+        self.assertEqual(
+            len(self.instrumentor._handler._event_id_to_token_usage._data),
+            0,
+            "Leaked entries in event_id_to_token_usage map",
         )
 
     def _find_span(self, name_contains: str) -> Optional[ReadableSpan]:

@@ -81,6 +81,19 @@ class DictWithLock:
         with self._lock:
             return self._data.pop(key, None)
 
+    def pop_items_if_matches(self, predicate: Callable[[Any, Any], bool]) -> list[tuple[Any, Any]]:
+        """Remove matching items while holding the lock.
+
+        The predicate must not call methods on this DictWithLock instance.
+        """
+        with self._lock:
+            matching_items = []
+            for key, value in list(self._data.items()):
+                if predicate(key, value):
+                    matching_items.append((key, value))
+                    del self._data[key]
+            return matching_items
+
     def clear(self) -> None:
         with self._lock:
             self._data.clear()

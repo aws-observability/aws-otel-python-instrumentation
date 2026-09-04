@@ -84,6 +84,7 @@ _LOG = logging.getLogger(__name__)
 class _SpanEntry:
     span: trace.Span
     token: Any
+    root_event_id: str
 
 
 class _EventBusEmitWrapper:
@@ -216,21 +217,25 @@ class OpenTelemetryEventHandler:
                 if tool_defs:
                     attributes[GEN_AI_TOOL_DEFINITIONS] = serialize_to_json_string(tool_defs)
 
-        self._start_span(span_name, event.event_id, attributes, event.parent_event_id)
+        self._start_span(
+            span_name,
+            event.event_id,
+            attributes,
+            event.parent_event_id,
+            root_event_id=event.event_id,
+        )
 
     def _on_crew_completed(
         self, source: "Crew", event: "CrewKickoffCompletedEvent"
     ) -> None:  # pylint: disable=unused-argument
         self._end_span(event.started_event_id)
-        self._event_id_to_span.clear()
-        self._event_id_to_token_usage.clear()
+        self._clear_span_entries_for_root(event.started_event_id)
 
     def _on_crew_failed(
         self, source: "Crew", event: "CrewKickoffFailedEvent"
     ) -> None:  # pylint: disable=unused-argument
         self._end_span(event.started_event_id, error=getattr(event, "error", None))
-        self._event_id_to_span.clear()
-        self._event_id_to_token_usage.clear()
+        self._clear_span_entries_for_root(event.started_event_id)
 
     def _on_agent_start(  # pylint: disable=too-many-branches
         self, source: "BaseAgent", event: "AgentExecutionStartedEvent"  # pylint: disable=unused-argument
@@ -450,16 +455,42 @@ class OpenTelemetryEventHandler:
         attributes: Optional[Dict[str, Any]] = None,
         parent_event_id: Optional[str] = None,
         kind: SpanKind = SpanKind.INTERNAL,
+        *,
+        root_event_id: Optional[str] = None,
     ) -> None:
         parent_ctx = None
+        parent_entry = None
         if parent_event_id:
             parent_entry = self._event_id_to_span.get(parent_event_id)
             if parent_entry:
                 parent_ctx = trace.set_span_in_context(parent_entry.span)
 
+        if root_event_id is None:
+            if parent_entry:
+                root_event_id = parent_entry.root_event_id
+            else:
+                # If the parent has already been cleaned up, keep this orphan in its own cleanup scope.
+                root_event_id = event_id
         span = self._tracer.start_span(name, kind=kind, attributes=attributes, context=parent_ctx)
         token = context.attach(trace.set_span_in_context(span))
-        self._event_id_to_span.put(event_id, _SpanEntry(span=span, token=token))
+        self._event_id_to_span.put(
+            event_id,
+            _SpanEntry(
+                span=span,
+                token=token,
+                root_event_id=root_event_id,
+            ),
+        )
+
+    def _clear_span_entries_for_root(self, root_event_id: Optional[str]) -> None:
+        if not root_event_id:
+            return
+
+        removed_span_entries = self._event_id_to_span.pop_items_if_matches(
+            lambda _event_id, span_entry: span_entry.root_event_id == root_event_id
+        )
+        for event_id, _span_entry in removed_span_entries:
+            self._event_id_to_token_usage.pop(event_id)
 
     def _end_span(
         self,
