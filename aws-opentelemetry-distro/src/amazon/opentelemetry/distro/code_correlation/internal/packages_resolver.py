@@ -380,4 +380,19 @@ def is_user_code(file_path: str) -> bool:
         True if the path represents user code, False otherwise
     """
     path_obj = Path(file_path)
-    return not (is_standard_library(path_obj) or is_third_party_package(path_obj))
+    if is_standard_library(path_obj) or is_third_party_package(path_obj):
+        return False
+
+    # Backstop: any file physically under site-packages is not user code, even
+    # when importlib.metadata resolution or the 3rd.txt allowlist fails to
+    # classify it. This covers namespace-package key collisions -- e.g. all
+    # opentelemetry/instrumentation/* files collapse to a single mapping key,
+    # so they can resolve to an arbitrary sibling distribution that may be
+    # absent from 3rd.txt and thus leak into captured code attributes.
+    resolved_path = path_obj
+    if not resolved_path.is_absolute() or resolved_path.is_symlink():
+        resolved_path = resolved_path.resolve()
+    if resolved_path.is_relative_to(_PURELIB_PATH) or resolved_path.is_relative_to(_PLATLIB_PATH):
+        return False
+
+    return True
