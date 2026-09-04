@@ -581,7 +581,7 @@ class TestLangChainInstrumentor(TestCase):
 
                     def invoke_anthropic(client):
                         llm = ChatAnthropic(
-                            model="claude-fable-5",
+                            model="claude-opus-5",
                             api_key="fake-key",
                             max_tokens=100,
                             temperature=1.0,
@@ -595,7 +595,7 @@ class TestLangChainInstrumentor(TestCase):
 
                     call_mock_llm("anthropic", invoke_llm_callback=invoke_anthropic)
                     expected_request_attributes = {
-                        GEN_AI_REQUEST_MODEL: "claude-fable-5",
+                        GEN_AI_REQUEST_MODEL: "claude-opus-5",
                         GEN_AI_REQUEST_TEMPERATURE: 1.0,
                         GEN_AI_REQUEST_TOP_P: 0.9,
                         GEN_AI_REQUEST_TOP_K: 40,
