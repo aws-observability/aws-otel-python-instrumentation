@@ -382,7 +382,7 @@ def is_user_code(file_path: str) -> bool:
     path_obj = Path(file_path)
     if is_standard_library(path_obj) or is_third_party_package(path_obj):
         return False
-    
+
     resolved_path = path_obj
     if not resolved_path.is_absolute() or resolved_path.is_symlink():
         resolved_path = resolved_path.resolve()
