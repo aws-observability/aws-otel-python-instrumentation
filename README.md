@@ -42,9 +42,11 @@ to model calls, tool invocations, and downstream dependencies.
 > `AWS_AGENTIC_INSTRUMENTATION=disabled` to disable all of the above
 > instrumentations if you are using another instrumentation source and automatic
 > detection does not work. If another third-party instrumentation is installed,
-> you may set `AWS_AGENTIC_INSTRUMENTATION=enabled` to force the above
-> instrumentations to load. We recommend that you do not use this setting because
-> both instrumentations may run and produce duplicate or inconsistent telemetry.
+> you should uninstall it or otherwise resolve any dependency conflicts before
+> using the above instrumentations. You may set
+> `AWS_AGENTIC_INSTRUMENTATION=enabled` to force the above instrumentations to
+> load. We recommend that you do not use this setting because both
+> instrumentations may run and produce duplicate or inconsistent telemetry.
 
 ## Support
 
