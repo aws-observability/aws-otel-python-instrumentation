@@ -21,6 +21,33 @@ Check out the [getting started documentation](https://aws-otel.github.io/docs/ge
 ## Supported Python libraries and frameworks
 For the complete list of supported frameworks, please refer to the [OpenTelemetry for Python documentation](https://github.com/open-telemetry/opentelemetry-python-contrib/blob/main/instrumentation/README.md).
 
+## Generative AI
+
+Instrumentation is also available for the supported agent frameworks and SDKs
+listed below. These libraries complement the auto-instrumentation already
+included with the distribution, providing comprehensive, end-to-end visibility
+into your agent applications, from incoming requests and framework orchestration
+to model calls, tool invocations, and downstream dependencies.
+
+- [CrewAI](aws-opentelemetry-distro/src/amazon/opentelemetry/distro/instrumentation/crewai/README.rst) (`crewai >= 1.10.0`)
+- [LangChain](aws-opentelemetry-distro/src/amazon/opentelemetry/distro/instrumentation/langchain/README.rst) (`langchain >= 0.3.21`)
+- [LlamaIndex](aws-opentelemetry-distro/src/amazon/opentelemetry/distro/instrumentation/llama_index/README.rst) (`llama-index-core >= 0.13.0`)
+- [Model Context Protocol (MCP)](aws-opentelemetry-distro/src/amazon/opentelemetry/distro/instrumentation/mcp/README.rst) (`mcp >= 1.10.0`)
+- [OpenAI Agents SDK](aws-opentelemetry-distro/src/amazon/opentelemetry/distro/instrumentation/openai_agents/README.rst) (`openai-agents >= 0.3.3`)
+
+> [!NOTE]
+> When agent observability is enabled (`AGENT_OBSERVABILITY_ENABLED=true`),
+> instrumentation is skipped when a conflicting third-party instrumentation is
+> detected for the same framework. You may set
+> `AWS_AGENTIC_INSTRUMENTATION=disabled` to disable all of the above
+> instrumentations if you are using another instrumentation source and automatic
+> detection does not work. If another third-party instrumentation is installed,
+> you should uninstall it or otherwise resolve any dependency conflicts before
+> using the above instrumentations. You may set
+> `AWS_AGENTIC_INSTRUMENTATION=enabled` to force the above instrumentations to
+> load. We recommend that you do not use this setting because both
+> instrumentations may run and produce duplicate or inconsistent telemetry.
+
 ## Support
 
 Please note that as per policy, we're providing support via GitHub on a best effort basis. However, if you have AWS Enterprise Support you can create a ticket and we will provide direct support within the respective SLAs.
