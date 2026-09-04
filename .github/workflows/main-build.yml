@@ -82,6 +82,21 @@ jobs:
           cd ./dist
           cp aws_opentelemetry_distro-${{ steps.python_output.outputs.ADOT_PYTHON_VERSION}}-py3-none-any.whl $staging_wheel
 
+      # Verify the freshly pushed staging image the same way release-build does: pull each arch
+      # back and check the operator copies + loads the payload, the version matches, and the
+      # library matches the built wheel. 
+      - name: Verify staging image (amd64)
+        shell: bash
+        env:
+          DOCKER_DEFAULT_PLATFORM: linux/amd64
+        run: .github/scripts/test-adot-python-image.sh "${{ steps.python_output.outputs.stagingImage }}" "${{ steps.python_output.outputs.ADOT_PYTHON_VERSION }}" "dist/aws_opentelemetry_distro-${{ steps.python_output.outputs.ADOT_PYTHON_VERSION }}-py3-none-any.whl"
+
+      - name: Verify staging image (arm64)
+        shell: bash
+        env:
+          DOCKER_DEFAULT_PLATFORM: linux/arm64
+        run: .github/scripts/test-adot-python-image.sh "${{ steps.python_output.outputs.stagingImage }}" "${{ steps.python_output.outputs.ADOT_PYTHON_VERSION }}" "dist/aws_opentelemetry_distro-${{ steps.python_output.outputs.ADOT_PYTHON_VERSION }}-py3-none-any.whl"
+
       - name: Build and Publish Lambda Staging Layer
         uses: ./.github/actions/lambda_artifacts_build
         with:
