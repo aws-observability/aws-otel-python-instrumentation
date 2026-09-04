@@ -12,6 +12,9 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- fix: stop logging a noisy `Invalid key/value pair (xrsr, None) found.` warning on span creation when no
+  X-Ray sampling rule hash is available
+  ([#874](https://github.com/aws-observability/aws-otel-python-instrumentation/issues/874))
 - [BREAKING CHANGE] Delete experimental code level attributes
   ([#883](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/883))
 - Only demote duplicate nested GenAI client spans
