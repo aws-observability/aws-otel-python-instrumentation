@@ -38,11 +38,13 @@ to model calls, tool invocations, and downstream dependencies.
 > [!NOTE]
 > When agent observability is enabled (`AGENT_OBSERVABILITY_ENABLED=true`),
 > instrumentation is skipped when a conflicting third-party instrumentation is
-> detected for the same framework. If the third-party instrumentation is
-> installed but disabled, set `AWS_AGENTIC_INSTRUMENTATION=enabled` to force the
-> ADOT instrumentation to load. Do not use this setting while the conflicting
-> instrumentation is active because both instrumentations may run and produce
-> duplicate or inconsistent telemetry.
+> detected for the same framework. You may set
+> `AWS_AGENTIC_INSTRUMENTATION=disabled` to disable all of the above
+> instrumentations if you are using another instrumentation source and automatic
+> detection does not work. If another third-party instrumentation is installed,
+> you may set `AWS_AGENTIC_INSTRUMENTATION=enabled` to force the above
+> instrumentations to load. We recommend that you do not use this setting because
+> both instrumentations may run and produce duplicate or inconsistent telemetry.
 
 ## Support
 
