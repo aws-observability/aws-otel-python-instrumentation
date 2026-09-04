@@ -12,6 +12,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- [BREAKING CHANGE] Delete experimental code level attributes
+  ([#883](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/883))
 - Only demote duplicate nested GenAI client spans
   ([#872](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/872))
 - (fix): Align and capture missing GenAI request attributes from framework LLM calls
