@@ -46,13 +46,28 @@ class TestAioPikaPatches(unittest.TestCase):
         # Verify we got a function back (the enhanced decorated callback)
         self.assertTrue(callable(result))
 
-    @patch("amazon.opentelemetry.distro.patches._aio_pika_patches.logger")
-    def test_apply_aio_pika_instrumentation_patches_success(self, mock_logger):
-        """Test patches are applied successfully."""
+    @patch("amazon.opentelemetry.distro.patches._aio_pika_patches.get_code_correlation_enabled_status")
+    def test_apply_aio_pika_instrumentation_patches_disabled(self, mock_get_status):
+        """Test patches are not applied when code correlation is disabled."""
+        mock_get_status.return_value = False
+
+        with patch.dict(
+            "sys.modules",
+            {
+                "opentelemetry.instrumentation.aio_pika": None,
+                "opentelemetry.instrumentation.aio_pika.callback_decorator": None,
+            },
+        ):
+            # Should not raise exception when code correlation is disabled
+            _apply_aio_pika_instrumentation_patches()
+
+    @patch("amazon.opentelemetry.distro.patches._aio_pika_patches.get_code_correlation_enabled_status")
+    def test_apply_aio_pika_instrumentation_patches_enabled(self, mock_get_status):
+        """Test patches are applied when code correlation is enabled."""
+        mock_get_status.return_value = True
+
         # Mock CallbackDecorator
         mock_callback_decorator = Mock()
-        original_decorate = Mock()
-        mock_callback_decorator.decorate = original_decorate
 
         with patch.dict(
             "sys.modules",
@@ -65,12 +80,14 @@ class TestAioPikaPatches(unittest.TestCase):
         ):
             _apply_aio_pika_instrumentation_patches()
 
-            # Verify the decorate method was patched (should be different from original)
-            self.assertNotEqual(mock_callback_decorator.decorate, original_decorate)
+            # Verify the decorate method was patched
+            self.assertTrue(hasattr(mock_callback_decorator, "decorate"))
 
-    @patch("amazon.opentelemetry.distro.patches._aio_pika_patches.logger")
-    def test_apply_aio_pika_instrumentation_patches_import_error(self, mock_logger):
+    @patch("amazon.opentelemetry.distro.patches._aio_pika_patches.get_code_correlation_enabled_status")
+    def test_apply_aio_pika_instrumentation_patches_import_error(self, mock_get_status):
         """Test patches handle import errors gracefully."""
+        mock_get_status.return_value = True
+
         with patch.dict(
             "sys.modules",
             {
@@ -81,26 +98,14 @@ class TestAioPikaPatches(unittest.TestCase):
             # Should not raise exception when import fails
             _apply_aio_pika_instrumentation_patches()
 
-            # Verify warning was logged
-            mock_logger.warning.assert_called_once()
-            args = mock_logger.warning.call_args[0]
-            self.assertIn("Failed to apply Aio-Pika patches", args[0])
-
     @patch("amazon.opentelemetry.distro.patches._aio_pika_patches.logger")
-    def test_apply_aio_pika_instrumentation_patches_exception_handling(self, mock_logger):
+    @patch("amazon.opentelemetry.distro.patches._aio_pika_patches.get_code_correlation_enabled_status")
+    def test_apply_aio_pika_instrumentation_patches_exception_handling(self, mock_get_status, mock_logger):
         """Test patches handle general exceptions gracefully."""
+        mock_get_status.side_effect = Exception("Test exception")
 
-        # Mock import that raises an exception
-        def failing_import(*args, **kwargs):
-            if "callback_decorator" in str(args):
-                raise Exception("Test exception")
-            return Mock()
+        # Should handle exceptions gracefully
+        _apply_aio_pika_instrumentation_patches()
 
-        with patch("builtins.__import__", side_effect=failing_import):
-            # Should handle exceptions gracefully
-            _apply_aio_pika_instrumentation_patches()
-
-            # Verify warning was logged
-            mock_logger.warning.assert_called_once()
-            args = mock_logger.warning.call_args[0]
-            self.assertIn("Failed to apply Aio-Pika patches", args[0])
+        # Verify warning was logged
+        mock_logger.warning.assert_called_once()

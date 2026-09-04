@@ -34,13 +34,41 @@ class TestDjangoPatches(TestBase):
         """Clean up after tests."""
         super().tearDown()
 
-    def test_apply_django_instrumentation_patches_enabled(self):
+    @patch("amazon.opentelemetry.distro.patches._django_patches.get_code_correlation_enabled_status")
+    def test_apply_django_instrumentation_patches_enabled(self, mock_get_status):
         """Test Django instrumentation patches when code correlation is enabled."""
+        mock_get_status.return_value = True
+
         with patch(
             "amazon.opentelemetry.distro.patches._django_patches._apply_django_code_attributes_patch"
         ) as mock_patch:
             _apply_django_instrumentation_patches()
+            mock_get_status.assert_called_once()
             mock_patch.assert_called_once()
+
+    @patch("amazon.opentelemetry.distro.patches._django_patches.get_code_correlation_enabled_status")
+    def test_apply_django_instrumentation_patches_disabled(self, mock_get_status):
+        """Test Django instrumentation patches when code correlation is disabled."""
+        mock_get_status.return_value = False
+
+        with patch(
+            "amazon.opentelemetry.distro.patches._django_patches._apply_django_code_attributes_patch"
+        ) as mock_patch:
+            _apply_django_instrumentation_patches()
+            mock_get_status.assert_called_once()
+            mock_patch.assert_not_called()
+
+    @patch("amazon.opentelemetry.distro.patches._django_patches.get_code_correlation_enabled_status")
+    def test_apply_django_instrumentation_patches_none_status(self, mock_get_status):
+        """Test Django instrumentation patches when status is None."""
+        mock_get_status.return_value = None
+
+        with patch(
+            "amazon.opentelemetry.distro.patches._django_patches._apply_django_code_attributes_patch"
+        ) as mock_patch:
+            _apply_django_instrumentation_patches()
+            mock_get_status.assert_called_once()
+            mock_patch.assert_not_called()
 
 
 class TestDjangoCodeAttributesPatches(TestBase):
@@ -102,6 +130,7 @@ class TestDjangoCodeAttributesPatches(TestBase):
             # If we get here, no exception was raised
 
 
+@patch("amazon.opentelemetry.distro.patches._django_patches.get_code_correlation_enabled_status", return_value=True)
 class TestDjangoRealIntegration(TestBase):
     """Test Django patches with real Django integration."""
 
@@ -142,7 +171,7 @@ class TestDjangoRealIntegration(TestBase):
             pass
         super().tearDown()
 
-    def test_django_view_function_patch_process_view(self):
+    def test_django_view_function_patch_process_view(self, mock_get_status):
         """Test Django patch with real view function triggering process_view method."""
 
         # Define a simple Django view function
@@ -192,7 +221,7 @@ class TestDjangoRealIntegration(TestBase):
             # Clean up instrumentation
             instrumentor.uninstrument()
 
-    def test_django_class_based_view_patch_process_view(self):
+    def test_django_class_based_view_patch_process_view(self, mock_get_status):
         """Test Django patch with class-based view to test handler targeting logic."""
 
         # Define a class-based Django view

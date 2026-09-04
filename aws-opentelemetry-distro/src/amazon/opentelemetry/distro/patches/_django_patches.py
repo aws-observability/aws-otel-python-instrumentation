@@ -4,6 +4,8 @@
 
 from logging import getLogger
 
+from amazon.opentelemetry.distro.aws_opentelemetry_configurator import get_code_correlation_enabled_status
+
 _logger = getLogger(__name__)
 
 
@@ -15,7 +17,8 @@ def _apply_django_instrumentation_patches() -> None:
     to spans by modifying the process_view method of the Django middleware.
     Also patches Django's path/re_path functions for URL pattern instrumentation.
     """
-    _apply_django_code_attributes_patch()
+    if get_code_correlation_enabled_status() is True:
+        _apply_django_code_attributes_patch()
 
 
 def _apply_django_code_attributes_patch() -> None:  # pylint: disable=too-many-statements

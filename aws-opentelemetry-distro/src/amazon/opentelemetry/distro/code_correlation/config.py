@@ -15,12 +15,12 @@ import os
 from typing import Any, Dict, List, Optional
 
 # Environment variable constants
-_ENV_CONFIG = "OTEL_AWS_CODE_ATTRIBUTES_CONFIG"
+_ENV_CONFIG = "OTEL_AWS_CODE_CORRELATION_CONFIG"
 
 _logger = logging.getLogger(__name__)
 
 
-class AwsCodeAttributesConfig:
+class AwsCodeCorrelationConfig:
     """
     Configuration manager for AWS OpenTelemetry code correlation features.
 
@@ -29,10 +29,10 @@ class AwsCodeAttributesConfig:
     and stack trace depth configuration.
 
     Environment Variables:
-        OTEL_AWS_CODE_ATTRIBUTES_CONFIG: JSON configuration with detailed settings
+        OTEL_AWS_CODE_CORRELATION_CONFIG: JSON configuration with detailed settings
 
     Example Configuration:
-        export OTEL_AWS_CODE_ATTRIBUTES_CONFIG='{
+        export OTEL_AWS_CODE_CORRELATION_CONFIG='{
             "include": ["myapp", "mylib"],
             "exclude": ["third-party", "vendor"],
             "stack_depth": 5
@@ -55,12 +55,12 @@ class AwsCodeAttributesConfig:
         self.stack_depth = stack_depth
 
     @classmethod
-    def from_env(cls) -> "AwsCodeAttributesConfig":
+    def from_env(cls) -> "AwsCodeCorrelationConfig":
         """
         Create configuration instance from environment variables.
 
         Returns:
-            AwsCodeAttributesConfig: Configured instance
+            AwsCodeCorrelationConfig: Configured instance
         """
         config_data = cls._parse_config_data()
         include_value = cls._validate_string_list(config_data, "include")
@@ -168,7 +168,7 @@ class AwsCodeAttributesConfig:
     def __repr__(self) -> str:
         """Return string representation of the configuration."""
         return (
-            f"AwsCodeAttributesConfig("
+            f"AwsCodeCorrelationConfig("
             f"include={self.include}, "
             f"exclude={self.exclude}, "
             f"stack_depth={self.stack_depth})"
