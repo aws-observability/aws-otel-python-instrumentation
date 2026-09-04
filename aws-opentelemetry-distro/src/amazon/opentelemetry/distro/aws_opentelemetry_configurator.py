@@ -109,7 +109,6 @@ OTEL_EXPORTER_OTLP_TRACES_ENDPOINT = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
 OTEL_EXPORTER_OTLP_LOGS_ENDPOINT = "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"
 OTEL_EXPORTER_OTLP_METRICS_ENDPOINT = "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"
 OTEL_EXPORTER_OTLP_LOGS_HEADERS = "OTEL_EXPORTER_OTLP_LOGS_HEADERS"
-OTEL_AWS_ENHANCED_CODE_ATTRIBUTES = "OTEL_AWS_EXPERIMENTAL_CODE_ATTRIBUTES"
 AWS_XRAY_ADAPTIVE_SAMPLING_CONFIG = "AWS_XRAY_ADAPTIVE_SAMPLING_CONFIG"
 
 OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS = "OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS"
@@ -586,13 +585,6 @@ def _customize_logs_exporter(log_exporter: LogRecordExporter) -> LogRecordExport
 
 
 def _customize_span_processors(provider: TracerProvider, resource: Resource, sampler: Sampler) -> None:
-
-    if is_enhanced_code_attributes() is True:
-        # pylint: disable=import-outside-toplevel
-        from amazon.opentelemetry.distro.code_correlation import CodeAttributesSpanProcessor
-
-        provider.add_span_processor(CodeAttributesSpanProcessor())
-
     # Add LambdaSpanProcessor to list of processors regardless of application signals.
     if _is_lambda_environment():
         provider.add_span_processor(AwsLambdaSpanProcessor())
@@ -763,23 +755,6 @@ def _is_application_signals_runtime_enabled():
     return _is_application_signals_enabled() and (
         os.environ.get(APPLICATION_SIGNALS_RUNTIME_ENABLED_CONFIG, "true").lower() == "true"
     )
-
-
-def is_enhanced_code_attributes() -> bool:
-    """
-    Get the enhanced code attributes enabled status from environment variable.
-
-    Returns:
-        True if OTEL_AWS_ENHANCED_CODE_ATTRIBUTES is set to 'true'
-        else False
-    """
-    env_value = os.environ.get(OTEL_AWS_ENHANCED_CODE_ATTRIBUTES, "false")
-
-    env_value_lower = env_value.strip().lower()
-    if env_value_lower == "true":
-        return True
-
-    return False
 
 
 def _is_lambda_environment():
