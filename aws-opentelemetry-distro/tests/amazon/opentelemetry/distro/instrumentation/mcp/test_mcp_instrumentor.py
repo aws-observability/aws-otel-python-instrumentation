@@ -157,6 +157,9 @@ class TestMcpInstrumentor(McpInstrumentorTestBase):
                     },
                 )
                 self.assertIn("Hello, World", tool_span.attributes.get(GEN_AI_TOOL_CALL_RESULT))
+                if transport == "http":
+                    session_span = self._get_span(client_spans, "mcp.session")
+                    self.assertIsNotNone(session_span.attributes.get(MCP_SESSION_ID))
 
     def test_mcp_tool_error(self):
         for transport in ["stdio", "http", "sse"]:
@@ -228,6 +231,9 @@ class TestMcpInstrumentor(McpInstrumentorTestBase):
         self.assertEqual(resource_span.attributes.get(ERROR_TYPE), "McpError")
         self.assertEqual(resource_span.status.status_code, StatusCode.ERROR)
         self.assertIsNotNone(resource_span.attributes.get(RPC_RESPONSE_STATUS_CODE))
+        session_span = self._get_span(client_spans, "mcp.session")
+        self.assertIsNotNone(session_span.attributes.get(ERROR_TYPE))
+        self.assertEqual(session_span.status.status_code, StatusCode.ERROR)
 
     def _run_transport_test(self, callback, transport, operation_span_name):
         self.span_exporter.clear()
