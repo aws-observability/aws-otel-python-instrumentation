@@ -168,17 +168,20 @@ class McpWrapper:
     @staticmethod
     def _set_error_attrs(span: trace.Span, exc: Exception) -> None:
         """Set error attributes on span from exception."""
-        span.set_status(Status(StatusCode.ERROR, str(exc)))
-        span.record_exception(exc)
-        span.set_attribute(ERROR_TYPE, type(exc).__name__)
-
         try:
-            from mcp.shared.exceptions import McpError  # pylint: disable=import-outside-toplevel
+            span.set_status(Status(StatusCode.ERROR, str(exc)))
+            span.record_exception(exc)
+            span.set_attribute(ERROR_TYPE, type(exc).__name__)
 
-            if isinstance(exc, McpError):
-                span.set_attribute(RPC_RESPONSE_STATUS_CODE, str(exc.error.code))
-        except ImportError:
-            pass
+            try:
+                from mcp.shared.exceptions import McpError  # pylint: disable=import-outside-toplevel
+
+                if isinstance(exc, McpError):
+                    span.set_attribute(RPC_RESPONSE_STATUS_CODE, str(exc.error.code))
+            except ImportError:
+                pass
+        except Exception:  # pylint: disable=broad-exception-caught
+            _LOG.debug("Failed to record MCP span error", exc_info=True)
 
 
 class ClientWrapper(McpWrapper):
@@ -292,9 +295,12 @@ class ClientWrapper(McpWrapper):
                 self._set_error_attrs(session_span, exc)
                 raise
             finally:
-                session_id = transport_info.get(MCP_SESSION_ID)
-                if session_id:
-                    session_span.set_attribute(MCP_SESSION_ID, session_id)
+                try:
+                    session_id = transport_info.get(MCP_SESSION_ID)
+                    if session_id:
+                        session_span.set_attribute(MCP_SESSION_ID, session_id)
+                except Exception:  # pylint: disable=broad-exception-caught
+                    _LOG.debug("Failed to record MCP session ID", exc_info=True)
                 session_span.end()
                 context.detach(token)
 

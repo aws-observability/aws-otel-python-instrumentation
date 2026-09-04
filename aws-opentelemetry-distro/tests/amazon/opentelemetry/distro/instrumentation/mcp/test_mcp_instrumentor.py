@@ -235,6 +235,31 @@ class TestMcpInstrumentor(McpInstrumentorTestBase):
         self.assertIsNotNone(session_span.attributes.get(ERROR_TYPE))
         self.assertEqual(session_span.status.status_code, StatusCode.ERROR)
 
+    def test_mcp_http_session_error(self):
+        span_name = "mcp resources/read nonexistent://resource"
+
+        async def run_client(session):
+            await session.initialize()
+            await session.read_resource("nonexistent://resource")
+
+        self.span_exporter.clear()
+        with self.assertRaises(BaseException):
+            asyncio.run(self._run_http_client(run_client))
+
+        client_spans = self.span_exporter.get_finished_spans()
+        server_spans = self._collect_server_spans()
+        session_span = self._get_span(client_spans, "mcp.session")
+        client_span = self._get_span(client_spans, span_name)
+        server_span = self._get_span(server_spans, span_name)
+
+        self.assertEqual(session_span.status.status_code, StatusCode.ERROR)
+        self.assertEqual(client_span.attributes.get(ERROR_TYPE), "McpError")
+        self.assertEqual(client_span.status.description, "Unknown resource: nonexistent://resource")
+        session_id = client_span.attributes.get(MCP_SESSION_ID)
+        self.assertRegex(session_id, r"^[0-9a-f]{32}$")
+        self.assertEqual(session_span.attributes.get(MCP_SESSION_ID), session_id)
+        self.assertEqual(self._get_attr(server_span, MCP_SESSION_ID), session_id)
+
     def _run_transport_test(self, callback, transport, operation_span_name):
         self.span_exporter.clear()
         self.server_telemetry.clear()
