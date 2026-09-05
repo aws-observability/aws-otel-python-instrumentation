@@ -12,6 +12,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- fix: restrict native GenAI instrumentations to supported dependency major versions
+  ([#884](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/884))
 - fix(mcp-instrumentation): record errors and session IDs on MCP session spans
   ([#880](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/880))
 - [BREAKING CHANGE] Delete experimental code level attributes
