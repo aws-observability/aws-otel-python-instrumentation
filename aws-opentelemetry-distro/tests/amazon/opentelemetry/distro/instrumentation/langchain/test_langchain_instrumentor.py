@@ -561,6 +561,10 @@ class TestLangChainInstrumentor(TestCase):
                             streaming=False,
                             n=2,
                             stop="STOP",
+                            # Pin to the Chat Completions API. Recent langchain-openai releases route
+                            # ChatOpenAI through the OpenAI Responses API by default, which rejects
+                            # frequency_penalty/presence_penalty and breaks this request-attribute test.
+                            use_responses_api=False,
                         ).invoke(messages)
 
                     call_mock_llm("openai", invoke_llm_callback=invoke_openai)
