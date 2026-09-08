@@ -579,36 +579,7 @@ class TestLangChainInstrumentor(TestCase):
                             **chat_completions_kwargs,
                         ).invoke(messages)
 
-                    mock_kwargs = {}
-                    if use_responses_api:
-                        mock_kwargs["responses"] = [
-                            {
-                                "id": "resp-mock",
-                                "created_at": 1234567890,
-                                "model": "gpt-5.6-sol",
-                                "object": "response",
-                                "output": [
-                                    {
-                                        "id": "msg-mock",
-                                        "content": [
-                                            {
-                                                "type": "output_text",
-                                                "text": "Hello, World!",
-                                                "annotations": [],
-                                            }
-                                        ],
-                                        "role": "assistant",
-                                        "status": "completed",
-                                        "type": "message",
-                                    }
-                                ],
-                                "parallel_tool_calls": True,
-                                "tool_choice": "auto",
-                                "tools": [],
-                            }
-                        ]
-
-                    call_mock_llm("openai", invoke_llm_callback=invoke_openai, **mock_kwargs)
+                    call_mock_llm("openai", invoke_llm_callback=invoke_openai)
                     expected_request_attributes = {
                         GEN_AI_REQUEST_MODEL: "gpt-5.6-sol",
                         GEN_AI_REQUEST_TEMPERATURE: 1.0,
