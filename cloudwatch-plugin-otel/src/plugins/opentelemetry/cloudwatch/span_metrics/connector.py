@@ -30,7 +30,6 @@ from plugins.opentelemetry.cloudwatch.span_metrics._constants import (
     RPC_SERVICE,
     RPC_SYSTEM,
     RPC_SYSTEM_NAME,
-    SERVICE_NAME,
     _SpanMetrics,
 )
 from plugins.opentelemetry.cloudwatch.version import __version__
@@ -50,9 +49,10 @@ class SpanMetricsConnector(SpanProcessor):
     """Span metrics processor implementation.
 
     `SpanMetricsConnector` is an implementation of `SpanProcessor` that derives
-    metrics from ended spans, dimensioned by `service.name`, `span.name`,
-    `span.kind`, and `status.code` (plus copied low-cardinality HTTP, RPC,
-    database, and messaging semantic-convention attributes):
+    metrics from ended spans, dimensioned by `span.name`, `span.kind`, and
+    `status.code` (plus copied low-cardinality HTTP, RPC, database, and
+    messaging semantic-convention attributes); `service.name` is carried by
+    the metric's resource, not duplicated on each datapoint:
 
     - `traces.span.metrics.calls`: a counter incremented once per span.
     - `traces.span.metrics.duration`: a histogram of span durations, in seconds.
@@ -65,7 +65,7 @@ class SpanMetricsConnector(SpanProcessor):
     def __init__(self, meter_provider: Optional[MeterProvider] = None) -> None:
         self.enabled = True
         meter: Meter = get_meter(_SpanMetrics.SCOPE_NAME, __version__, meter_provider)
-        self._calls_counter = meter.create_counter(_SpanMetrics.CALLS_NAME)
+        self._calls_counter = meter.create_counter(_SpanMetrics.CALLS_NAME, unit=_SpanMetrics.CALLS_UNIT)
         self._duration_histogram = meter.create_histogram(
             _SpanMetrics.DURATION_NAME,
             unit=_SpanMetrics.DURATION_UNIT,
@@ -130,10 +130,11 @@ class SpanMetricsConnector(SpanProcessor):
             _SpanMetrics.LIB_VERSION: __version__,
         }
 
-        if span.resource is not None:
-            service_name = span.resource.attributes.get(SERVICE_NAME)
-            if service_name is not None:
-                attributes[SERVICE_NAME] = service_name
+        # service.name is deliberately NOT a datapoint attribute: the metrics are recorded into the
+        # host SDK's MeterProvider, whose resource already carries service.name, so duplicating it
+        # on every datapoint would add a redundant dimension. Consumers read it from the metric
+        # resource. (Intentional divergence from the collector spanmetrics connector, which flattens
+        # it into datapoint attributes because collector-side consumers may drop the resource.)
 
         self._copy(attributes, span_attributes, HTTP_REQUEST_METHOD, HTTP_METHOD)
         self._copy(attributes, span_attributes, HTTP_RESPONSE_STATUS_CODE, HTTP_STATUS_CODE)
