@@ -426,7 +426,11 @@ class TestLangChainInstrumentor(TestCase):
                 {"model": "test", "region_name": "us-east-1"},
                 GenAiProviderNameValues.AWS_BEDROCK.value,
             ),
-            (ChatOpenAI, {"api_key": "fake"}, GenAiProviderNameValues.OPENAI.value),
+            # LangChain routes gpt-5.6-sol to Responses by default after:
+            # https://github.com/langchain-ai/langchain/pull/40133
+            # Keep separate cases because some request attributes are Chat Completions-only.
+            (ChatOpenAI, {"use_responses_api": False}, GenAiProviderNameValues.OPENAI.value),
+            (ChatOpenAI, {"use_responses_api": True}, GenAiProviderNameValues.OPENAI.value),
             (
                 AzureChatOpenAI,
                 {
@@ -540,13 +544,28 @@ class TestLangChainInstrumentor(TestCase):
         ]
 
         for model_cls, init_kwargs, expected_provider in cases:
-            with self.subTest(model=model_cls.__name__):
+            subtest_kwargs = {"model": model_cls.__name__}
+            if model_cls is ChatOpenAI:
+                subtest_kwargs["api"] = "responses" if init_kwargs["use_responses_api"] else "chat_completions"
+            with self.subTest(**subtest_kwargs):
                 self.span_exporter.clear()
                 expected_request_attributes = {}
 
                 if model_cls is ChatOpenAI:
+                    use_responses_api = init_kwargs["use_responses_api"]
 
-                    def invoke_openai(client):
+                    def invoke_openai(client, use_responses_api=use_responses_api):
+                        chat_completions_kwargs = (
+                            {
+                                "frequency_penalty": 0.5,
+                                "presence_penalty": 0.3,
+                                "extra_body": {"top_k": 40, "seed": 42},
+                                "n": 2,
+                                "stop": "STOP",
+                            }
+                            if not use_responses_api
+                            else {}
+                        )
                         ChatOpenAI(
                             model="gpt-5.6-sol",
                             api_key="fake-key",
@@ -555,12 +574,9 @@ class TestLangChainInstrumentor(TestCase):
                             temperature=1.0,
                             top_p=0.9,
                             max_completion_tokens=100,
-                            frequency_penalty=0.5,
-                            presence_penalty=0.3,
-                            extra_body={"top_k": 40, "seed": 42},
                             streaming=False,
-                            n=2,
-                            stop="STOP",
+                            use_responses_api=use_responses_api,
+                            **chat_completions_kwargs,
                         ).invoke(messages)
 
                     call_mock_llm("openai", invoke_llm_callback=invoke_openai)
@@ -568,15 +584,20 @@ class TestLangChainInstrumentor(TestCase):
                         GEN_AI_REQUEST_MODEL: "gpt-5.6-sol",
                         GEN_AI_REQUEST_TEMPERATURE: 1.0,
                         GEN_AI_REQUEST_TOP_P: 0.9,
-                        GEN_AI_REQUEST_TOP_K: 40,
                         GEN_AI_REQUEST_MAX_TOKENS: 100,
-                        GEN_AI_REQUEST_FREQUENCY_PENALTY: 0.5,
-                        GEN_AI_REQUEST_PRESENCE_PENALTY: 0.3,
-                        GEN_AI_REQUEST_STOP_SEQUENCES: ("STOP",),
-                        GEN_AI_REQUEST_SEED: 42,
-                        GEN_AI_REQUEST_CHOICE_COUNT: 2,
                         GEN_AI_REQUEST_STREAM: False,
                     }
+                    if not use_responses_api:
+                        expected_request_attributes.update(
+                            {
+                                GEN_AI_REQUEST_TOP_K: 40,
+                                GEN_AI_REQUEST_FREQUENCY_PENALTY: 0.5,
+                                GEN_AI_REQUEST_PRESENCE_PENALTY: 0.3,
+                                GEN_AI_REQUEST_STOP_SEQUENCES: ("STOP",),
+                                GEN_AI_REQUEST_SEED: 42,
+                                GEN_AI_REQUEST_CHOICE_COUNT: 2,
+                            }
+                        )
                 elif model_cls is ChatAnthropic:
 
                     def invoke_anthropic(client):

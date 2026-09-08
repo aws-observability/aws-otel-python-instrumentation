@@ -76,6 +76,68 @@ def call_mock_llm(
                 except StopIteration as error:
                     raise AssertionError("Mock LLM response sequence exhausted") from error
                 return httpx.Response(200, request=request, json=response)
+            if request.url.path.endswith("/responses"):
+                request_data = json.loads(request.content)
+                response_reasoning = {"effort": None, "summary": None}
+                response_reasoning.update(request_data.get("reasoning") or {})
+                response_text = {"format": {"type": "text"}}
+                response_text.update(request_data.get("text") or {})
+                # Keep this aligned with OpenAI's documented completed Response object:
+                # https://developers.openai.com/api/reference/resources/responses/methods/retrieve
+                return httpx.Response(
+                    200,
+                    request=request,
+                    json={
+                        "id": "resp-mock",
+                        "object": "response",
+                        "created_at": 1234567890,
+                        "status": "completed",
+                        "completed_at": 1234567891,
+                        "error": None,
+                        "incomplete_details": None,
+                        "instructions": request_data.get("instructions"),
+                        "max_output_tokens": request_data.get("max_output_tokens"),
+                        "model": request_data.get("model", model),
+                        "output": [
+                            {
+                                "type": "message",
+                                "id": "msg-mock",
+                                "status": "completed",
+                                "role": "assistant",
+                                "content": [
+                                    {
+                                        "type": "output_text",
+                                        "text": "Hello, World!",
+                                        "annotations": [],
+                                        "logprobs": [],
+                                    }
+                                ],
+                            }
+                        ],
+                        "parallel_tool_calls": request_data.get("parallel_tool_calls", True),
+                        "previous_response_id": request_data.get("previous_response_id"),
+                        "reasoning": response_reasoning,
+                        "store": request_data.get("store", True),
+                        "temperature": request_data.get("temperature", 1.0),
+                        "text": response_text,
+                        "tool_choice": request_data.get("tool_choice", "auto"),
+                        "tools": request_data.get("tools", []),
+                        "top_p": request_data.get("top_p", 1.0),
+                        "truncation": request_data.get("truncation", "disabled"),
+                        "usage": {
+                            "input_tokens": 36,
+                            "input_tokens_details": {
+                                "cache_write_tokens": 0,
+                                "cached_tokens": 0,
+                            },
+                            "output_tokens": 87,
+                            "output_tokens_details": {"reasoning_tokens": 0},
+                            "total_tokens": 123,
+                        },
+                        "user": request_data.get("user"),
+                        "metadata": request_data.get("metadata") or {},
+                    },
+                )
             return httpx.Response(
                 200,
                 request=request,
