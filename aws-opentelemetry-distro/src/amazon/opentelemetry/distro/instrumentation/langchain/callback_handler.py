@@ -425,7 +425,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         )
         is_agent_span = GenAiOperationNameValues.INVOKE_AGENT.value in getattr(span, "name", "")
         if entry.agent_content is not None and is_agent_span:
-            self._apply_agent_span_content(span, entry.agent_content)
+            self._set_agent_span_content(span, entry.agent_content)
 
         if payload and is_agent_or_workflow_span:
             messages = convert_to_messages([payload] if isinstance(payload, str) else payload)
@@ -1062,8 +1062,8 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             content.request_models.add(request_model)
         content.output_messages = first_not_none(output_messages, content.output_messages)
 
-    def _apply_agent_span_content(self, span: Span, content: _AgentContent) -> None:
-        """Apply collected agent content as span attributes."""
+    def _set_agent_span_content(self, span: Span, content: _AgentContent) -> None:
+        """Set collected content and request attributes on the agent span."""
         if content.system_instructions:
             self._set_span_attribute(
                 span, GEN_AI_SYSTEM_INSTRUCTIONS, serialize_to_json_string(content.system_instructions)
