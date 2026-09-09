@@ -836,6 +836,20 @@ class TestLangChainInstrumentor(TestCase):
         except ImportError:
             self.skipTest("langchain-aws is not available")
 
+        try:
+            from langchain.agents.middleware import AgentState, before_model
+        except ImportError:
+            self.skipTest("langchain agent middleware is not available")
+
+        class LazyAgentState(AgentState):
+            pending_input: str
+
+        @before_model(state_schema=LazyAgentState)
+        def materialize_input(state, _runtime):
+            if not state["messages"]:
+                return {"messages": [HumanMessage(content=state["pending_input"])]}
+            return None
+
         model_kwargs = {
             "model": "anthropic.claude-fable-5",
             "region_name": "us-east-1",
@@ -863,7 +877,7 @@ class TestLangChainInstrumentor(TestCase):
 
         def create_delegate_tool(worker, tool_name):
             def delegate(query: str) -> str:
-                result = worker.invoke({"messages": [HumanMessage(content=query)]})
+                result = worker.invoke({"messages": [], "pending_input": query})
                 return result["messages"][-1].text
 
             return StructuredTool.from_function(
@@ -873,8 +887,16 @@ class TestLangChainInstrumentor(TestCase):
             )
 
         workers = [
-            create_agent(worker_llm, tools=[create_calculator_tool(calculator_tool_name)], name=agent_name)
-            for worker_llm, (agent_name, _, calculator_tool_name, _, _, _, _) in zip(worker_llms, worker_specs)
+            create_agent(
+                worker_llm,
+                tools=[create_calculator_tool(calculator_tool_name)],
+                system_prompt=f"Worker {index} system instruction {index * 1000}.",
+                middleware=[materialize_input],
+                name=agent_name,
+            )
+            for index, (worker_llm, (agent_name, _, calculator_tool_name, _, _, _, _)) in enumerate(
+                zip(worker_llms, worker_specs), start=1
+            )
         ]
         supervisor = create_agent(
             supervisor_llm,
@@ -882,6 +904,8 @@ class TestLangChainInstrumentor(TestCase):
                 create_delegate_tool(worker, delegate_tool_name)
                 for worker, (_, delegate_tool_name, _, _, _, _, _) in zip(workers, worker_specs)
             ],
+            system_prompt="Supervisor system instruction 9000.",
+            middleware=[materialize_input],
             name="SupervisorAgent",
         )
 
@@ -889,7 +913,12 @@ class TestLangChainInstrumentor(TestCase):
             for worker_llm in worker_llms:
                 worker_llm.client = client
             supervisor_llm.client = client
-            supervisor.invoke({"messages": [HumanMessage(content="Run numbered calculations 1 through 4.")]})
+            supervisor.invoke(
+                {
+                    "messages": [],
+                    "pending_input": "Run numbered calculations 1 through 4.",
+                }
+            )
 
         def tool_response(tool_name, tool_input, tool_use_id):
             return {
@@ -960,6 +989,11 @@ class TestLangChainInstrumentor(TestCase):
             validate_otel_genai_schema(messages, schema_name)
             return messages
 
+        def system_instructions(span):
+            instructions = json.loads(span.attributes[GEN_AI_SYSTEM_INSTRUCTIONS])
+            validate_otel_genai_schema(instructions, "gen-ai-system-instructions")
+            return instructions
+
         self.assertEqual(
             messages(supervisor_span, GEN_AI_INPUT_MESSAGES, "gen-ai-input-messages"),
             [
@@ -978,6 +1012,10 @@ class TestLangChainInstrumentor(TestCase):
                     "finish_reason": "stop",
                 }
             ],
+        )
+        self.assertEqual(
+            system_instructions(supervisor_span),
+            [{"type": "text", "content": "Supervisor system instruction 9000."}],
         )
         self.assertEqual(supervisor_span.attributes[GEN_AI_PROVIDER_NAME], "aws.bedrock")
 
@@ -998,6 +1036,10 @@ class TestLangChainInstrumentor(TestCase):
                         "finish_reason": "stop",
                     }
                 ],
+            )
+            self.assertEqual(
+                system_instructions(worker_span),
+                [{"type": "text", "content": f"Worker {index} system instruction {index * 1000}."}],
             )
             self.assertEqual(worker_span.attributes[GEN_AI_PROVIDER_NAME], "aws.bedrock")
             delegate_span = next(
