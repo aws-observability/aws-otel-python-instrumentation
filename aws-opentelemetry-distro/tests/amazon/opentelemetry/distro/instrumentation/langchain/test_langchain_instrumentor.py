@@ -1018,7 +1018,6 @@ class TestLangChainInstrumentor(TestCase):
             system_instructions(supervisor_span),
             [{"type": "text", "content": "Supervisor system instruction 9000."}],
         )
-        self.assertEqual(supervisor_span.attributes[GEN_AI_PROVIDER_NAME], "aws.bedrock")
 
         for index, (agent_name, delegate_tool_name, _, expected_input, _, _, result) in enumerate(
             worker_specs, start=1
@@ -1042,7 +1041,6 @@ class TestLangChainInstrumentor(TestCase):
                 system_instructions(worker_span),
                 [{"type": "text", "content": f"Worker {index} system instruction {index * 1000}."}],
             )
-            self.assertEqual(worker_span.attributes[GEN_AI_PROVIDER_NAME], "aws.bedrock")
             delegate_span = next(
                 span for span in tool_spans if span.attributes.get(GEN_AI_TOOL_NAME) == delegate_tool_name
             )
@@ -1724,9 +1722,16 @@ class TestLangChainInstrumentor(TestCase):
 
         spans = self.span_exporter.get_finished_spans()
         agent_span = next((s for s in spans if "invoke_agent" in s.name), None)
+        chat_span = next(
+            s for s in spans if s.attributes.get(GEN_AI_OPERATION_NAME) == GenAiOperationNameValues.CHAT.value
+        )
         self.assertIsNotNone(agent_span)
-        self.assertEqual(agent_span.attributes[GEN_AI_REQUEST_MODEL], "test-model-id")
-        self.assertEqual(agent_span.attributes[GEN_AI_PROVIDER_NAME], "openai")
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_MODEL], "test-model-id")
+        self.assertEqual(chat_span.attributes[GEN_AI_PROVIDER_NAME], "openai")
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_TOP_P], 0.9)
+        self.assertIsNone(agent_span.attributes.get(GEN_AI_REQUEST_MODEL))
+        self.assertIsNone(agent_span.attributes.get(GEN_AI_PROVIDER_NAME))
+        self.assertIsNone(agent_span.attributes.get(GEN_AI_REQUEST_TOP_P))
 
     def test_text_completion_propagates_to_parent_agent(self):
         if not self.HAS_LEGACY_LANGCHAIN:
@@ -1746,8 +1751,15 @@ class TestLangChainInstrumentor(TestCase):
 
         spans = self.span_exporter.get_finished_spans()
         agent_span = next((s for s in spans if "invoke_agent" in s.name), None)
+        llm_span = next(
+            s
+            for s in spans
+            if s.attributes.get(GEN_AI_OPERATION_NAME) == GenAiOperationNameValues.TEXT_COMPLETION.value
+        )
         self.assertIsNotNone(agent_span)
-        self.assertIsNotNone(agent_span.attributes.get(GEN_AI_REQUEST_MODEL))
+        self.assertIsNotNone(llm_span.attributes.get(GEN_AI_REQUEST_MODEL))
+        self.assertIsNone(agent_span.attributes.get(GEN_AI_REQUEST_MODEL))
+        self.assertIsNone(agent_span.attributes.get(GEN_AI_PROVIDER_NAME))
 
     def test_create_agent_detects_agent_with_and_without_name(self):
         if create_agent:

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import logging
 from contextvars import Token
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, Optional
 from uuid import UUID
 
@@ -82,8 +82,6 @@ class _AgentContent:
     input_messages: Optional[list[dict[str, Any]]] = None
     output_messages: Optional[list[dict[str, Any]]] = None
     system_instructions: Optional[list[dict[str, Any]]] = None
-    provider_names: set[str] = field(default_factory=set)
-    request_models: set[str] = field(default_factory=set)
 
 
 @dataclass
@@ -168,8 +166,6 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             run_id,
             input_messages=conversation or None,
             system_instructions=system_instructions or None,
-            provider_name=provider,
-            request_model=model_name,
         )
 
     @skip_instrumentation_if_suppressed
@@ -207,8 +203,6 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         self._update_agent_span_content(
             run_id,
             input_messages=input_messages or None,
-            provider_name=provider,
-            request_model=model_name,
         )
 
     @skip_instrumentation_if_suppressed
@@ -381,7 +375,8 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         span: Span = self._start_span(run_id, parent_run_id, span_name)
 
         self._set_langgraph_span_attributes(span, metadata)
-        self._set_span_attribute(span, GEN_AI_PROVIDER_NAME, provider)
+        if not is_agent_chain:
+            self._set_span_attribute(span, GEN_AI_PROVIDER_NAME, provider)
         if is_agent_chain:
             self._set_span_attribute(span, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.INVOKE_AGENT.value)
         if is_workflow_chain:
@@ -1046,24 +1041,18 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         input_messages: Optional[list[dict[str, Any]]] = None,
         output_messages: Optional[list[dict[str, Any]]] = None,
         system_instructions: Optional[list[dict[str, Any]]] = None,
-        provider_name: Optional[str] = None,
-        request_model: Optional[str] = None,
     ) -> None:
-        """Sets the first input, providers, model, latest output, and instructions for the agent span."""
+        """Collect the first input, latest output, and system instructions for the agent span."""
         entry = self._safe_get_span(run_id)
         content = entry.agent_content if entry else None
         if content is None:
             return
         content.input_messages = first_not_none(content.input_messages, input_messages)
         content.system_instructions = first_not_none(content.system_instructions, system_instructions)
-        if provider_name:
-            content.provider_names.add(provider_name)
-        if request_model:
-            content.request_models.add(request_model)
         content.output_messages = first_not_none(output_messages, content.output_messages)
 
     def _set_agent_span_content(self, span: Span, content: _AgentContent) -> None:
-        """Set collected content and request attributes on the agent span."""
+        """Set collected content on the internal agent span."""
         if content.system_instructions:
             self._set_span_attribute(
                 span, GEN_AI_SYSTEM_INSTRUCTIONS, serialize_to_json_string(content.system_instructions)
@@ -1072,12 +1061,6 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             self._set_span_attribute(span, GEN_AI_INPUT_MESSAGES, serialize_to_json_string(content.input_messages))
         if content.output_messages:
             self._set_span_attribute(span, GEN_AI_OUTPUT_MESSAGES, serialize_to_json_string(content.output_messages))
-        if len(content.provider_names) == 1:
-            (provider_name,) = content.provider_names
-            self._set_span_attribute(span, GEN_AI_PROVIDER_NAME, provider_name)
-        if len(content.request_models) == 1:
-            (request_model,) = content.request_models
-            self._set_span_attribute(span, GEN_AI_REQUEST_MODEL, request_model)
 
     def _safe_get_span(self, run_id: Optional[UUID]) -> Optional[_SpanEntry]:
         """Return the span entry mapped to a run, including entries inherited by skipped runs."""
