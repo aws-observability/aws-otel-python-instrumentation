@@ -5,8 +5,12 @@ on:
       - opened
       - reopened
       - synchronize
+      # labeled/unlabeled kept so adding the "Skip Changelog" label re-runs the
+      # changelog check. Heavy jobs are gated off for these actions (see per-job
+      # `if:` below) so a label change does not re-fire the full build matrix.
       - labeled
       - unlabeled
+      - ready_for_review
     branches:
       - main
       - "release/v*"
@@ -128,6 +132,8 @@ jobs:
 
   build-wheel:
     runs-on: ubuntu-latest
+    # Skip on draft PRs and on label-only events; neither affects the build.
+    if: ${{ github.event.action != 'labeled' && github.event.action != 'unlabeled' && github.event.pull_request.draft == false }}
     steps:
       - name: Checkout Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
@@ -145,6 +151,8 @@ jobs:
 
   build-cloudwatch-plugin-otel:
     runs-on: ubuntu-latest
+    # Skip on draft PRs and on label-only events; neither affects the build.
+    if: ${{ github.event.action != 'labeled' && github.event.action != 'unlabeled' && github.event.pull_request.draft == false }}
     steps:
       - name: Checkout Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
@@ -161,6 +169,8 @@ jobs:
 
   build-lambda:
     runs-on: ubuntu-latest
+    # Skip on draft PRs and on label-only events; neither affects the build.
+    if: ${{ github.event.action != 'labeled' && github.event.action != 'unlabeled' && github.event.pull_request.draft == false }}
     steps:
       - name: Checkout Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
@@ -184,6 +194,8 @@ jobs:
 
   build-and-scan-image:
     runs-on: ubuntu-latest
+    # Skip on draft PRs and on label-only events; neither affects the build.
+    if: ${{ github.event.action != 'labeled' && github.event.action != 'unlabeled' && github.event.pull_request.draft == false }}
     strategy:
       fail-fast: false # ensures the entire test matrix is run, even if one permutation fails
       matrix:
@@ -207,6 +219,8 @@ jobs:
   unit-tests:
     runs-on: ubuntu-latest
     needs: build-wheel
+    # Skip on draft PRs and on label-only events; neither affects the tests.
+    if: ${{ github.event.action != 'labeled' && github.event.action != 'unlabeled' && github.event.pull_request.draft == false }}
     strategy:
       fail-fast: false # ensures the entire test matrix is run, even if one permutation fails
       matrix:
@@ -237,6 +251,8 @@ jobs:
     name: cloudwatch-plugin-otel-${{ matrix.otel }} ${{ matrix.python-version }} Ubuntu
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Skip on draft PRs and on label-only events; neither affects the tests.
+    if: ${{ github.event.action != 'labeled' && github.event.action != 'unlabeled' && github.event.pull_request.draft == false }}
     strategy:
       fail-fast: false # ensures the entire test matrix is run, even if one permutation fails
       matrix:
@@ -261,6 +277,8 @@ jobs:
 
   contract-tests:
     needs: build-wheel
+    # Skip on draft PRs and on label-only events; neither affects the tests.
+    if: ${{ github.event.action != 'labeled' && github.event.action != 'unlabeled' && github.event.pull_request.draft == false }}
     strategy:
       fail-fast: false # ensures the entire test matrix is run, even if one permutation fails
       matrix:
@@ -271,6 +289,8 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
+    # Skip on draft PRs and on label-only events; neither affects lint/spellcheck.
+    if: ${{ github.event.action != 'labeled' && github.event.action != 'unlabeled' && github.event.pull_request.draft == false }}
     strategy:
       fail-fast: false # ensures the entire test matrix is run, even if one permutation fails
       matrix:
@@ -295,6 +315,8 @@ jobs:
 
   spotless:
     runs-on: ubuntu-latest
+    # Skip on draft PRs and on label-only events; neither affects spotless.
+    if: ${{ github.event.action != 'labeled' && github.event.action != 'unlabeled' && github.event.pull_request.draft == false }}
     steps:
       - name: Checkout Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
@@ -324,9 +346,13 @@ jobs:
       
       - name: Check all jobs succeeded and none missing
         run: |
-          # Check if all needed jobs succeeded
+          # Check if all needed jobs succeeded.
+          # "skipped" is treated as passing: on labeled/unlabeled PR events the
+          # heavy jobs are intentionally gated off (see their `if:`), so they
+          # report "skipped" while static-code-checks still runs. Real failures
+          # ("failure"/"cancelled") are still caught and fail the gate.
           results='${{ toJSON(needs) }}'
-          if echo "$results" | jq -r '.[] | .result' | grep -v success; then
+          if echo "$results" | jq -r '.[] | .result' | grep -vE '^(success|skipped)$'; then
             echo "Some jobs failed"
             exit 1
           fi
