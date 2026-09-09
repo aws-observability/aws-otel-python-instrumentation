@@ -843,13 +843,23 @@ class TestLangChainInstrumentor(TestCase):
             "aws_secret_access_key": "fake-key",
         }
         worker_specs = [
-            ("WorkerAgent1", "delegate_to_worker_1", "Lazily created worker 1 input", "Worker 1 complete."),
-            ("WorkerAgent2", "delegate_to_worker_2", "Lazily created worker 2 input", "Worker 2 complete."),
-            ("WorkerAgent3", "delegate_to_worker_3", "Lazily created worker 3 input", "Worker 3 complete."),
-            ("WorkerAgent4", "delegate_to_worker_4", "Lazily created worker 4 input", "Worker 4 complete."),
+            ("WorkerAgent1", "delegate_to_worker_1", "calculate_worker_1", "Add 11 and 101.", 11, 101, "112"),
+            ("WorkerAgent2", "delegate_to_worker_2", "calculate_worker_2", "Add 22 and 202.", 22, 202, "224"),
+            ("WorkerAgent3", "delegate_to_worker_3", "calculate_worker_3", "Add 33 and 303.", 33, 303, "336"),
+            ("WorkerAgent4", "delegate_to_worker_4", "calculate_worker_4", "Add 44 and 404.", 44, 404, "448"),
         ]
         worker_llms = [ChatBedrockConverse(**model_kwargs) for _ in worker_specs]
         supervisor_llm = ChatBedrockConverse(**model_kwargs)
+
+        def create_calculator_tool(tool_name):
+            def calculate(left: int, right: int) -> int:
+                return left + right
+
+            return StructuredTool.from_function(
+                func=calculate,
+                name=tool_name,
+                description="Add two numbers.",
+            )
 
         def create_delegate_tool(worker, tool_name):
             def delegate(query: str) -> str:
@@ -863,13 +873,14 @@ class TestLangChainInstrumentor(TestCase):
             )
 
         workers = [
-            create_agent(worker_llm, tools=[], name=agent_name)
-            for worker_llm, (agent_name, _, _, _) in zip(worker_llms, worker_specs)
+            create_agent(worker_llm, tools=[create_calculator_tool(calculator_tool_name)], name=agent_name)
+            for worker_llm, (agent_name, _, calculator_tool_name, _, _, _, _) in zip(worker_llms, worker_specs)
         ]
         supervisor = create_agent(
             supervisor_llm,
             tools=[
-                create_delegate_tool(worker, tool_name) for worker, (_, tool_name, _, _) in zip(workers, worker_specs)
+                create_delegate_tool(worker, delegate_tool_name)
+                for worker, (_, delegate_tool_name, _, _, _, _, _) in zip(workers, worker_specs)
             ],
             name="SupervisorAgent",
         )
@@ -878,9 +889,9 @@ class TestLangChainInstrumentor(TestCase):
             for worker_llm in worker_llms:
                 worker_llm.client = client
             supervisor_llm.client = client
-            supervisor.invoke({"messages": [HumanMessage(content="Start delegation")]})
+            supervisor.invoke({"messages": [HumanMessage(content="Run numbered calculations 1 through 4.")]})
 
-        def tool_response(tool_name, query, tool_use_id):
+        def tool_response(tool_name, tool_input, tool_use_id):
             return {
                 "output": {
                     "message": {
@@ -890,7 +901,7 @@ class TestLangChainInstrumentor(TestCase):
                                 "toolUse": {
                                     "toolUseId": tool_use_id,
                                     "name": tool_name,
-                                    "input": {"query": query},
+                                    "input": tool_input,
                                 }
                             }
                         ],
@@ -910,9 +921,21 @@ class TestLangChainInstrumentor(TestCase):
             }
 
         responses = []
-        for index, (_, tool_name, query, output) in enumerate(worker_specs, start=1):
-            responses.extend([tool_response(tool_name, query, f"delegate-call-{index}"), text_response(output)])
-        responses.append(text_response("Supervisor complete."))
+        for index, (_, delegate_tool_name, calculator_tool_name, query, left, right, output) in enumerate(
+            worker_specs, start=1
+        ):
+            responses.extend(
+                [
+                    tool_response(delegate_tool_name, {"query": query}, f"delegate-call-{index}"),
+                    tool_response(
+                        calculator_tool_name,
+                        {"left": left, "right": right},
+                        f"calculator-call-{index}",
+                    ),
+                    text_response(f"Worker {index} final answer: {output}."),
+                ]
+            )
+        responses.append(text_response("Supervisor final answer: 112, 224, 336, 448."))
 
         call_mock_llm(
             "bedrock",
@@ -922,33 +945,70 @@ class TestLangChainInstrumentor(TestCase):
 
         spans = self.span_exporter.get_finished_spans()
         supervisor_span = next(span for span in spans if span.name == "invoke_agent SupervisorAgent")
+        worker_spans = {
+            agent_name: next(span for span in spans if span.name == f"invoke_agent {agent_name}")
+            for agent_name, _, _, _, _, _, _ in worker_specs
+        }
+        tool_spans = [
+            span
+            for span in spans
+            if span.attributes.get(GEN_AI_OPERATION_NAME) == GenAiOperationNameValues.EXECUTE_TOOL.value
+        ]
 
-        def message_content(span, attribute, schema_name):
+        def messages(span, attribute, schema_name):
             messages = json.loads(span.attributes[attribute])
             validate_otel_genai_schema(messages, schema_name)
-            return messages[-1]["parts"][0]["content"]
+            return messages
 
         self.assertEqual(
-            message_content(supervisor_span, GEN_AI_INPUT_MESSAGES, "gen-ai-input-messages"),
-            "Start delegation",
+            messages(supervisor_span, GEN_AI_INPUT_MESSAGES, "gen-ai-input-messages"),
+            [
+                {
+                    "role": "user",
+                    "parts": [{"type": "text", "content": "Run numbered calculations 1 through 4."}],
+                }
+            ],
         )
         self.assertEqual(
-            message_content(supervisor_span, GEN_AI_OUTPUT_MESSAGES, "gen-ai-output-messages"),
-            "Supervisor complete.",
+            messages(supervisor_span, GEN_AI_OUTPUT_MESSAGES, "gen-ai-output-messages"),
+            [
+                {
+                    "role": "assistant",
+                    "parts": [{"type": "text", "content": "Supervisor final answer: 112, 224, 336, 448."}],
+                    "finish_reason": "stop",
+                }
+            ],
         )
         self.assertEqual(supervisor_span.attributes[GEN_AI_PROVIDER_NAME], "aws.bedrock")
 
-        for agent_name, _, expected_input, expected_output in worker_specs:
-            worker_span = next(span for span in spans if span.name == f"invoke_agent {agent_name}")
+        for index, (agent_name, delegate_tool_name, _, expected_input, _, _, result) in enumerate(
+            worker_specs, start=1
+        ):
+            worker_span = worker_spans[agent_name]
             self.assertEqual(
-                message_content(worker_span, GEN_AI_INPUT_MESSAGES, "gen-ai-input-messages"),
-                expected_input,
+                messages(worker_span, GEN_AI_INPUT_MESSAGES, "gen-ai-input-messages"),
+                [{"role": "user", "parts": [{"type": "text", "content": expected_input}]}],
             )
             self.assertEqual(
-                message_content(worker_span, GEN_AI_OUTPUT_MESSAGES, "gen-ai-output-messages"),
-                expected_output,
+                messages(worker_span, GEN_AI_OUTPUT_MESSAGES, "gen-ai-output-messages"),
+                [
+                    {
+                        "role": "assistant",
+                        "parts": [{"type": "text", "content": f"Worker {index} final answer: {result}."}],
+                        "finish_reason": "stop",
+                    }
+                ],
             )
             self.assertEqual(worker_span.attributes[GEN_AI_PROVIDER_NAME], "aws.bedrock")
+            delegate_span = next(
+                span for span in tool_spans if span.attributes.get(GEN_AI_TOOL_NAME) == delegate_tool_name
+            )
+            self.assertEqual(worker_span.parent.span_id, delegate_span.context.span_id)
+
+        self.assertEqual(
+            {span.context.trace_id for span in (supervisor_span, *worker_spans.values(), *tool_spans)},
+            {supervisor_span.context.trace_id},
+        )
 
     def test_nested_raw_stategraph_uses_pregel_fallback_under_explicit_agent(self):
         try:
