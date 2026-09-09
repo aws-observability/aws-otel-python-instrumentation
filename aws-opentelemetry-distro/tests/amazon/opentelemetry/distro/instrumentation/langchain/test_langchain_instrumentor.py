@@ -841,6 +841,7 @@ class TestLangChainInstrumentor(TestCase):
         except ImportError:
             self.skipTest("langchain agent middleware is not available")
 
+        # Dynamic prompts, state transforms, and multi-agent handoffs commonly materialize input after the agent starts.
         class LazyAgentState(AgentState):
             pending_input: str
 
