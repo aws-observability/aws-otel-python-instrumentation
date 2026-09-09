@@ -28,6 +28,7 @@ class LangChainInstrumentor(BaseInstrumentor):
             _BaseCallbackManagerInitWrapper,
         )
         from amazon.opentelemetry.distro.instrumentation.langchain.span_processor import LangChainSpanProcessor
+        from amazon.opentelemetry.distro.instrumentation.langchain.wrapper import PregelWrapper
 
         tracer_provider = kwargs.get("tracer_provider") or trace.get_tracer_provider()
         tracer = trace.get_tracer(__name__, __version__, tracer_provider=tracer_provider)
@@ -40,9 +41,21 @@ class LangChainInstrumentor(BaseInstrumentor):
             "BaseCallbackManager.__init__",
             _BaseCallbackManagerInitWrapper(OpenTelemetryCallbackHandler(tracer)),
         )
+        try_wrap(
+            "langgraph.pregel",
+            "Pregel.stream",
+            PregelWrapper(),
+        )
+        try_wrap(
+            "langgraph.pregel",
+            "Pregel.astream",
+            PregelWrapper(is_async=True),
+        )
 
     def _uninstrument(self, **kwargs: Any) -> None:  # pylint: disable=no-self-use
         # pylint: disable=import-outside-toplevel
         from langchain_core.callbacks import BaseCallbackManager
 
         try_unwrap(BaseCallbackManager, "__init__")
+        try_unwrap("langgraph.pregel.Pregel", "stream")
+        try_unwrap("langgraph.pregel.Pregel", "astream")

@@ -12,6 +12,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- feat(langchain): classify LangGraph StateGraph invocations as agent or workflow spans through the Pregel runtime
+  ([#888](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/888))
 - fix: stop logging a noisy `Invalid key/value pair (xrsr, None) found.` warning on span creation when no
   X-Ray sampling rule hash is available
   ([#874](https://github.com/aws-observability/aws-otel-python-instrumentation/issues/874))

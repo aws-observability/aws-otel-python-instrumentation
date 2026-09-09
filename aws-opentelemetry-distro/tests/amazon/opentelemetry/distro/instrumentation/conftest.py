@@ -277,5 +277,9 @@ def call_mock_llm(
             "metrics": {"latencyMs": 1},
         }
         with Stubber(client) as stubber:
-            stubber.add_response("converse", response)
+            if responses is None:
+                stubber.add_response("converse", response)
+            else:
+                for stubbed_response in responses:
+                    stubber.add_response("converse", stubbed_response)
             invoke_llm_callback(client)
