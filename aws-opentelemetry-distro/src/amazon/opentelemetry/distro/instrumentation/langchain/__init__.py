@@ -27,14 +27,10 @@ class LangChainInstrumentor(BaseInstrumentor):
             OpenTelemetryCallbackHandler,
             _BaseCallbackManagerInitWrapper,
         )
-        from amazon.opentelemetry.distro.instrumentation.langchain.span_processor import LangChainSpanProcessor
         from amazon.opentelemetry.distro.instrumentation.langchain.wrapper import PregelWrapper
 
         tracer_provider = kwargs.get("tracer_provider") or trace.get_tracer_provider()
         tracer = trace.get_tracer(__name__, __version__, tracer_provider=tracer_provider)
-
-        if hasattr(tracer_provider, "add_span_processor"):
-            tracer_provider.add_span_processor(LangChainSpanProcessor(scope_name=__name__))  # type: ignore[union-attr]
 
         try_wrap(
             "langchain_core.callbacks",

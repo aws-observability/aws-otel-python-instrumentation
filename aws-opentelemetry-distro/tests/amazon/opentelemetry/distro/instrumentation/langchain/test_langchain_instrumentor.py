@@ -827,6 +827,129 @@ class TestLangChainInstrumentor(TestCase):
         )
         self.assertFalse(any("Runnable" in span.name for span in spans))
 
+    def test_multi_agent_lazily_created_input_populates_agent_spans(self):
+        if not create_agent:
+            self.skipTest("langchain create_agent is not available")
+
+        try:
+            from langchain_aws import ChatBedrockConverse
+        except ImportError:
+            self.skipTest("langchain-aws is not available")
+
+        model_kwargs = {
+            "model": "anthropic.claude-fable-5",
+            "region_name": "us-east-1",
+            "aws_access_key_id": "fake-key",
+            "aws_secret_access_key": "fake-key",
+        }
+        worker_specs = [
+            ("WorkerAgent1", "delegate_to_worker_1", "Lazily created worker 1 input", "Worker 1 complete."),
+            ("WorkerAgent2", "delegate_to_worker_2", "Lazily created worker 2 input", "Worker 2 complete."),
+            ("WorkerAgent3", "delegate_to_worker_3", "Lazily created worker 3 input", "Worker 3 complete."),
+            ("WorkerAgent4", "delegate_to_worker_4", "Lazily created worker 4 input", "Worker 4 complete."),
+        ]
+        worker_llms = [ChatBedrockConverse(**model_kwargs) for _ in worker_specs]
+        supervisor_llm = ChatBedrockConverse(**model_kwargs)
+
+        def create_delegate_tool(worker, tool_name):
+            def delegate(query: str) -> str:
+                result = worker.invoke({"messages": [HumanMessage(content=query)]})
+                return result["messages"][-1].text
+
+            return StructuredTool.from_function(
+                func=delegate,
+                name=tool_name,
+                description="Delegate a runtime-created query to a worker agent.",
+            )
+
+        workers = [
+            create_agent(worker_llm, tools=[], name=agent_name)
+            for worker_llm, (agent_name, _, _, _) in zip(worker_llms, worker_specs)
+        ]
+        supervisor = create_agent(
+            supervisor_llm,
+            tools=[
+                create_delegate_tool(worker, tool_name) for worker, (_, tool_name, _, _) in zip(workers, worker_specs)
+            ],
+            name="SupervisorAgent",
+        )
+
+        def invoke_llm(client):
+            for worker_llm in worker_llms:
+                worker_llm.client = client
+            supervisor_llm.client = client
+            supervisor.invoke({"messages": [HumanMessage(content="Start delegation")]})
+
+        def tool_response(tool_name, query, tool_use_id):
+            return {
+                "output": {
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "toolUse": {
+                                    "toolUseId": tool_use_id,
+                                    "name": tool_name,
+                                    "input": {"query": query},
+                                }
+                            }
+                        ],
+                    }
+                },
+                "stopReason": "tool_use",
+                "usage": {"inputTokens": 10, "outputTokens": 5, "totalTokens": 15},
+                "metrics": {"latencyMs": 1},
+            }
+
+        def text_response(text):
+            return {
+                "output": {"message": {"role": "assistant", "content": [{"text": text}]}},
+                "stopReason": "end_turn",
+                "usage": {"inputTokens": 10, "outputTokens": 20, "totalTokens": 30},
+                "metrics": {"latencyMs": 1},
+            }
+
+        responses = []
+        for index, (_, tool_name, query, output) in enumerate(worker_specs, start=1):
+            responses.extend([tool_response(tool_name, query, f"delegate-call-{index}"), text_response(output)])
+        responses.append(text_response("Supervisor complete."))
+
+        call_mock_llm(
+            "bedrock",
+            invoke_llm_callback=invoke_llm,
+            responses=responses,
+        )
+
+        spans = self.span_exporter.get_finished_spans()
+        supervisor_span = next(span for span in spans if span.name == "invoke_agent SupervisorAgent")
+
+        def message_content(span, attribute, schema_name):
+            messages = json.loads(span.attributes[attribute])
+            validate_otel_genai_schema(messages, schema_name)
+            return messages[-1]["parts"][0]["content"]
+
+        self.assertEqual(
+            message_content(supervisor_span, GEN_AI_INPUT_MESSAGES, "gen-ai-input-messages"),
+            "Start delegation",
+        )
+        self.assertEqual(
+            message_content(supervisor_span, GEN_AI_OUTPUT_MESSAGES, "gen-ai-output-messages"),
+            "Supervisor complete.",
+        )
+        self.assertEqual(supervisor_span.attributes[GEN_AI_PROVIDER_NAME], "aws.bedrock")
+
+        for agent_name, _, expected_input, expected_output in worker_specs:
+            worker_span = next(span for span in spans if span.name == f"invoke_agent {agent_name}")
+            self.assertEqual(
+                message_content(worker_span, GEN_AI_INPUT_MESSAGES, "gen-ai-input-messages"),
+                expected_input,
+            )
+            self.assertEqual(
+                message_content(worker_span, GEN_AI_OUTPUT_MESSAGES, "gen-ai-output-messages"),
+                expected_output,
+            )
+            self.assertEqual(worker_span.attributes[GEN_AI_PROVIDER_NAME], "aws.bedrock")
+
     def test_nested_raw_stategraph_uses_pregel_fallback_under_explicit_agent(self):
         try:
             from langgraph.graph import END, START, MessagesState, StateGraph
@@ -1500,7 +1623,6 @@ class TestLangChainInstrumentor(TestCase):
         agent_span = next((s for s in spans if "invoke_agent" in s.name), None)
         self.assertIsNotNone(agent_span)
         self.assertEqual(agent_span.attributes[GEN_AI_REQUEST_MODEL], "test-model-id")
-        self.assertEqual(agent_span.attributes[GEN_AI_REQUEST_TEMPERATURE], 0.7)
         self.assertEqual(agent_span.attributes[GEN_AI_PROVIDER_NAME], "openai")
 
     def test_text_completion_propagates_to_parent_agent(self):
