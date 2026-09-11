@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import asyncio
 import json
 import sys
 import unittest
@@ -34,6 +35,7 @@ from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 from langchain_core.tools import StructuredTool, tool
 
 from amazon.opentelemetry.distro.instrumentation.langchain import LangChainInstrumentor
+from amazon.opentelemetry.distro.instrumentation.langchain.wrapper import PregelWrapper
 from opentelemetry import context
 from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY
 from opentelemetry.sdk.trace import TracerProvider
@@ -70,6 +72,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_USAGE_INPUT_TOKENS,
     GEN_AI_USAGE_OUTPUT_TOKENS,
     GEN_AI_USAGE_REASONING_OUTPUT_TOKENS,
+    GEN_AI_WORKFLOW_NAME,
     GenAiOperationNameValues,
     GenAiProviderNameValues,
 )
@@ -251,6 +254,841 @@ class TestLangChainInstrumentor(TestCase):
         validate_otel_genai_schema(output_messages, "gen-ai-output-messages")
         self.assertTrue(any(message.get("role") == "assistant" for message in output_messages))
 
+    def test_raw_stategraph_stream_creates_invoke_agent_span(self):
+        try:
+            from langgraph.graph import END, START, MessagesState, StateGraph
+        except ImportError:
+            self.skipTest("langgraph is not available")
+
+        graph_builder = StateGraph(MessagesState)
+        graph_builder.add_node("respond", lambda _: {"messages": [AIMessage(content="Done.")]})
+        graph_builder.add_edge(START, "respond")
+        graph_builder.add_edge("respond", END)
+        graph = graph_builder.compile(name="RawStateGraph")
+
+        list(graph.stream({"messages": [HumanMessage(content="Hello")]}))
+
+        spans = self.span_exporter.get_finished_spans()
+        agent_spans = [span for span in spans if span.name == "invoke_agent RawStateGraph"]
+        self.assertEqual(len(agent_spans), 1)
+        self.assertEqual(
+            agent_spans[0].attributes[GEN_AI_OPERATION_NAME],
+            GenAiOperationNameValues.INVOKE_AGENT.value,
+        )
+        self.assertEqual(agent_spans[0].attributes[GEN_AI_AGENT_NAME], "RawStateGraph")
+        self.assertIn(GEN_AI_INPUT_MESSAGES, agent_spans[0].attributes)
+        self.assertIn(GEN_AI_OUTPUT_MESSAGES, agent_spans[0].attributes)
+        self.assertIsNone(PregelWrapper.get_active_agent_name())
+
+    def test_raw_stategraph_astream_creates_invoke_agent_span(self):
+        try:
+            from langgraph.graph import END, START, MessagesState, StateGraph
+        except ImportError:
+            self.skipTest("langgraph is not available")
+
+        graph_builder = StateGraph(MessagesState)
+        graph_builder.add_node("respond", lambda _: {"messages": [AIMessage(content="Done.")]})
+        graph_builder.add_edge(START, "respond")
+        graph_builder.add_edge("respond", END)
+        graph = graph_builder.compile(name="AsyncRawStateGraph")
+
+        async def consume_graph():
+            return [chunk async for chunk in graph.astream({"messages": [HumanMessage(content="Hello")]})]
+
+        asyncio.run(consume_graph())
+
+        spans = self.span_exporter.get_finished_spans()
+        agent_spans = [span for span in spans if span.name == "invoke_agent AsyncRawStateGraph"]
+        self.assertEqual(len(agent_spans), 1)
+        self.assertEqual(
+            agent_spans[0].attributes[GEN_AI_OPERATION_NAME],
+            GenAiOperationNameValues.INVOKE_AGENT.value,
+        )
+        self.assertEqual(agent_spans[0].attributes[GEN_AI_AGENT_NAME], "AsyncRawStateGraph")
+        self.assertIn(GEN_AI_INPUT_MESSAGES, agent_spans[0].attributes)
+        self.assertIn(GEN_AI_OUTPUT_MESSAGES, agent_spans[0].attributes)
+        self.assertIsNone(PregelWrapper.get_active_agent_name())
+
+    def test_raw_stategraph_invoke_uses_stream_fallback(self):
+        try:
+            from langgraph.graph import END, START, MessagesState, StateGraph
+        except ImportError:
+            self.skipTest("langgraph is not available")
+
+        graph_builder = StateGraph(MessagesState)
+        graph_builder.add_node("respond", lambda _: {"messages": [AIMessage(content="Done.")]})
+        graph_builder.add_edge(START, "respond")
+        graph_builder.add_edge("respond", END)
+        graph = graph_builder.compile(name="InvokedRawStateGraph")
+
+        result = graph.invoke({"messages": [HumanMessage(content="Hello")]})
+
+        self.assertEqual(result["messages"][-1].content, "Done.")
+        agent_spans = [
+            span for span in self.span_exporter.get_finished_spans() if span.name == "invoke_agent InvokedRawStateGraph"
+        ]
+        self.assertEqual(len(agent_spans), 1)
+        self.assertIsNone(PregelWrapper.get_active_agent_name())
+
+    def test_raw_stategraph_ainvoke_uses_astream_fallback(self):
+        try:
+            from langgraph.graph import END, START, MessagesState, StateGraph
+        except ImportError:
+            self.skipTest("langgraph is not available")
+
+        graph_builder = StateGraph(MessagesState)
+        graph_builder.add_node("respond", lambda _: {"messages": [AIMessage(content="Done.")]})
+        graph_builder.add_edge(START, "respond")
+        graph_builder.add_edge("respond", END)
+        graph = graph_builder.compile(name="AsyncInvokedRawStateGraph")
+
+        result = asyncio.run(graph.ainvoke({"messages": [HumanMessage(content="Hello")]}))
+
+        self.assertEqual(result["messages"][-1].content, "Done.")
+        agent_spans = [
+            span
+            for span in self.span_exporter.get_finished_spans()
+            if span.name == "invoke_agent AsyncInvokedRawStateGraph"
+        ]
+        self.assertEqual(len(agent_spans), 1)
+        self.assertIsNone(PregelWrapper.get_active_agent_name())
+
+    def test_raw_stategraph_stream_close_preserves_application_behavior(self):
+        try:
+            from langgraph.graph import END, START, MessagesState, StateGraph
+        except ImportError:
+            self.skipTest("langgraph is not available")
+
+        executed_nodes = []
+
+        def first_node(_):
+            self.assertEqual(PregelWrapper.get_active_agent_name(), "ClosableRawStateGraph")
+            executed_nodes.append("first")
+            return {"messages": [AIMessage(content="First node complete.")]}
+
+        def second_node(_):
+            executed_nodes.append("second")
+            return {"messages": [AIMessage(content="Second node complete.")]}
+
+        graph_builder = StateGraph(MessagesState)
+        graph_builder.add_node("first", first_node)
+        graph_builder.add_node("second", second_node)
+        graph_builder.add_edge(START, "first")
+        graph_builder.add_edge("first", "second")
+        graph_builder.add_edge("second", END)
+        graph = graph_builder.compile(name="ClosableRawStateGraph")
+
+        stream = graph.stream(
+            {"messages": [HumanMessage(content="Hello")]},
+            stream_mode="updates",
+        )
+        first_update = next(stream)
+        self.assertEqual(first_update["first"]["messages"][0].content, "First node complete.")
+        self.assertIsNone(PregelWrapper.get_active_agent_name())
+
+        stream.close()
+
+        self.assertEqual(executed_nodes, ["first"])
+        self.assertIsNone(PregelWrapper.get_active_agent_name())
+        agent_spans = [
+            span
+            for span in self.span_exporter.get_finished_spans()
+            if span.name == "invoke_agent ClosableRawStateGraph"
+        ]
+        self.assertEqual(len(agent_spans), 1)
+
+    def test_raw_stategraph_astream_aclose_preserves_application_behavior(self):
+        try:
+            from langgraph.graph import END, START, MessagesState, StateGraph
+        except ImportError:
+            self.skipTest("langgraph is not available")
+
+        executed_nodes = []
+
+        async def first_node(_):
+            self.assertEqual(PregelWrapper.get_active_agent_name(), "ClosableAsyncRawStateGraph")
+            executed_nodes.append("first")
+            return {"messages": [AIMessage(content="First async node complete.")]}
+
+        async def second_node(_):
+            executed_nodes.append("second")
+            return {"messages": [AIMessage(content="Second async node complete.")]}
+
+        graph_builder = StateGraph(MessagesState)
+        graph_builder.add_node("first", first_node)
+        graph_builder.add_node("second", second_node)
+        graph_builder.add_edge(START, "first")
+        graph_builder.add_edge("first", "second")
+        graph_builder.add_edge("second", END)
+        graph = graph_builder.compile(name="ClosableAsyncRawStateGraph")
+
+        async def consume_first_update():
+            stream = graph.astream(
+                {"messages": [HumanMessage(content="Hello")]},
+                stream_mode="updates",
+            )
+            first_update = await anext(stream)
+            self.assertEqual(first_update["first"]["messages"][0].content, "First async node complete.")
+            self.assertIsNone(PregelWrapper.get_active_agent_name())
+            await stream.aclose()
+
+        asyncio.run(consume_first_update())
+
+        self.assertEqual(executed_nodes, ["first"])
+        self.assertIsNone(PregelWrapper.get_active_agent_name())
+        agent_spans = [
+            span
+            for span in self.span_exporter.get_finished_spans()
+            if span.name == "invoke_agent ClosableAsyncRawStateGraph"
+        ]
+        self.assertEqual(len(agent_spans), 1)
+
+    def test_raw_stategraph_stream_propagates_application_error(self):
+        try:
+            from langgraph.graph import END, START, MessagesState, StateGraph
+        except ImportError:
+            self.skipTest("langgraph is not available")
+
+        expected_error = RuntimeError("sync graph failed")
+
+        def failing_node(_):
+            self.assertEqual(PregelWrapper.get_active_agent_name(), "FailingRawStateGraph")
+            raise expected_error
+
+        graph_builder = StateGraph(MessagesState)
+        graph_builder.add_node("fail", failing_node)
+        graph_builder.add_edge(START, "fail")
+        graph_builder.add_edge("fail", END)
+        graph = graph_builder.compile(name="FailingRawStateGraph")
+
+        with self.assertRaises(RuntimeError) as raised:
+            list(graph.stream({"messages": [HumanMessage(content="Hello")]}))
+
+        self.assertIs(raised.exception, expected_error)
+        self.assertIsNone(PregelWrapper.get_active_agent_name())
+        agent_span = next(
+            span for span in self.span_exporter.get_finished_spans() if span.name == "invoke_agent FailingRawStateGraph"
+        )
+        self.assertEqual(agent_span.status.status_code, StatusCode.ERROR)
+
+    def test_raw_stategraph_astream_propagates_application_error(self):
+        try:
+            from langgraph.graph import END, START, MessagesState, StateGraph
+        except ImportError:
+            self.skipTest("langgraph is not available")
+
+        expected_error = RuntimeError("async graph failed")
+
+        async def failing_node(_):
+            self.assertEqual(PregelWrapper.get_active_agent_name(), "FailingAsyncRawStateGraph")
+            raise expected_error
+
+        graph_builder = StateGraph(MessagesState)
+        graph_builder.add_node("fail", failing_node)
+        graph_builder.add_edge(START, "fail")
+        graph_builder.add_edge("fail", END)
+        graph = graph_builder.compile(name="FailingAsyncRawStateGraph")
+
+        async def consume_graph():
+            return [chunk async for chunk in graph.astream({"messages": [HumanMessage(content="Hello")]})]
+
+        with self.assertRaises(RuntimeError) as raised:
+            asyncio.run(consume_graph())
+
+        self.assertIs(raised.exception, expected_error)
+        self.assertIsNone(PregelWrapper.get_active_agent_name())
+        agent_span = next(
+            span
+            for span in self.span_exporter.get_finished_spans()
+            if span.name == "invoke_agent FailingAsyncRawStateGraph"
+        )
+        self.assertEqual(agent_span.status.status_code, StatusCode.ERROR)
+
+    def test_explicit_agent_marker_takes_precedence_over_pregel_fallback(self):
+        try:
+            from langgraph.graph import END, START, MessagesState, StateGraph
+        except ImportError:
+            self.skipTest("langgraph is not available")
+
+        graph_builder = StateGraph(MessagesState)
+        graph_builder.add_node("respond", lambda _: {"messages": [AIMessage(content="Done.")]})
+        graph_builder.add_edge(START, "respond")
+        graph_builder.add_edge("respond", END)
+        graph = graph_builder.compile(name="RawStateGraph").with_config(
+            {
+                "metadata": {
+                    "otel_agent_span": True,
+                    "agent_name": "ExplicitStateGraphAgent",
+                    "agent_type": "stategraph",
+                }
+            }
+        )
+
+        graph.invoke({"messages": [HumanMessage(content="Hello")]})
+
+        spans = self.span_exporter.get_finished_spans()
+        agent_spans = [span for span in spans if span.name == "invoke_agent ExplicitStateGraphAgent"]
+        self.assertEqual(len(agent_spans), 1)
+        self.assertEqual(agent_spans[0].attributes[GEN_AI_AGENT_NAME], "ExplicitStateGraphAgent")
+        self.assertEqual(
+            agent_spans[0].attributes[GEN_AI_OPERATION_NAME],
+            GenAiOperationNameValues.INVOKE_AGENT.value,
+        )
+
+    def test_otel_agent_span_false_does_not_disable_pregel_fallback(self):
+        try:
+            from langgraph.graph import END, START, MessagesState, StateGraph
+        except ImportError:
+            self.skipTest("langgraph is not available")
+
+        graph_builder = StateGraph(MessagesState)
+        graph_builder.add_node("respond", lambda _: {"messages": [AIMessage(content="Done.")]})
+        graph_builder.add_edge(START, "respond")
+        graph_builder.add_edge("respond", END)
+        graph = graph_builder.compile(name="AutomaticStateGraphAgent").with_config(
+            {"metadata": {"otel_agent_span": False}}
+        )
+
+        graph.invoke({"messages": [HumanMessage(content="Hello")]})
+
+        spans = self.span_exporter.get_finished_spans()
+        self.assertEqual(
+            len([span for span in spans if span.name == "invoke_agent AutomaticStateGraphAgent"]),
+            1,
+        )
+
+    def test_explicit_workflow_marker_overrides_pregel_fallback(self):
+        try:
+            from langgraph.graph import END, START, MessagesState, StateGraph
+        except ImportError:
+            self.skipTest("langgraph is not available")
+
+        graph_builder = StateGraph(MessagesState)
+        graph_builder.add_node("respond", lambda _: {"messages": [AIMessage(content="Done.")]})
+        graph_builder.add_edge(START, "respond")
+        graph_builder.add_edge("respond", END)
+        graph = graph_builder.compile(name="ExplicitStateGraphWorkflow").with_config(
+            {"metadata": {"otel_workflow_span": True}}
+        )
+
+        graph.invoke({"messages": [HumanMessage(content="Hello")]})
+
+        spans = self.span_exporter.get_finished_spans()
+        workflow_spans = [span for span in spans if span.name == "invoke_workflow ExplicitStateGraphWorkflow"]
+        self.assertEqual(len(workflow_spans), 1)
+        self.assertEqual(
+            workflow_spans[0].attributes[GEN_AI_OPERATION_NAME],
+            GenAiOperationNameValues.INVOKE_WORKFLOW.value,
+        )
+        self.assertEqual(workflow_spans[0].attributes[GEN_AI_WORKFLOW_NAME], "ExplicitStateGraphWorkflow")
+        self.assertIn(GEN_AI_INPUT_MESSAGES, workflow_spans[0].attributes)
+        self.assertIn(GEN_AI_OUTPUT_MESSAGES, workflow_spans[0].attributes)
+        self.assertFalse(any(span.name == "invoke_agent ExplicitStateGraphWorkflow" for span in spans))
+
+    def test_explicit_workflow_marker_overrides_incidental_agent_metadata(self):
+        try:
+            from langgraph.graph import END, START, MessagesState, StateGraph
+        except ImportError:
+            self.skipTest("langgraph is not available")
+
+        graph_builder = StateGraph(MessagesState)
+        graph_builder.add_node("respond", lambda _: {"messages": [AIMessage(content="Done.")]})
+        graph_builder.add_edge(START, "respond")
+        graph_builder.add_edge("respond", END)
+        graph = graph_builder.compile(name="WorkflowWithAgentMetadata").with_config(
+            {
+                "metadata": {
+                    "otel_workflow_span": True,
+                    "agent_name": "UpstreamAgentName",
+                }
+            }
+        )
+
+        graph.invoke({"messages": [HumanMessage(content="Hello")]})
+
+        spans = self.span_exporter.get_finished_spans()
+        workflow_span = next(span for span in spans if span.name == "invoke_workflow WorkflowWithAgentMetadata")
+        self.assertEqual(
+            workflow_span.attributes[GEN_AI_OPERATION_NAME],
+            GenAiOperationNameValues.INVOKE_WORKFLOW.value,
+        )
+        self.assertNotIn(GEN_AI_AGENT_NAME, workflow_span.attributes)
+        self.assertFalse(any(span.name.startswith("invoke_agent") for span in spans))
+
+    def test_skipped_chains_parent_model_span_to_nearest_ancestor(self):
+        try:
+            from langchain_aws import ChatBedrockConverse
+            from langgraph.graph import END, START, MessagesState, StateGraph
+        except ImportError:
+            self.skipTest("langgraph or langchain-aws is not available")
+
+        def invoke_graph(client):
+            llm = ChatBedrockConverse(model="anthropic.claude-fable-5", client=client)
+            nested_runnables = (
+                RunnableLambda(lambda state: state["messages"])
+                | RunnableLambda(lambda messages: messages)
+                | llm
+                | RunnableLambda(lambda message: {"messages": [message]})
+            )
+
+            graph_builder = StateGraph(MessagesState)
+            graph_builder.add_node("nested_runnables", nested_runnables)
+            graph_builder.add_edge(START, "nested_runnables")
+            graph_builder.add_edge("nested_runnables", END)
+            graph = graph_builder.compile(name="SkippedChainParentingAgent")
+
+            graph.invoke({"messages": [HumanMessage(content="Hello")]})
+
+        call_mock_llm("bedrock", invoke_llm_callback=invoke_graph)
+
+        spans = self.span_exporter.get_finished_spans()
+        agent_span = next(span for span in spans if span.name == "invoke_agent SkippedChainParentingAgent")
+        chat_span = next(
+            span for span in spans if span.attributes.get(GEN_AI_OPERATION_NAME) == GenAiOperationNameValues.CHAT.value
+        )
+        self.assertEqual(chat_span.context.trace_id, agent_span.context.trace_id)
+        self.assertEqual(chat_span.parent.span_id, agent_span.context.span_id)
+        self.assertLess(agent_span.start_time, chat_span.start_time)
+        self.assertGreater(agent_span.end_time, chat_span.end_time)
+        self.assertFalse(any("Runnable" in span.name for span in spans))
+
+    def test_stategraph_with_create_agents_and_nested_stategraph_preserves_agent_hierarchy(self):
+        try:
+            from langchain_aws import ChatBedrockConverse
+            from langgraph.graph import END, START, MessagesState, StateGraph
+        except ImportError:
+            self.skipTest("langgraph or langchain-aws is not available")
+        if not create_agent:
+            self.skipTest("langchain create_agent is not available")
+
+        @tool
+        def search_knowledge_base(query: str) -> str:
+            """Search the internal knowledge base."""
+            return f"Found research for: {query}"
+
+        @tool
+        def check_draft(draft: str) -> str:
+            """Check a draft for correctness."""
+            return f"Draft approved: {draft}"
+
+        def text_response(text: str) -> dict:
+            return {
+                "output": {"message": {"role": "assistant", "content": [{"text": text}]}},
+                "stopReason": "end_turn",
+                "usage": {"inputTokens": 10, "outputTokens": 20, "totalTokens": 30},
+                "metrics": {"latencyMs": 1},
+            }
+
+        def tool_response(tool_use_id: str, tool_name: str, tool_input: dict) -> dict:
+            return {
+                "output": {
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "toolUse": {
+                                    "toolUseId": tool_use_id,
+                                    "name": tool_name,
+                                    "input": tool_input,
+                                }
+                            }
+                        ],
+                    }
+                },
+                "stopReason": "tool_use",
+                "usage": {"inputTokens": 10, "outputTokens": 5, "totalTokens": 15},
+                "metrics": {"latencyMs": 1},
+            }
+
+        def invoke_graph(client):
+            llm = ChatBedrockConverse(model="anthropic.claude-fable-5", client=client)
+            research_agent = create_agent(llm, tools=[search_knowledge_base], name="ResearchCreateAgent")
+            writer_agent = create_agent(llm, tools=[], name="WriterCreateAgent")
+            review_agent = create_agent(llm, tools=[check_draft], name="ReviewCreateAgent")
+
+            synthesis_builder = StateGraph(MessagesState)
+            synthesis_builder.add_node(
+                "synthesize",
+                lambda _: {"messages": [AIMessage(content="StateGraph synthesis complete.")]},
+            )
+            synthesis_builder.add_edge(START, "synthesize")
+            synthesis_builder.add_edge("synthesize", END)
+            nested_synthesis_graph = synthesis_builder.compile(name="NestedSynthesisStateGraph")
+
+            supervisor_builder = StateGraph(MessagesState)
+            supervisor_builder.add_node(
+                "prepare",
+                RunnableLambda(lambda _: {"messages": [HumanMessage(content="Prepared for the nested agent.")]}),
+            )
+            supervisor_builder.add_node("research_agent", research_agent)
+            supervisor_builder.add_node("nested_synthesis_graph", nested_synthesis_graph)
+            supervisor_builder.add_node("writer_agent", writer_agent)
+            supervisor_builder.add_node("review_agent", review_agent)
+            supervisor_builder.add_edge(START, "prepare")
+            supervisor_builder.add_edge("prepare", "research_agent")
+            supervisor_builder.add_edge("research_agent", "nested_synthesis_graph")
+            supervisor_builder.add_edge("nested_synthesis_graph", "writer_agent")
+            supervisor_builder.add_edge("writer_agent", "review_agent")
+            supervisor_builder.add_edge("review_agent", END)
+            supervisor = supervisor_builder.compile(name="MixedStateGraphSupervisor")
+
+            supervisor.invoke({"messages": [HumanMessage(content="Start the mixed graph.")]})
+
+        call_mock_llm(
+            "bedrock",
+            invoke_llm_callback=invoke_graph,
+            responses=[
+                tool_response("research-tool-use", "search_knowledge_base", {"query": "agent tracing"}),
+                text_response("Research complete."),
+                text_response("Draft complete."),
+                tool_response("review-tool-use", "check_draft", {"draft": "Draft complete."}),
+                text_response("Review complete."),
+            ],
+        )
+
+        spans = self.span_exporter.get_finished_spans()
+        supervisor_span = next(span for span in spans if span.name == "invoke_agent MixedStateGraphSupervisor")
+        create_agent_spans = [
+            next(span for span in spans if span.name == f"invoke_agent {agent_name}")
+            for agent_name in ("ResearchCreateAgent", "WriterCreateAgent", "ReviewCreateAgent")
+        ]
+        synthesis_graph_span = next(span for span in spans if span.name == "invoke_agent NestedSynthesisStateGraph")
+        chat_spans = [
+            span for span in spans if span.attributes.get(GEN_AI_OPERATION_NAME) == GenAiOperationNameValues.CHAT.value
+        ]
+        tool_spans = [
+            span
+            for span in spans
+            if span.attributes.get(GEN_AI_OPERATION_NAME) == GenAiOperationNameValues.EXECUTE_TOOL.value
+        ]
+        model_step_spans = [span for span in spans if span.name == "chain model"]
+        tool_step_spans = [span for span in spans if span.name == "chain tools"]
+
+        for create_agent_span in create_agent_spans:
+            self.assertEqual(create_agent_span.parent.span_id, supervisor_span.context.span_id)
+        self.assertEqual(synthesis_graph_span.parent.span_id, supervisor_span.context.span_id)
+        self.assertCountEqual(
+            [
+                (span.attributes["langgraph.node"], span.attributes["langgraph.step"])
+                for span in (*create_agent_spans, synthesis_graph_span)
+            ],
+            [
+                ("research_agent", 2),
+                ("writer_agent", 4),
+                ("review_agent", 5),
+                ("nested_synthesis_graph", 3),
+            ],
+        )
+        self.assertEqual(len(chat_spans), 5)
+        self.assertEqual(len(model_step_spans), 5)
+        self.assertEqual(len(tool_step_spans), 2)
+        self.assertCountEqual(
+            [(span.attributes["langgraph.node"], span.attributes["langgraph.step"]) for span in model_step_spans],
+            [("model", 1), ("model", 3), ("model", 1), ("model", 1), ("model", 3)],
+        )
+        self.assertCountEqual(
+            [(span.attributes["langgraph.node"], span.attributes["langgraph.step"]) for span in tool_step_spans],
+            [("tools", 2), ("tools", 2)],
+        )
+        model_step_parent_span_ids = [span.parent.span_id for span in model_step_spans]
+        self.assertEqual(model_step_parent_span_ids.count(create_agent_spans[0].context.span_id), 2)
+        self.assertEqual(model_step_parent_span_ids.count(create_agent_spans[1].context.span_id), 1)
+        self.assertEqual(model_step_parent_span_ids.count(create_agent_spans[2].context.span_id), 2)
+        self.assertEqual(
+            {span.parent.span_id for span in chat_spans},
+            {span.context.span_id for span in model_step_spans},
+        )
+        self.assertEqual(
+            {span.attributes[GEN_AI_TOOL_NAME] for span in tool_spans},
+            {"search_knowledge_base", "check_draft"},
+        )
+        self.assertEqual(
+            {span.parent.span_id for span in tool_step_spans},
+            {create_agent_spans[0].context.span_id, create_agent_spans[2].context.span_id},
+        )
+        self.assertEqual(
+            {span.parent.span_id for span in tool_spans},
+            {span.context.span_id for span in tool_step_spans},
+        )
+        self.assertEqual(
+            {
+                span.context.trace_id
+                for span in (
+                    supervisor_span,
+                    synthesis_graph_span,
+                    *create_agent_spans,
+                    *model_step_spans,
+                    *tool_step_spans,
+                    *chat_spans,
+                    *tool_spans,
+                )
+            },
+            {supervisor_span.context.trace_id},
+        )
+        self.assertFalse(any("Runnable" in span.name for span in spans))
+
+    def test_multi_agent_lazily_created_input_populates_agent_spans(self):
+        if not create_agent:
+            self.skipTest("langchain create_agent is not available")
+
+        try:
+            from langchain_aws import ChatBedrockConverse
+        except ImportError:
+            self.skipTest("langchain-aws is not available")
+
+        try:
+            from langchain.agents.middleware import AgentState, before_model
+        except ImportError:
+            self.skipTest("langchain agent middleware is not available")
+
+        # Dynamic prompts, state transforms, and multi-agent handoffs commonly materialize input after the agent starts.
+        class LazyAgentState(AgentState):
+            pending_input: str
+
+        @before_model(state_schema=LazyAgentState)
+        def materialize_input(state, _runtime):
+            if not state["messages"]:
+                return {"messages": [HumanMessage(content=state["pending_input"])]}
+            return None
+
+        model_kwargs = {
+            "model": "anthropic.claude-fable-5",
+            "region_name": "us-east-1",
+            "aws_access_key_id": "fake-key",
+            "aws_secret_access_key": "fake-key",
+        }
+        worker_specs = [
+            ("WorkerAgent1", "delegate_to_worker_1", "calculate_worker_1", "Add 11 and 101.", 11, 101, "112"),
+            ("WorkerAgent2", "delegate_to_worker_2", "calculate_worker_2", "Add 22 and 202.", 22, 202, "224"),
+            ("WorkerAgent3", "delegate_to_worker_3", "calculate_worker_3", "Add 33 and 303.", 33, 303, "336"),
+            ("WorkerAgent4", "delegate_to_worker_4", "calculate_worker_4", "Add 44 and 404.", 44, 404, "448"),
+        ]
+        worker_llms = [ChatBedrockConverse(**model_kwargs) for _ in worker_specs]
+        supervisor_llm = ChatBedrockConverse(**model_kwargs)
+
+        def create_calculator_tool(tool_name):
+            def calculate(left: int, right: int) -> int:
+                return left + right
+
+            return StructuredTool.from_function(
+                func=calculate,
+                name=tool_name,
+                description="Add two numbers.",
+            )
+
+        def create_delegate_tool(worker, tool_name):
+            def delegate(query: str) -> str:
+                result = worker.invoke({"messages": [], "pending_input": query})
+                return result["messages"][-1].text
+
+            return StructuredTool.from_function(
+                func=delegate,
+                name=tool_name,
+                description="Delegate a runtime-created query to a worker agent.",
+            )
+
+        workers = [
+            create_agent(
+                worker_llm,
+                tools=[create_calculator_tool(calculator_tool_name)],
+                system_prompt=f"Worker {index} system instruction {index * 1000}.",
+                middleware=[materialize_input],
+                name=agent_name,
+            )
+            for index, (worker_llm, (agent_name, _, calculator_tool_name, _, _, _, _)) in enumerate(
+                zip(worker_llms, worker_specs), start=1
+            )
+        ]
+        supervisor = create_agent(
+            supervisor_llm,
+            tools=[
+                create_delegate_tool(worker, delegate_tool_name)
+                for worker, (_, delegate_tool_name, _, _, _, _, _) in zip(workers, worker_specs)
+            ],
+            system_prompt="Supervisor system instruction 9000.",
+            middleware=[materialize_input],
+            name="SupervisorAgent",
+        )
+
+        def invoke_llm(client):
+            for worker_llm in worker_llms:
+                worker_llm.client = client
+            supervisor_llm.client = client
+            supervisor.invoke(
+                {
+                    "messages": [],
+                    "pending_input": "Run numbered calculations 1 through 4.",
+                }
+            )
+
+        def tool_response(tool_name, tool_input, tool_use_id):
+            return {
+                "output": {
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "toolUse": {
+                                    "toolUseId": tool_use_id,
+                                    "name": tool_name,
+                                    "input": tool_input,
+                                }
+                            }
+                        ],
+                    }
+                },
+                "stopReason": "tool_use",
+                "usage": {"inputTokens": 10, "outputTokens": 5, "totalTokens": 15},
+                "metrics": {"latencyMs": 1},
+            }
+
+        def text_response(text):
+            return {
+                "output": {"message": {"role": "assistant", "content": [{"text": text}]}},
+                "stopReason": "end_turn",
+                "usage": {"inputTokens": 10, "outputTokens": 20, "totalTokens": 30},
+                "metrics": {"latencyMs": 1},
+            }
+
+        responses = []
+        for index, (_, delegate_tool_name, calculator_tool_name, query, left, right, output) in enumerate(
+            worker_specs, start=1
+        ):
+            responses.extend(
+                [
+                    tool_response(delegate_tool_name, {"query": query}, f"delegate-call-{index}"),
+                    tool_response(
+                        calculator_tool_name,
+                        {"left": left, "right": right},
+                        f"calculator-call-{index}",
+                    ),
+                    text_response(f"Worker {index} final answer: {output}."),
+                ]
+            )
+        responses.append(text_response("Supervisor final answer: 112, 224, 336, 448."))
+
+        call_mock_llm(
+            "bedrock",
+            invoke_llm_callback=invoke_llm,
+            responses=responses,
+        )
+
+        spans = self.span_exporter.get_finished_spans()
+        supervisor_span = next(span for span in spans if span.name == "invoke_agent SupervisorAgent")
+        worker_spans = {
+            agent_name: next(span for span in spans if span.name == f"invoke_agent {agent_name}")
+            for agent_name, _, _, _, _, _, _ in worker_specs
+        }
+        tool_spans = [
+            span
+            for span in spans
+            if span.attributes.get(GEN_AI_OPERATION_NAME) == GenAiOperationNameValues.EXECUTE_TOOL.value
+        ]
+
+        def messages(span, attribute, schema_name):
+            messages = json.loads(span.attributes[attribute])
+            validate_otel_genai_schema(messages, schema_name)
+            return messages
+
+        def system_instructions(span):
+            instructions = json.loads(span.attributes[GEN_AI_SYSTEM_INSTRUCTIONS])
+            validate_otel_genai_schema(instructions, "gen-ai-system-instructions")
+            return instructions
+
+        self.assertEqual(
+            messages(supervisor_span, GEN_AI_INPUT_MESSAGES, "gen-ai-input-messages"),
+            [
+                {
+                    "role": "user",
+                    "parts": [{"type": "text", "content": "Run numbered calculations 1 through 4."}],
+                }
+            ],
+        )
+        self.assertEqual(
+            messages(supervisor_span, GEN_AI_OUTPUT_MESSAGES, "gen-ai-output-messages"),
+            [
+                {
+                    "role": "assistant",
+                    "parts": [{"type": "text", "content": "Supervisor final answer: 112, 224, 336, 448."}],
+                    "finish_reason": "stop",
+                }
+            ],
+        )
+        self.assertEqual(
+            system_instructions(supervisor_span),
+            [{"type": "text", "content": "Supervisor system instruction 9000."}],
+        )
+
+        for index, (agent_name, delegate_tool_name, _, expected_input, _, _, result) in enumerate(
+            worker_specs, start=1
+        ):
+            worker_span = worker_spans[agent_name]
+            self.assertEqual(
+                messages(worker_span, GEN_AI_INPUT_MESSAGES, "gen-ai-input-messages"),
+                [{"role": "user", "parts": [{"type": "text", "content": expected_input}]}],
+            )
+            self.assertEqual(
+                messages(worker_span, GEN_AI_OUTPUT_MESSAGES, "gen-ai-output-messages"),
+                [
+                    {
+                        "role": "assistant",
+                        "parts": [{"type": "text", "content": f"Worker {index} final answer: {result}."}],
+                        "finish_reason": "stop",
+                    }
+                ],
+            )
+            self.assertEqual(
+                system_instructions(worker_span),
+                [{"type": "text", "content": f"Worker {index} system instruction {index * 1000}."}],
+            )
+            delegate_span = next(
+                span for span in tool_spans if span.attributes.get(GEN_AI_TOOL_NAME) == delegate_tool_name
+            )
+            self.assertEqual(worker_span.parent.span_id, delegate_span.context.span_id)
+
+        self.assertEqual(
+            {span.context.trace_id for span in (supervisor_span, *worker_spans.values(), *tool_spans)},
+            {supervisor_span.context.trace_id},
+        )
+
+    def test_nested_raw_stategraph_uses_pregel_fallback_under_explicit_agent(self):
+        try:
+            from langgraph.graph import END, START, MessagesState, StateGraph
+        except ImportError:
+            self.skipTest("langgraph is not available")
+
+        child_builder = StateGraph(MessagesState)
+        child_builder.add_node("respond", lambda _: {"messages": [AIMessage(content="Child done.")]})
+        child_builder.add_edge(START, "respond")
+        child_builder.add_edge("respond", END)
+        child = child_builder.compile(name="RawChildStateGraph")
+
+        parent_builder = StateGraph(MessagesState)
+        parent_builder.add_node("child", child)
+        parent_builder.add_edge(START, "child")
+        parent_builder.add_edge("child", END)
+        parent = parent_builder.compile(name="ExplicitParentStateGraph").with_config(
+            {
+                "metadata": {
+                    "otel_agent_span": True,
+                    "agent_name": "ExplicitParentStateGraph",
+                    "agent_type": "stategraph",
+                }
+            }
+        )
+
+        parent.invoke({"messages": [HumanMessage(content="Hello")]})
+
+        spans = self.span_exporter.get_finished_spans()
+        agent_spans = [span for span in spans if span.name.startswith("invoke_agent")]
+        agent_span_names = [span.name for span in agent_spans]
+        self.assertEqual(agent_span_names.count("invoke_agent ExplicitParentStateGraph"), 1)
+        self.assertEqual(agent_span_names.count("invoke_agent RawChildStateGraph"), 1)
+        parent_span = next(span for span in agent_spans if span.name == "invoke_agent ExplicitParentStateGraph")
+        child_span = next(span for span in agent_spans if span.name == "invoke_agent RawChildStateGraph")
+        self.assertEqual(child_span.context.trace_id, parent_span.context.trace_id)
+        self.assertEqual(child_span.parent.span_id, parent_span.context.span_id)
+
     def test_tool_span_has_all_attributes(self):
         def add_numbers(a: int, b: int) -> int:
             return a + b
@@ -426,7 +1264,11 @@ class TestLangChainInstrumentor(TestCase):
                 {"model": "test", "region_name": "us-east-1"},
                 GenAiProviderNameValues.AWS_BEDROCK.value,
             ),
-            (ChatOpenAI, {"api_key": "fake"}, GenAiProviderNameValues.OPENAI.value),
+            # LangChain routes gpt-5.6-sol to Responses by default after:
+            # https://github.com/langchain-ai/langchain/pull/40133
+            # Keep separate cases because some request attributes are Chat Completions-only.
+            (ChatOpenAI, {"use_responses_api": False}, GenAiProviderNameValues.OPENAI.value),
+            (ChatOpenAI, {"use_responses_api": True}, GenAiProviderNameValues.OPENAI.value),
             (
                 AzureChatOpenAI,
                 {
@@ -540,13 +1382,28 @@ class TestLangChainInstrumentor(TestCase):
         ]
 
         for model_cls, init_kwargs, expected_provider in cases:
-            with self.subTest(model=model_cls.__name__):
+            subtest_kwargs = {"model": model_cls.__name__}
+            if model_cls is ChatOpenAI:
+                subtest_kwargs["api"] = "responses" if init_kwargs["use_responses_api"] else "chat_completions"
+            with self.subTest(**subtest_kwargs):
                 self.span_exporter.clear()
                 expected_request_attributes = {}
 
                 if model_cls is ChatOpenAI:
+                    use_responses_api = init_kwargs["use_responses_api"]
 
-                    def invoke_openai(client):
+                    def invoke_openai(client, use_responses_api=use_responses_api):
+                        chat_completions_kwargs = (
+                            {
+                                "frequency_penalty": 0.5,
+                                "presence_penalty": 0.3,
+                                "extra_body": {"top_k": 40, "seed": 42},
+                                "n": 2,
+                                "stop": "STOP",
+                            }
+                            if not use_responses_api
+                            else {}
+                        )
                         ChatOpenAI(
                             model="gpt-5.6-sol",
                             api_key="fake-key",
@@ -555,12 +1412,9 @@ class TestLangChainInstrumentor(TestCase):
                             temperature=1.0,
                             top_p=0.9,
                             max_completion_tokens=100,
-                            frequency_penalty=0.5,
-                            presence_penalty=0.3,
-                            extra_body={"top_k": 40, "seed": 42},
                             streaming=False,
-                            n=2,
-                            stop="STOP",
+                            use_responses_api=use_responses_api,
+                            **chat_completions_kwargs,
                         ).invoke(messages)
 
                     call_mock_llm("openai", invoke_llm_callback=invoke_openai)
@@ -568,15 +1422,20 @@ class TestLangChainInstrumentor(TestCase):
                         GEN_AI_REQUEST_MODEL: "gpt-5.6-sol",
                         GEN_AI_REQUEST_TEMPERATURE: 1.0,
                         GEN_AI_REQUEST_TOP_P: 0.9,
-                        GEN_AI_REQUEST_TOP_K: 40,
                         GEN_AI_REQUEST_MAX_TOKENS: 100,
-                        GEN_AI_REQUEST_FREQUENCY_PENALTY: 0.5,
-                        GEN_AI_REQUEST_PRESENCE_PENALTY: 0.3,
-                        GEN_AI_REQUEST_STOP_SEQUENCES: ("STOP",),
-                        GEN_AI_REQUEST_SEED: 42,
-                        GEN_AI_REQUEST_CHOICE_COUNT: 2,
                         GEN_AI_REQUEST_STREAM: False,
                     }
+                    if not use_responses_api:
+                        expected_request_attributes.update(
+                            {
+                                GEN_AI_REQUEST_TOP_K: 40,
+                                GEN_AI_REQUEST_FREQUENCY_PENALTY: 0.5,
+                                GEN_AI_REQUEST_PRESENCE_PENALTY: 0.3,
+                                GEN_AI_REQUEST_STOP_SEQUENCES: ("STOP",),
+                                GEN_AI_REQUEST_SEED: 42,
+                                GEN_AI_REQUEST_CHOICE_COUNT: 2,
+                            }
+                        )
                 elif model_cls is ChatAnthropic:
 
                     def invoke_anthropic(client):
@@ -863,10 +1722,16 @@ class TestLangChainInstrumentor(TestCase):
 
         spans = self.span_exporter.get_finished_spans()
         agent_span = next((s for s in spans if "invoke_agent" in s.name), None)
+        chat_span = next(
+            s for s in spans if s.attributes.get(GEN_AI_OPERATION_NAME) == GenAiOperationNameValues.CHAT.value
+        )
         self.assertIsNotNone(agent_span)
-        self.assertEqual(agent_span.attributes[GEN_AI_REQUEST_MODEL], "test-model-id")
-        self.assertEqual(agent_span.attributes[GEN_AI_REQUEST_TEMPERATURE], 0.7)
-        self.assertEqual(agent_span.attributes[GEN_AI_PROVIDER_NAME], "openai")
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_MODEL], "test-model-id")
+        self.assertEqual(chat_span.attributes[GEN_AI_PROVIDER_NAME], "openai")
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_TOP_P], 0.9)
+        self.assertIsNone(agent_span.attributes.get(GEN_AI_REQUEST_MODEL))
+        self.assertIsNone(agent_span.attributes.get(GEN_AI_PROVIDER_NAME))
+        self.assertIsNone(agent_span.attributes.get(GEN_AI_REQUEST_TOP_P))
 
     def test_text_completion_propagates_to_parent_agent(self):
         if not self.HAS_LEGACY_LANGCHAIN:
@@ -886,8 +1751,15 @@ class TestLangChainInstrumentor(TestCase):
 
         spans = self.span_exporter.get_finished_spans()
         agent_span = next((s for s in spans if "invoke_agent" in s.name), None)
+        llm_span = next(
+            s
+            for s in spans
+            if s.attributes.get(GEN_AI_OPERATION_NAME) == GenAiOperationNameValues.TEXT_COMPLETION.value
+        )
         self.assertIsNotNone(agent_span)
-        self.assertIsNotNone(agent_span.attributes.get(GEN_AI_REQUEST_MODEL))
+        self.assertIsNotNone(llm_span.attributes.get(GEN_AI_REQUEST_MODEL))
+        self.assertIsNone(agent_span.attributes.get(GEN_AI_REQUEST_MODEL))
+        self.assertIsNone(agent_span.attributes.get(GEN_AI_PROVIDER_NAME))
 
     def test_create_agent_detects_agent_with_and_without_name(self):
         if create_agent:

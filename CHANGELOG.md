@@ -12,6 +12,14 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- fix: restrict native GenAI instrumentations to supported dependency major versions
+  ([#884](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/884))
+- fix(langchain): propagate first input, last output, and system instructions to internal agent spans
+  ([#889](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/889))
+- feat: redact span, span event, and span link attributes via ADOT_REDACT_SPAN_ATTRIBUTES
+  ([#886](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/886))
+- feat(langchain): classify LangGraph StateGraph invocations as agent or workflow spans through the Pregel runtime
+  ([#888](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/888))
 - fix: stop logging a noisy `Invalid key/value pair (xrsr, None) found.` warning on span creation when no
   X-Ray sampling rule hash is available
   ([#874](https://github.com/aws-observability/aws-otel-python-instrumentation/issues/874))

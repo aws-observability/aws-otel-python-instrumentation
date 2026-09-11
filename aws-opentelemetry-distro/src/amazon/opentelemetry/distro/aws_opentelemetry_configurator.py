@@ -22,6 +22,7 @@ from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSample
 from amazon.opentelemetry.distro.attribute_propagating_span_processor_builder import (
     AttributePropagatingSpanProcessorBuilder,
 )
+from amazon.opentelemetry.distro.attribute_redacting_span_processor import AttributeRedactingSpanProcessor
 from amazon.opentelemetry.distro.aws_batch_unsampled_span_processor import BatchUnsampledSpanProcessor
 from amazon.opentelemetry.distro.aws_lambda_span_processor import AwsLambdaSpanProcessor
 from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder import (
@@ -342,6 +343,10 @@ def _init_tracing(
     # processors to ensure exporters observe the updated kind.
     if is_agent_observability_enabled():
         trace_provider.add_span_processor(GenAINestedClientSpanProcessor())
+
+    # This processor modifies attributes in on_end, so it must run before batch
+    # processors to ensure exporters observe the redacted values.
+    trace_provider.add_span_processor(AttributeRedactingSpanProcessor())
 
     for _, exporter_class in exporters.items():
         exporter_args: Dict[str, any] = {}

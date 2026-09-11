@@ -18,7 +18,7 @@ class LangChainInstrumentor(BaseInstrumentor):
     """
 
     def instrumentation_dependencies(self) -> Collection[str]:  # pylint: disable=no-self-use
-        return ("langchain >= 0.3.21",)
+        return ("langchain >= 0.3.21, < 2",)
 
     # disabling these linters rules as these are instance methods from BaseInstrumentor
     def _instrument(self, **kwargs: Any) -> None:  # pylint: disable=no-self-use
@@ -27,18 +27,25 @@ class LangChainInstrumentor(BaseInstrumentor):
             OpenTelemetryCallbackHandler,
             _BaseCallbackManagerInitWrapper,
         )
-        from amazon.opentelemetry.distro.instrumentation.langchain.span_processor import LangChainSpanProcessor
+        from amazon.opentelemetry.distro.instrumentation.langchain.wrapper import PregelWrapper
 
         tracer_provider = kwargs.get("tracer_provider") or trace.get_tracer_provider()
         tracer = trace.get_tracer(__name__, __version__, tracer_provider=tracer_provider)
-
-        if hasattr(tracer_provider, "add_span_processor"):
-            tracer_provider.add_span_processor(LangChainSpanProcessor(scope_name=__name__))  # type: ignore[union-attr]
 
         try_wrap(
             "langchain_core.callbacks",
             "BaseCallbackManager.__init__",
             _BaseCallbackManagerInitWrapper(OpenTelemetryCallbackHandler(tracer)),
+        )
+        try_wrap(
+            "langgraph.pregel",
+            "Pregel.stream",
+            PregelWrapper(),
+        )
+        try_wrap(
+            "langgraph.pregel",
+            "Pregel.astream",
+            PregelWrapper(is_async=True),
         )
 
     def _uninstrument(self, **kwargs: Any) -> None:  # pylint: disable=no-self-use
@@ -46,3 +53,5 @@ class LangChainInstrumentor(BaseInstrumentor):
         from langchain_core.callbacks import BaseCallbackManager
 
         try_unwrap(BaseCallbackManager, "__init__")
+        try_unwrap("langgraph.pregel.Pregel", "stream")
+        try_unwrap("langgraph.pregel.Pregel", "astream")

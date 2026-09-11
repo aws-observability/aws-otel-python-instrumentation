@@ -13,6 +13,7 @@ from requests import Session
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_LOCAL_SERVICE, AWS_SERVICE_TYPE
 from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSampler
 from amazon.opentelemetry.distro.attribute_propagating_span_processor import AttributePropagatingSpanProcessor
+from amazon.opentelemetry.distro.attribute_redacting_span_processor import AttributeRedactingSpanProcessor
 from amazon.opentelemetry.distro.aws_batch_unsampled_span_processor import BatchUnsampledSpanProcessor
 from amazon.opentelemetry.distro.aws_lambda_span_processor import AwsLambdaSpanProcessor
 from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter import AwsMetricAttributesSpanExporter
@@ -626,7 +627,8 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
         processors = [call.args[0] for call in trace_provider.add_span_processor.call_args_list]
         self.assertIsInstance(processors[0], GenAINestedClientSpanProcessor)
-        self.assertIs(processors[1], batch_processor)
+        self.assertIsInstance(processors[1], AttributeRedactingSpanProcessor)
+        self.assertIs(processors[2], batch_processor)
 
         os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
         os.environ.pop("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", None)

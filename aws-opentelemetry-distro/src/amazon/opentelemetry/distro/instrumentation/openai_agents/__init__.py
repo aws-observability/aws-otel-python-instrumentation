@@ -21,7 +21,7 @@ class OpenAIAgentsInstrumentor(BaseInstrumentor):  # type: ignore
 
     @override
     def instrumentation_dependencies(self) -> Collection[str]:  # pylint: disable=no-self-use
-        return ("openai-agents >= 0.3.3",)
+        return ("openai-agents >= 0.3.3, < 1",)
 
     @override
     def _instrument(self, **kwargs: Any) -> None:
