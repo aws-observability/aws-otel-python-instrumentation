@@ -655,3 +655,52 @@ class DIFastAPISyncRouteHandlerTest(DITestInfrastructure):
         self.assert_snapshot_attr(log, "aws.di.instrumentation_level", "method")
         self.assert_snapshot_attr(log, "aws.di.code_unit", _CODE_UNIT)
         self.assert_body_has_entry_or_return(log)
+
+
+# =============================================================================
+# functools.partial target
+# =============================================================================
+class DIFastAPIPartialTargetTest(DITestInfrastructure):
+    """A function-level breakpoint on a functools.partial target must fire.
+
+    A partial has no __qualname__/__name__, so the wrapper's old runtime-name key
+    ("<module>.<anonymous>") missed the breakpoint set the manager registered under
+    the configured key ("<module>.partial_target"), and the partial silently never
+    fired. The fix keys the wrapper's lookup off the configured name, so a snapshot
+    IS produced.
+    """
+
+    __test__ = True
+
+    @override
+    @staticmethod
+    def get_application_image_name() -> str:
+        return _APP_IMAGE
+
+    @override
+    def get_application_wait_pattern(self) -> str:
+        return "Ready"
+
+    def test_partial_target_produces_snapshot(self) -> None:
+        # Control: a plain instrumented function works, proving DI is active here.
+        control = self.send_request("GET", "success")
+        self.assertEqual(200, control.status_code)
+        self.wait_for_snapshots(min_count=1)
+
+        # Hit the functools.partial target.
+        response = self.send_request("GET", "partial")
+        self.assertEqual(200, response.status_code)
+        # The partial still runs normally (DI must never break the application).
+        self.assertEqual(response.json().get("result"), "hello:9")
+
+        partial_logs = self.wait_for_method_snapshots("partial_target", min_count=1)
+        self.assertGreater(
+            len(partial_logs),
+            0,
+            "Expected a snapshot for the functools.partial target 'partial_target'.",
+        )
+
+        log = partial_logs[0]
+        self.assert_snapshot_attr(log, "aws.di.instrumentation_level", "method")
+        self.assert_snapshot_attr(log, "aws.di.code_unit", _CODE_UNIT)
+        self.assert_body_has_entry_or_return(log)

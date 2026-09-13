@@ -184,7 +184,7 @@ class TestSyncWrapperErrorBranches(_SnapshotEmitterFixture):
         def compute():
             return 7
 
-        func_key = f"{self.module_name}.{FunctionWrapper._get_qualified_name(compute)}"
+        func_key = f"{self.module_name}.{compute.__name__}"
         module = _register_module(self.module_name, compute=compute)
         bp_set = _make_function_bp_set(func_key, self.module_name, "compute")
         manager = _IncrementRaisesManager({func_key: bp_set})
@@ -204,7 +204,7 @@ class TestSyncWrapperErrorBranches(_SnapshotEmitterFixture):
         def boom():
             raise ValueError("user error")
 
-        func_key = f"{self.module_name}.{FunctionWrapper._get_qualified_name(boom)}"
+        func_key = f"{self.module_name}.{boom.__name__}"
         module = _register_module(self.module_name, boom=boom)
         bp_set = _make_function_bp_set(func_key, self.module_name, "boom")
         manager = _FakeIncrementOkManager({func_key: bp_set})
@@ -225,7 +225,7 @@ class TestSyncWrapperErrorBranches(_SnapshotEmitterFixture):
         def compute():
             return 99
 
-        func_key = f"{self.module_name}.{FunctionWrapper._get_qualified_name(compute)}"
+        func_key = f"{self.module_name}.{compute.__name__}"
         module = _register_module(self.module_name, compute=compute)
         bp_set = _make_function_bp_set(func_key, self.module_name, "compute")
         manager = _FakeIncrementOkManager({func_key: bp_set})
@@ -293,7 +293,7 @@ class TestAsyncWrapperErrorBranches(_SnapshotEmitterFixture):
         async def fetch():
             return "ok"
 
-        func_key = f"{self.module_name}.{FunctionWrapper._get_qualified_name(fetch)}"
+        func_key = f"{self.module_name}.{fetch.__name__}"
         module = _register_module(self.module_name, fetch=fetch)
         bp_set = _make_function_bp_set(func_key, self.module_name, "fetch")
         manager = _IncrementRaisesManager({func_key: bp_set})
@@ -311,7 +311,7 @@ class TestAsyncWrapperErrorBranches(_SnapshotEmitterFixture):
         async def fetch(a, b):
             return a + b
 
-        func_key = f"{self.module_name}.{FunctionWrapper._get_qualified_name(fetch)}"
+        func_key = f"{self.module_name}.{fetch.__name__}"
         module = _register_module(self.module_name, fetch=fetch)
         bp_set = _make_function_bp_set(func_key, self.module_name, "fetch")
         manager = _FakeIncrementOkManager({func_key: bp_set})
@@ -331,7 +331,7 @@ class TestAsyncWrapperErrorBranches(_SnapshotEmitterFixture):
         async def boom():
             raise KeyError("async error")
 
-        func_key = f"{self.module_name}.{FunctionWrapper._get_qualified_name(boom)}"
+        func_key = f"{self.module_name}.{boom.__name__}"
         module = _register_module(self.module_name, boom=boom)
         bp_set = _make_function_bp_set(func_key, self.module_name, "boom")
         manager = _FakeIncrementOkManager({func_key: bp_set})
@@ -350,7 +350,7 @@ class TestAsyncWrapperErrorBranches(_SnapshotEmitterFixture):
         async def fetch():
             return 42
 
-        func_key = f"{self.module_name}.{FunctionWrapper._get_qualified_name(fetch)}"
+        func_key = f"{self.module_name}.{fetch.__name__}"
         module = _register_module(self.module_name, fetch=fetch)
         bp_set = _make_function_bp_set(func_key, self.module_name, "fetch")
         manager = _FakeIncrementOkManager({func_key: bp_set})
