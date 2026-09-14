@@ -13,7 +13,7 @@ from opentelemetry.context import Context
 from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor
 from opentelemetry.util import types
 
-ENV_ADOT_REDACT_SPAN_ATTRIBUTES = "ADOT_REDACT_SPAN_ATTRIBUTES"
+ENV_AWS_REDACT_SPAN_ATTRIBUTES = "AWS_REDACT_SPAN_ATTRIBUTES"
 REDACTED_VALUE = "REDACTED"
 
 
@@ -22,7 +22,7 @@ class AttributeRedactingSpanProcessor(SpanProcessor):
     Redacts configured attributes on completed spans, their events, and their links.
 
     Attribute names can be supplied to the constructor or through the
-    ``ADOT_REDACT_SPAN_ATTRIBUTES`` environment variable as a comma-separated
+    ``AWS_REDACT_SPAN_ATTRIBUTES`` environment variable as a comma-separated
     list. Each entry can be an exact attribute name or contain ``*`` wildcards.
     Matching attribute values are replaced with ``REDACTED`` in place while
     attribute names and non-matching values remain unchanged.
@@ -31,11 +31,11 @@ class AttributeRedactingSpanProcessor(SpanProcessor):
         Redact several exact attributes, every attribute beginning with
         ``http.request.``, and matching GenAI content attributes:
 
-        ``ADOT_REDACT_SPAN_ATTRIBUTES=user.email,request.body,db.statement,http.request.*,gen_ai.*.content``
+        ``AWS_REDACT_SPAN_ATTRIBUTES=user.email,request.body,db.statement,http.request.*,gen_ai.*.content``
 
         Redact every span, span event, and span link attribute:
 
-        ``ADOT_REDACT_SPAN_ATTRIBUTES=*``
+        ``AWS_REDACT_SPAN_ATTRIBUTES=*``
     """
 
     def __init__(self, attributes_to_redact: Optional[Collection[str]] = None) -> None:
@@ -44,7 +44,7 @@ class AttributeRedactingSpanProcessor(SpanProcessor):
             if attributes_to_redact
             else [
                 attribute.strip()
-                for attribute in os.environ.get(ENV_ADOT_REDACT_SPAN_ATTRIBUTES, "").split(",")
+                for attribute in os.environ.get(ENV_AWS_REDACT_SPAN_ATTRIBUTES, "").split(",")
                 if attribute.strip()
             ]
         )

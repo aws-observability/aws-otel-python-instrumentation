@@ -7,7 +7,7 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from amazon.opentelemetry.distro.attribute_redacting_span_processor import (
-    ENV_ADOT_REDACT_SPAN_ATTRIBUTES,
+    ENV_AWS_REDACT_SPAN_ATTRIBUTES,
     REDACTED_VALUE,
     AttributeRedactingSpanProcessor,
 )
@@ -36,7 +36,7 @@ class TestAttributeRedactingSpanProcessor(TestCase):
             RedactionTestData(
                 name="configured attribute names",
                 environment_variables={
-                    ENV_ADOT_REDACT_SPAN_ATTRIBUTES: (
+                    ENV_AWS_REDACT_SPAN_ATTRIBUTES: (
                         " user.email, request.body, db.statement, gen_ai.prompt, user.email "
                     ),
                 },
@@ -88,7 +88,7 @@ class TestAttributeRedactingSpanProcessor(TestCase):
             RedactionTestData(
                 name="wildcard only",
                 environment_variables={
-                    ENV_ADOT_REDACT_SPAN_ATTRIBUTES: "*",
+                    ENV_AWS_REDACT_SPAN_ATTRIBUTES: "*",
                 },
                 span_attributes={"first": "secret", "second": 42, "third": True},
                 span_event_attributes={"event.first": "secret", "event.second": 42},
@@ -111,7 +111,7 @@ class TestAttributeRedactingSpanProcessor(TestCase):
             RedactionTestData(
                 name="prefix wildcard",
                 environment_variables={
-                    ENV_ADOT_REDACT_SPAN_ATTRIBUTES: "http.*",
+                    ENV_AWS_REDACT_SPAN_ATTRIBUTES: "http.*",
                 },
                 span_attributes={
                     "http.request.method": "GET",
@@ -143,7 +143,7 @@ class TestAttributeRedactingSpanProcessor(TestCase):
             RedactionTestData(
                 name="suffix wildcard",
                 environment_variables={
-                    ENV_ADOT_REDACT_SPAN_ATTRIBUTES: "*.body",
+                    ENV_AWS_REDACT_SPAN_ATTRIBUTES: "*.body",
                 },
                 span_attributes={"request.body": "secret", "response.body": "secret", "body.size": 42},
                 span_event_attributes={"message.body": "secret", "message.body.size": 42},
@@ -165,7 +165,7 @@ class TestAttributeRedactingSpanProcessor(TestCase):
             RedactionTestData(
                 name="multiple wildcard segments",
                 environment_variables={
-                    ENV_ADOT_REDACT_SPAN_ATTRIBUTES: "gen_ai.*.content",
+                    ENV_AWS_REDACT_SPAN_ATTRIBUTES: "gen_ai.*.content",
                 },
                 span_attributes={
                     "gen_ai.input.content": "secret input",
@@ -197,7 +197,7 @@ class TestAttributeRedactingSpanProcessor(TestCase):
             RedactionTestData(
                 name="wildcard mixed with explicit names",
                 environment_variables={
-                    ENV_ADOT_REDACT_SPAN_ATTRIBUTES: "user.email,http.*",
+                    ENV_AWS_REDACT_SPAN_ATTRIBUTES: "user.email,http.*",
                 },
                 span_attributes={"user.email": "user@example.com", "http.route": "/users", "safe": "value"},
                 span_event_attributes={
@@ -237,7 +237,7 @@ class TestAttributeRedactingSpanProcessor(TestCase):
             RedactionTestData(
                 name="empty configuration",
                 environment_variables={
-                    ENV_ADOT_REDACT_SPAN_ATTRIBUTES: "",
+                    ENV_AWS_REDACT_SPAN_ATTRIBUTES: "",
                 },
                 span_attributes={"user.email": "user@example.com"},
                 span_event_attributes={"user.email": "event-user@example.com"},
@@ -249,7 +249,7 @@ class TestAttributeRedactingSpanProcessor(TestCase):
             RedactionTestData(
                 name="empty comma-separated entries",
                 environment_variables={
-                    ENV_ADOT_REDACT_SPAN_ATTRIBUTES: " , , ",
+                    ENV_AWS_REDACT_SPAN_ATTRIBUTES: " , , ",
                 },
                 span_attributes={"request.body": "secret"},
                 span_event_attributes={"request.body": "event secret"},
@@ -261,7 +261,7 @@ class TestAttributeRedactingSpanProcessor(TestCase):
             RedactionTestData(
                 name="whitespace-only configuration",
                 environment_variables={
-                    ENV_ADOT_REDACT_SPAN_ATTRIBUTES: " \t ",
+                    ENV_AWS_REDACT_SPAN_ATTRIBUTES: " \t ",
                 },
                 span_attributes={"db.statement": "SELECT * FROM users"},
                 span_event_attributes={"db.statement": "DELETE FROM users"},
@@ -273,7 +273,7 @@ class TestAttributeRedactingSpanProcessor(TestCase):
             RedactionTestData(
                 name="unsupported regular expression",
                 environment_variables={
-                    ENV_ADOT_REDACT_SPAN_ATTRIBUTES: r"http\.request\..+",
+                    ENV_AWS_REDACT_SPAN_ATTRIBUTES: r"http\.request\..+",
                 },
                 span_attributes={"http.request.method": "POST"},
                 span_event_attributes={"http.request.body": "secret"},
@@ -285,7 +285,7 @@ class TestAttributeRedactingSpanProcessor(TestCase):
             RedactionTestData(
                 name="unsupported regular expression anchors",
                 environment_variables={
-                    ENV_ADOT_REDACT_SPAN_ATTRIBUTES: "^user.email$",
+                    ENV_AWS_REDACT_SPAN_ATTRIBUTES: "^user.email$",
                 },
                 span_attributes={"user.email": "user@example.com"},
                 span_event_attributes={"user.email": "event-user@example.com"},
@@ -297,7 +297,7 @@ class TestAttributeRedactingSpanProcessor(TestCase):
             RedactionTestData(
                 name="unsupported regular expression character class",
                 environment_variables={
-                    ENV_ADOT_REDACT_SPAN_ATTRIBUTES: "http.request.[a-z]+",
+                    ENV_AWS_REDACT_SPAN_ATTRIBUTES: "http.request.[a-z]+",
                 },
                 span_attributes={"http.request.method": "POST"},
                 span_event_attributes={"http.request.body": "secret"},
@@ -309,7 +309,7 @@ class TestAttributeRedactingSpanProcessor(TestCase):
             RedactionTestData(
                 name="unsupported regular expression alternation",
                 environment_variables={
-                    ENV_ADOT_REDACT_SPAN_ATTRIBUTES: "user.email|request.body",
+                    ENV_AWS_REDACT_SPAN_ATTRIBUTES: "user.email|request.body",
                 },
                 span_attributes={
                     "user.email": "user@example.com",
@@ -339,7 +339,7 @@ class TestAttributeRedactingSpanProcessor(TestCase):
             RedactionTestData(
                 name="unsupported question mark wildcard",
                 environment_variables={
-                    ENV_ADOT_REDACT_SPAN_ATTRIBUTES: "http.request.?",
+                    ENV_AWS_REDACT_SPAN_ATTRIBUTES: "http.request.?",
                 },
                 span_attributes={"http.request.method": "POST"},
                 span_event_attributes={"http.request.body": "secret"},
@@ -351,7 +351,7 @@ class TestAttributeRedactingSpanProcessor(TestCase):
             RedactionTestData(
                 name="malformed bracket pattern",
                 environment_variables={
-                    ENV_ADOT_REDACT_SPAN_ATTRIBUTES: "http.request.[",
+                    ENV_AWS_REDACT_SPAN_ATTRIBUTES: "http.request.[",
                 },
                 span_attributes={"http.request.method": "POST"},
                 span_event_attributes={"http.request.body": "secret"},
@@ -363,7 +363,7 @@ class TestAttributeRedactingSpanProcessor(TestCase):
             RedactionTestData(
                 name="attribute name containing comma",
                 environment_variables={
-                    ENV_ADOT_REDACT_SPAN_ATTRIBUTES: "custom,attribute",
+                    ENV_AWS_REDACT_SPAN_ATTRIBUTES: "custom,attribute",
                 },
                 span_attributes={"custom,attribute": "secret"},
                 span_event_attributes={"custom,attribute": "event secret"},

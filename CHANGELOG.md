@@ -12,14 +12,15 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
-- feat(genai): add AWS-prefixed controls for GenAI instrumentation, MCP HTTP suppression, and OpenAI Agents
-  trace export; retain `AWS_AGENTIC_INSTRUMENTATION` and `OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION` as legacy fallbacks
+- feat(genai): add AWS-prefixed controls for GenAI instrumentation, MCP HTTP suppression, OpenAI Agents
+  trace export, and span attribute redaction; retain `AWS_AGENTIC_INSTRUMENTATION` and
+  `OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION` as legacy fallbacks
   ([#893](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/893))
 - fix: restrict native GenAI instrumentations to supported dependency major versions
   ([#884](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/884))
 - fix(langchain): propagate first input, last output, and system instructions to internal agent spans
   ([#889](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/889))
-- feat: redact span, span event, and span link attributes via ADOT_REDACT_SPAN_ATTRIBUTES
+- feat: redact span, span event, and span link attributes via `AWS_REDACT_SPAN_ATTRIBUTES`
   ([#886](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/886))
 - feat(langchain): classify LangGraph StateGraph invocations as agent or workflow spans through the Pregel runtime
   ([#888](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/888))
