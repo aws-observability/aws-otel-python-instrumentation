@@ -37,8 +37,8 @@ from opentelemetry.trace import SpanKind, Status, StatusCode
 
 _LOG = logging.getLogger(__name__)
 
-ADOT_INSTRUMENTATION_MCP_SUPPRESS_HTTP_INSTRUMENTATION = "ADOT_INSTRUMENTATION_MCP_SUPPRESS_HTTP_INSTRUMENTATION"
-# Deprecated: use ADOT_INSTRUMENTATION_MCP_SUPPRESS_HTTP_INSTRUMENTATION.
+AWS_INSTRUMENTATION_MCP_SUPPRESS_HTTP_INSTRUMENTATION = "AWS_INSTRUMENTATION_MCP_SUPPRESS_HTTP_INSTRUMENTATION"
+# Legacy: use AWS_INSTRUMENTATION_MCP_SUPPRESS_HTTP_INSTRUMENTATION.
 OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION = "OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION"
 
 # Context key for storing client transport metadata alongside the session span.
@@ -61,7 +61,7 @@ class McpWrapper:
         self._propagators = kwargs.get("propagators") or get_global_textmap()
         self._should_suppress_http_spans = (
             get_env(
-                ADOT_INSTRUMENTATION_MCP_SUPPRESS_HTTP_INSTRUMENTATION,
+                AWS_INSTRUMENTATION_MCP_SUPPRESS_HTTP_INSTRUMENTATION,
                 OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION,
                 "true",
             ).lower()

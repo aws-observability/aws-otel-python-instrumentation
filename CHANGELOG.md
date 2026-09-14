@@ -12,8 +12,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
-- feat(genai): add ADOT-prefixed controls for GenAI instrumentation, MCP HTTP suppression, and OpenAI Agents
-  trace export, and deprecate the previous environment variable names
+- feat(genai): add AWS-prefixed controls for GenAI instrumentation, MCP HTTP suppression, and OpenAI Agents
+  trace export; retain `AWS_AGENTIC_INSTRUMENTATION` and `OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION` as legacy fallbacks
   ([#893](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/893))
 - fix: restrict native GenAI instrumentations to supported dependency major versions
   ([#884](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/884))

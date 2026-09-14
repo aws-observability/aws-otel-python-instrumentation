@@ -14,7 +14,7 @@ from opentelemetry.instrumentation.instrumentor import BaseInstrumentor  # type:
 from opentelemetry.instrumentation.utils import suppress_http_instrumentation
 
 # Disables exporting traces to the OpenAI backend when set to true.
-ADOT_INSTRUMENTATION_OPENAI_AGENTS_DISABLE_TRACE_EXPORT = "ADOT_INSTRUMENTATION_OPENAI_AGENTS_DISABLE_TRACE_EXPORT"
+AWS_INSTRUMENTATION_OPENAI_AGENTS_DISABLE_OPENAI_EXPORT = "AWS_INSTRUMENTATION_OPENAI_AGENTS_DISABLE_OPENAI_EXPORT"
 
 
 class OpenAIAgentsInstrumentor(BaseInstrumentor):  # type: ignore
@@ -83,7 +83,7 @@ class OpenAIAgentsInstrumentor(BaseInstrumentor):  # type: ignore
         disable_openai_trace_export = kwargs.get("disable_openai_trace_export")
         if disable_openai_trace_export is None:
             disable_openai_trace_export = (
-                os.environ.get(ADOT_INSTRUMENTATION_OPENAI_AGENTS_DISABLE_TRACE_EXPORT, "false").lower() == "true"
+                os.environ.get(AWS_INSTRUMENTATION_OPENAI_AGENTS_DISABLE_OPENAI_EXPORT, "false").lower() == "true"
             )
         if disable_openai_trace_export:
             trace_provider = get_trace_provider()

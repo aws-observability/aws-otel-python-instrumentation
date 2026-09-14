@@ -117,8 +117,8 @@ _load._logger.setLevel(LEVELS.get(os.environ.get(OTEL_PYTHON_LOG_LEVEL, "error")
 #   "auto" (default, also when unset): load aws_* unless a same-library third-party is registered.
 #   "enabled" : load all aws_* unconditionally.
 #   "disabled": skip all aws_*.
-ADOT_GENAI_INSTRUMENTATION = "ADOT_GENAI_INSTRUMENTATION"
-# Deprecated: use ADOT_GENAI_INSTRUMENTATION.
+AWS_GENAI_INSTRUMENTATION = "AWS_GENAI_INSTRUMENTATION"
+# Legacy: use AWS_GENAI_INSTRUMENTATION.
 AWS_AGENTIC_INSTRUMENTATION = "AWS_AGENTIC_INSTRUMENTATION"
 
 # Maps third-party instrumentor entry point names to their AWS native equivalents.
@@ -260,7 +260,7 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
         """Skip AWS native agentic instrumentors that should not load.
 
         When agent observability is enabled:
-        - ADOT_GENAI_INSTRUMENTATION or AWS_AGENTIC_INSTRUMENTATION
+        - AWS_GENAI_INSTRUMENTATION or AWS_AGENTIC_INSTRUMENTATION
           (auto/enabled/disabled) governs the aws_* side only. Third-party
           instrumentors are never touched here.
         """
@@ -275,9 +275,9 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
             return False
 
         mode_variable = (
-            ADOT_GENAI_INSTRUMENTATION if ADOT_GENAI_INSTRUMENTATION in os.environ else AWS_AGENTIC_INSTRUMENTATION
+            AWS_GENAI_INSTRUMENTATION if AWS_GENAI_INSTRUMENTATION in os.environ else AWS_AGENTIC_INSTRUMENTATION
         )
-        raw_mode = get_env(ADOT_GENAI_INSTRUMENTATION, AWS_AGENTIC_INSTRUMENTATION, "auto")
+        raw_mode = get_env(AWS_GENAI_INSTRUMENTATION, AWS_AGENTIC_INSTRUMENTATION, "auto")
         mode = raw_mode.lower()
         if mode not in ("auto", "enabled", "disabled"):
             _logger.warning(

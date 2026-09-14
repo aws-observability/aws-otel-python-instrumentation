@@ -20,7 +20,7 @@ from openai import NOT_GIVEN, Omit
 from pydantic import BaseModel
 
 from amazon.opentelemetry.distro.instrumentation.openai_agents import (
-    ADOT_INSTRUMENTATION_OPENAI_AGENTS_DISABLE_TRACE_EXPORT,
+    AWS_INSTRUMENTATION_OPENAI_AGENTS_DISABLE_OPENAI_EXPORT,
     OpenAIAgentsInstrumentor,
 )
 from amazon.opentelemetry.distro.instrumentation.openai_agents._gen_ai_context_capture import GenAICapturingContext
@@ -160,17 +160,17 @@ class TestOpenAIAgentsInstrumentor(unittest.TestCase):
     def test_disable_openai_trace_export_restores_previous_processors(self):
         cases = [
             ("kwarg", {"disable_openai_trace_export": True}, {}, True),
-            ("environment", {}, {ADOT_INSTRUMENTATION_OPENAI_AGENTS_DISABLE_TRACE_EXPORT: "TrUe"}, True),
+            ("environment", {}, {AWS_INSTRUMENTATION_OPENAI_AGENTS_DISABLE_OPENAI_EXPORT: "TrUe"}, True),
             (
                 "kwarg_false_overrides_environment",
                 {"disable_openai_trace_export": False},
-                {ADOT_INSTRUMENTATION_OPENAI_AGENTS_DISABLE_TRACE_EXPORT: "true"},
+                {AWS_INSTRUMENTATION_OPENAI_AGENTS_DISABLE_OPENAI_EXPORT: "true"},
                 False,
             ),
         ]
         for mode, instrument_kwargs, environment, export_disabled in cases:
             with self.subTest(mode=mode), patch.dict(os.environ, {}, clear=False):
-                os.environ.pop(ADOT_INSTRUMENTATION_OPENAI_AGENTS_DISABLE_TRACE_EXPORT, None)
+                os.environ.pop(AWS_INSTRUMENTATION_OPENAI_AGENTS_DISABLE_OPENAI_EXPORT, None)
                 os.environ.update(environment)
                 existing_processor = MagicMock()
                 tracing.set_trace_processors([existing_processor])
