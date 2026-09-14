@@ -65,15 +65,15 @@ dependencies.
       </td>
     </tr>
     <tr>
-      <td><code>ADOT_REDACT_SPAN_ATTRIBUTES</code></td>
+      <td><code>AWS_REDACT_SPAN_ATTRIBUTES</code></td>
       <td>
         <p>A comma separated list of span attributes to redact. Matching values in spans, span events, and span links are all replaced with <code>REDACTED</code>. Note that this applies to all span attributes, not just those produced by this distribution's instrumentations.</p>
         <p>Supports wildcard patterns.</p>
         <p><strong>Examples:</strong></p>
         <p>To redact specific sensitive data GenAI attributes:</p>
-        <pre><code>export ADOT_REDACT_SPAN_ATTRIBUTES='gen_ai.input.messages,gen_ai.output.messages'</code></pre>
+        <pre><code>export AWS_REDACT_SPAN_ATTRIBUTES='gen_ai.input.messages,gen_ai.output.messages'</code></pre>
         <p>To redact multiple attributes matching a pattern:</p>
-        <pre><code>export ADOT_REDACT_SPAN_ATTRIBUTES='llm.input_messages.*,llm.output_messages.*'</code></pre>
+        <pre><code>export AWS_REDACT_SPAN_ATTRIBUTES='llm.input_messages.*,llm.output_messages.*'</code></pre>
         <blockquote>
           <p>[!WARNING]</p>
           <p>Redaction occurs in-process within the agent, before telemetry is exported. This may affect other integrations that rely on these attribute values.</p>
