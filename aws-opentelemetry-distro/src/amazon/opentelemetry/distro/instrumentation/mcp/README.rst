@@ -40,12 +40,12 @@ Configuration
 -------------
 
 MCP instrumentation suppresses HTTP client and ASGI spans by default. Set
-``ADOT_INSTRUMENTATION_MCP_SUPPRESS_HTTP_INSTRUMENTATION=false`` to retain
+``AWS_INSTRUMENTATION_MCP_SUPPRESS_HTTP_INSTRUMENTATION=false`` to retain
 those spans:
 
 ::
 
-    export ADOT_INSTRUMENTATION_MCP_SUPPRESS_HTTP_INSTRUMENTATION=false
+    export AWS_INSTRUMENTATION_MCP_SUPPRESS_HTTP_INSTRUMENTATION=false
 
 .. pull-quote::
 
@@ -53,7 +53,7 @@ those spans:
 
     ``OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION`` is the legacy environment
     variable name and remains supported as a fallback when
-    ``ADOT_INSTRUMENTATION_MCP_SUPPRESS_HTTP_INSTRUMENTATION`` is not set.
+    ``AWS_INSTRUMENTATION_MCP_SUPPRESS_HTTP_INSTRUMENTATION`` is not set.
 
 Disable the instrumentation
 ---------------------------

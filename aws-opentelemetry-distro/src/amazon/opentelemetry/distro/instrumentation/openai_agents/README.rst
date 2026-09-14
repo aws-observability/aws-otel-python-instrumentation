@@ -67,13 +67,13 @@ If your application supplies a ``RunConfig``, leave tracing enabled:
 OpenAI trace export
 ~~~~~~~~~~~~~~~~~~~
 
-Set ``ADOT_INSTRUMENTATION_OPENAI_AGENTS_DISABLE_TRACE_EXPORT=true`` to
+Set ``AWS_INSTRUMENTATION_OPENAI_AGENTS_DISABLE_OPENAI_EXPORT=true`` to
 disable exporting traces to the OpenAI backend while retaining this
 instrumentation:
 
 ::
 
-    export ADOT_INSTRUMENTATION_OPENAI_AGENTS_DISABLE_TRACE_EXPORT=true
+    export AWS_INSTRUMENTATION_OPENAI_AGENTS_DISABLE_OPENAI_EXPORT=true
 
 Disable the instrumentation
 ---------------------------

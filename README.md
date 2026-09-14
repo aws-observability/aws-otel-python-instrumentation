@@ -83,11 +83,11 @@ dependencies.
     </tr>
     <tr>
       <td>
-        <p><code>ADOT_GENAI_INSTRUMENTATION</code></p>
+        <p><code>AWS_GENAI_INSTRUMENTATION</code></p>
         <br>
         <blockquote>
           <p>[!NOTE]</p>
-          <p><code>AWS_AGENTIC_INSTRUMENTATION</code> is the legacy environment variable name and remains supported as a fallback when <code>ADOT_GENAI_INSTRUMENTATION</code> is not set.</p>
+          <p><code>AWS_AGENTIC_INSTRUMENTATION</code> is the legacy environment variable name and remains supported as a fallback when <code>AWS_GENAI_INSTRUMENTATION</code> is not set.</p>
         </blockquote>
       </td>
       <td>
@@ -95,8 +95,8 @@ dependencies.
         <blockquote>
           <p>[!NOTE]</p>
           <p>When agent observability is enabled (<code>AGENT_OBSERVABILITY_ENABLED=true</code>), instrumentation is skipped when a conflicting third-party instrumentation is detected for the same framework.</p>
-          <p>You may set <code>ADOT_GENAI_INSTRUMENTATION=disabled</code> to disable all of the above instrumentations if you are using another instrumentation source and automatic detection does not work. If another third-party instrumentation is installed, you should uninstall it or otherwise resolve any dependency conflicts before using the above instrumentations.</p>
-          <p>You may set <code>ADOT_GENAI_INSTRUMENTATION=enabled</code> to force the above instrumentations to load. We recommend that you do not use this setting because both instrumentations may run and produce duplicate or inconsistent telemetry.</p>
+          <p>You may set <code>AWS_GENAI_INSTRUMENTATION=disabled</code> to disable all of the above instrumentations if you are using another instrumentation source and automatic detection does not work. If another third-party instrumentation is installed, you should uninstall it or otherwise resolve any dependency conflicts before using the above instrumentations.</p>
+          <p>You may set <code>AWS_GENAI_INSTRUMENTATION=enabled</code> to force the above instrumentations to load. We recommend that you do not use this setting because both instrumentations may run and produce duplicate or inconsistent telemetry.</p>
         </blockquote>
         <br>
       </td>
