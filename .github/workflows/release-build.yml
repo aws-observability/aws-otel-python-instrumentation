@@ -14,9 +14,13 @@ env:
   AWS_DEFAULT_REGION: us-east-1
   AWS_PUBLIC_ECR_REGION: us-east-1
   AWS_PRIVATE_ECR_REGION: us-west-2
+  AWS_STAGING_ECR_REGION: us-east-1
   RELEASE_PUBLIC_REPOSITORY: public.ecr.aws/aws-observability/adot-autoinstrumentation-python
   RELEASE_PRIVATE_REPOSITORY: 020628701572.dkr.ecr.us-west-2.amazonaws.com/adot-autoinstrumentation-python
   RELEASE_PRIVATE_REGISTRY: 020628701572.dkr.ecr.us-west-2.amazonaws.com
+  # Main build pushes the validated multi-arch image here (a different AWS account); release promotes it.
+  STAGING_ECR_REGISTRY: 637423224110.dkr.ecr.us-east-1.amazonaws.com
+  STAGING_ECR_REPOSITORY: aws-observability/adot-autoinstrumentation-python-staging
   PACKAGE_NAME: aws-opentelemetry-distro
   VERSION: ${{ github.event.inputs.version }}
   AWS_REGIONS: ${{ github.event.inputs.aws_region }}
@@ -97,6 +101,20 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 #3.11.1
 
+      # Promotion source: assume the role that main-build uses to push to the staging ECR, so we can
+      # pull the validated image back. NOTE: this needs pull (ecr:BatchGetImage /
+      # GetDownloadUrlForLayer) on the staging repo -- push perms alone are not enough.
+      - name: Configure AWS credentials for staging ECR (image source)
+        uses: aws-actions/configure-aws-credentials@a03048d87541d1d9fcf2ecf528a4a65ba9bd7838 #v5.0.0
+        with:
+          role-to-assume: ${{ secrets.AWS_ASSUME_ROLE_ARN }}
+          aws-region: ${{ env.AWS_STAGING_ECR_REGION }}
+
+      - name: Log in to staging ECR
+        uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 #v3.5.0
+        with:
+          registry: ${{ env.STAGING_ECR_REGISTRY }}
+
       - name: Configure AWS credentials for private ECR
         uses: aws-actions/configure-aws-credentials@a03048d87541d1d9fcf2ecf528a4a65ba9bd7838 #v5.0.0
         with:
@@ -149,16 +167,21 @@ jobs:
           verbose: true
           packages-dir: dist-pypi
 
-      - name: Build and push image
-        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 #v6.18.0
-        with:
-          push: true
-          context: .
-          file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
-          tags: |
-            ${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ env.VERSION }}
-            ${{ env.RELEASE_PRIVATE_REPOSITORY }}:v${{ env.VERSION }}
+      # Promote the exact multi-arch image the main build already built, scanned, and E2E-tested:
+      # copy its manifest (all arches + attestations) from staging to the release registries by
+      # reference -- no rebuild. The staging tag is reconstructed the same way main-build.yml builds
+      # it: <version.py __version__>-<short sha> of this (same) commit.
+      - name: Promote staging image to release ECRs
+        run: |
+          set -euo pipefail
+          PKG_VERSION=$(grep '__version__' ./aws-opentelemetry-distro/src/amazon/opentelemetry/distro/version.py | awk -F '"' '{print $2}')
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          STAGING_IMAGE="${{ env.STAGING_ECR_REGISTRY }}/${{ env.STAGING_ECR_REPOSITORY }}:${PKG_VERSION}-${SHORT_SHA}"
+          echo "Promoting $STAGING_IMAGE"
+          docker buildx imagetools create \
+            -t "${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ env.VERSION }}" \
+            -t "${{ env.RELEASE_PRIVATE_REPOSITORY }}:v${{ env.VERSION }}" \
+            "$STAGING_IMAGE"
 
       - name: Tag platform images in private ECR
         env:
