@@ -3,10 +3,11 @@
 
 import asyncio
 import json
+import os
 import unittest
 from importlib.metadata import entry_points
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import litellm
 from agents import Agent, ModelSettings, OpenAIChatCompletionsModel, RunConfig, Runner, function_tool, tracing
@@ -18,7 +19,10 @@ from litellm.litellm_core_utils.streaming_handler import CustomStreamWrapper
 from openai import NOT_GIVEN, Omit
 from pydantic import BaseModel
 
-from amazon.opentelemetry.distro.instrumentation.openai_agents import OpenAIAgentsInstrumentor
+from amazon.opentelemetry.distro.instrumentation.openai_agents import (
+    AWS_INSTRUMENTATION_OPENAI_AGENTS_DISABLE_OPENAI_EXPORT,
+    OpenAIAgentsInstrumentor,
+)
 from amazon.opentelemetry.distro.instrumentation.openai_agents._gen_ai_context_capture import GenAICapturingContext
 from amazon.opentelemetry.distro.instrumentation.openai_agents._processor import (
     GEN_AI_REQUEST_REASONING_LEVEL,
@@ -154,18 +158,33 @@ class TestOpenAIAgentsInstrumentor(unittest.TestCase):
         self.assertIs(litellm.acompletion, original_acompletion)
 
     def test_disable_openai_trace_export_restores_previous_processors(self):
-        existing_processor = MagicMock()
-        tracing.set_trace_processors([existing_processor])
+        cases = [
+            ("kwarg", {"disable_openai_trace_export": True}, {}, True),
+            ("environment", {}, {AWS_INSTRUMENTATION_OPENAI_AGENTS_DISABLE_OPENAI_EXPORT: "TrUe"}, True),
+            (
+                "kwarg_false_overrides_environment",
+                {"disable_openai_trace_export": False},
+                {AWS_INSTRUMENTATION_OPENAI_AGENTS_DISABLE_OPENAI_EXPORT: "true"},
+                False,
+            ),
+        ]
+        for mode, instrument_kwargs, environment, export_disabled in cases:
+            with self.subTest(mode=mode), patch.dict(os.environ, {}, clear=False):
+                os.environ.pop(AWS_INSTRUMENTATION_OPENAI_AGENTS_DISABLE_OPENAI_EXPORT, None)
+                os.environ.update(environment)
+                existing_processor = MagicMock()
+                tracing.set_trace_processors([existing_processor])
 
-        self.instrumentor.instrument(disable_openai_trace_export=True, skip_dep_check=True)
-        processor = self.instrumentor._processor  # pylint: disable=protected-access
-        current = tracing.get_trace_provider()._multi_processor._processors  # pylint: disable=protected-access
-        self.assertEqual(current, (processor,))
+                self.instrumentor.instrument(skip_dep_check=True, **instrument_kwargs)
+                processor = self.instrumentor._processor  # pylint: disable=protected-access
+                current = tracing.get_trace_provider()._multi_processor._processors  # pylint: disable=protected-access
+                expected = (processor,) if export_disabled else (existing_processor, processor)
+                self.assertEqual(current, expected)
 
-        self.instrumentor.uninstrument()
-        current = tracing.get_trace_provider()._multi_processor._processors  # pylint: disable=protected-access
-        self.assertEqual(current, (existing_processor,))
-        self.assertIsNone(self.instrumentor._processor)  # pylint: disable=protected-access
+                self.instrumentor.uninstrument()
+                current = tracing.get_trace_provider()._multi_processor._processors  # pylint: disable=protected-access
+                self.assertEqual(current, (existing_processor,))
+                self.assertIsNone(self.instrumentor._processor)  # pylint: disable=protected-access
 
     def test_openai_trace_export_produces_no_http_spans(self):
         exporter = InMemorySpanExporter()
