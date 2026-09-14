@@ -15,6 +15,11 @@ OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS = "OTEL_METRICS_ADD_APPLICATION_
 AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT = "AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT"
 
 
+def get_env(name: str, fallback_name: str, default: Optional[str] = None) -> Optional[str]:
+    """Get an environment variable, falling back to another name when unset."""
+    return os.environ.get(name, os.environ.get(fallback_name, default))
+
+
 def is_installed(req: str) -> bool:
     """Is the given required package installed?"""
     req = Requirement(req)
