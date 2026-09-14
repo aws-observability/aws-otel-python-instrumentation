@@ -17,7 +17,10 @@ from unittest import TestCase
 from collector import OTLPServer, Telemetry
 
 from amazon.opentelemetry.distro.instrumentation.mcp import McpInstrumentor
-from amazon.opentelemetry.distro.instrumentation.mcp._wrappers import OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION
+from amazon.opentelemetry.distro.instrumentation.mcp._wrappers import (
+    AWS_INSTRUMENTATION_MCP_SUPPRESS_HTTP_INSTRUMENTATION,
+    OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION,
+)
 from opentelemetry.baggage.propagation import W3CBaggagePropagator
 
 try:
@@ -492,19 +495,21 @@ class TestMcpInstrumentorInProcess(McpInstrumentorTestBase):
         self.assertEqual(format(server_span.context.trace_id, "032x"), expected_trace_id)
 
     def test_http_span_suppression(self):
-        for suppress_value, expect_post_spans in [("false", True), ("true", False), (None, False)]:
-            label = f"suppress={suppress_value}" if suppress_value else "suppress=default"
-            with self.subTest(label):
+        cases = [
+            ({AWS_INSTRUMENTATION_MCP_SUPPRESS_HTTP_INSTRUMENTATION: "false"}, True, "aws-false"),
+            ({AWS_INSTRUMENTATION_MCP_SUPPRESS_HTTP_INSTRUMENTATION: "true"}, False, "aws-true"),
+            ({OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION: "false"}, True, "legacy-false"),
+            ({}, False, "default"),
+        ]
+        for patch_env, expect_post_spans, mode in cases:
+            with self.subTest(mode=mode):
                 self.instrumentor.uninstrument()
                 self.span_exporter.clear()
 
-                patch_env = {}
-                if suppress_value is not None:
-                    patch_env[OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION] = suppress_value
-
-                with unittest.mock.patch.dict(os.environ, patch_env):
-                    if suppress_value is None:
-                        os.environ.pop(OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION, None)
+                with unittest.mock.patch.dict(os.environ, {}, clear=False):
+                    os.environ.pop(AWS_INSTRUMENTATION_MCP_SUPPRESS_HTTP_INSTRUMENTATION, None)
+                    os.environ.pop(OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION, None)
+                    os.environ.update(patch_env)
 
                     self.instrumentor.instrument(tracer_provider=self.tracer_provider, propagators=self.propagator)
                     self.server = self._create_server()
@@ -596,13 +601,16 @@ class TestMcpInstrumentorInProcess(McpInstrumentorTestBase):
         self.assertEqual(client_trace_id, server_trace_id, "Server span should be on same trace as client")
 
     def test_prepare_headers_skips_inject_when_not_suppressed(self):
-        """When ``OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION=false``, the httpx client
+        """When ``AWS_INSTRUMENTATION_MCP_SUPPRESS_HTTP_INSTRUMENTATION=false``, the httpx client
         instrumentation handles header injection itself, so ``wrap_prepare_headers``
         should NOT inject (to avoid duplicate traceparent writes)."""
         self.instrumentor.uninstrument()
         self.span_exporter.clear()
 
-        with unittest.mock.patch.dict(os.environ, {OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION: "false"}):
+        with unittest.mock.patch.dict(
+            os.environ,
+            {AWS_INSTRUMENTATION_MCP_SUPPRESS_HTTP_INSTRUMENTATION: "false"},
+        ):
             self.instrumentor.instrument(tracer_provider=self.tracer_provider, propagators=self.propagator)
             self.server = self._create_server()
 
