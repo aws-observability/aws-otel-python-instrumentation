@@ -49,17 +49,43 @@ dependencies.
     <tr>
       <td><code>AGENT_OBSERVABILITY_ENABLED</code></td>
       <td>
-        Set to <code>true</code> to enable agent-observability defaults. The default is <code>false</code>.
+        <p>Set to <code>true</code> to enable agent-observability defaults. The default is <code>false</code>.</p>
+        <p>When enabled, the following environment variable defaults are applied unless you have already configured them:</p>
+        <pre><code>OTEL_TRACES_EXPORTER=otlp
+OTEL_LOGS_EXPORTER=otlp
+OTEL_METRICS_EXPORTER=awsemf
+OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true
+OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://xray.&lt;region&gt;.amazonaws.com/v1/traces
+OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=https://logs.&lt;region&gt;.amazonaws.com/v1/logs
+OTEL_PYTHON_DISABLED_INSTRUMENTATIONS=http,sqlalchemy,psycopg2,pymysql,sqlite3,aiopg,asyncpg,mysql_connector,urllib3,requests,system_metrics,google-genai,jinja2
+OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED=true
+OTEL_PYTHON_LOG_CORRELATION=true
+OTEL_AWS_APPLICATION_SIGNALS_ENABLED=false
+OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS=false
+CREWAI_DISABLE_TELEMETRY=true</code></pre>
+        <blockquote>
+          <p>[!NOTE]</p>
+          <p>The trace and log endpoints are configured only when <code>OTEL_EXPORTER_OTLP_ENDPOINT</code> is not set and an AWS Region can be determined.</p>
+        </blockquote>
         <br>
       </td>
     </tr>
     <tr>
       <td><code>AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT</code></td>
       <td>
-        <p><strong>We strongly recommend setting this variable to <code>true</code> to keep captured content in span attributes.</strong> The current default is <code>false</code>: captured content is removed from span attributes and routed to a separate logs pipeline. If that logs pipeline is disabled, the content is discarded.</p>
+        <p><strong>We recommend setting <code>AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT=true</code> to keep captured content in span attributes.</strong> The current default is <code>false</code>: captured content is removed from span attributes and routed to a separate logs pipeline. If that logs pipeline is disabled, the content is discarded.</p>
         <blockquote>
           <p>[!NOTE]</p>
-          <p>In a future release, routing captured content to the separate logs pipeline will become opt-in.</p>
+          <p><strong>In a future release, routing captured content to the separate logs pipeline will become <em>OPT-IN</em>.</strong></p>
+        </blockquote>
+        <br>
+        <blockquote>
+          <p>[!NOTE]</p>
+          <p>For context about why this environment variable exists, OTel recently replaced per-message events with structured attributes in Semantic Conventions v1.37.0.</p>
+          <ul>
+            <li><a href="https://github.com/open-telemetry/semantic-conventions/releases/tag/v1.37.0"><code>https://github.com/open-telemetry/semantic-conventions/releases/tag/v1.37.0</code></a></li>
+            <li><a href="https://github.com/open-telemetry/semantic-conventions/pull/2179"><code>https://github.com/open-telemetry/semantic-conventions/pull/2179</code></a></li>
+          </ul>
         </blockquote>
         <br>
       </td>
@@ -67,7 +93,7 @@ dependencies.
     <tr>
       <td><code>AWS_REDACT_SPAN_ATTRIBUTES</code></td>
       <td>
-        <p>A comma separated list of span attributes to redact. Matching values in spans, span events, and span links are all replaced with <code>REDACTED</code>. Note that this applies to all span attributes, not just those produced by this distribution's instrumentations.</p>
+        <p>Your spans may contain sensitive information from LLM interactions, such as your users' prompt data and tool call information; use <code>AWS_REDACT_SPAN_ATTRIBUTES</code> to specify a comma-separated list of span attributes to redact. Matching values in spans, span events, and span links are all replaced with <code>REDACTED</code>. Note that this applies to all span attributes, not just those produced by this distribution's instrumentations.</p>
         <p>Supports wildcard patterns.</p>
         <p><strong>Examples:</strong></p>
         <p>To redact specific sensitive data GenAI attributes:</p>
