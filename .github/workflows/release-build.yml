@@ -59,6 +59,7 @@ jobs:
         run: |
           gh run download "$RUN_ID" -n release-artifacts -D dist
           gh run download "$RUN_ID" -n layer.zip -D layer
+          gh run download "$RUN_ID" -n staging-image -D staging-ref
 
       - name: Upload SDK wheel artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
@@ -77,6 +78,12 @@ jobs:
         with:
           name: layer.zip
           path: layer/${{ env.LAYER_ARTIFACT_NAME }}
+
+      - name: Upload staging image reference
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
+        with:
+          name: staging-image
+          path: staging-ref/staging-image.txt
 
       - name: Set up regions matrix
         id: set-matrix
@@ -167,21 +174,30 @@ jobs:
           verbose: true
           packages-dir: dist-pypi
 
-      # Promote the exact multi-arch image the main build already built, scanned, and E2E-tested:
-      # copy its manifest (all arches + attestations) from staging to the release registries by
-      # reference -- no rebuild. The staging tag is reconstructed the same way main-build.yml builds
-      # it: <version.py __version__>-<short sha> of this (same) commit.
-      - name: Promote staging image to release ECRs
+      # The digest of the image main-build already built, scanned, and E2E-tested -- recorded by that
+      # same run and downloaded above. Promoting this exact digest (not a rebuild) is what lets us
+      # ship precisely the validated image.
+      - name: Download validated image reference
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
+        with:
+          name: staging-image
+          path: staging-image
+
+      - name: Promote validated main-build image to release ECRs
         run: |
           set -euo pipefail
-          PKG_VERSION=$(grep '__version__' ./aws-opentelemetry-distro/src/amazon/opentelemetry/distro/version.py | awk -F '"' '{print $2}')
-          SHORT_SHA=$(git rev-parse --short HEAD)
-          STAGING_IMAGE="${{ env.STAGING_ECR_REGISTRY }}/${{ env.STAGING_ECR_REPOSITORY }}:${PKG_VERSION}-${SHORT_SHA}"
-          echo "Promoting $STAGING_IMAGE"
+
+          # e.g. 637...amazonaws.com/aws-observability/adot-autoinstrumentation-python-staging@sha256:<digest>
+          validated_image="$(cat staging-image/staging-image.txt)"
+          echo "Promoting validated image: $validated_image"
+
+          # Copy that one multi-arch image (all architectures + attestations) into both release
+          # repos under the v<version> tag. imagetools copies the manifest by reference, so no
+          # rebuild happens and the released bits are identical to what main-build validated.
           docker buildx imagetools create \
-            -t "${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ env.VERSION }}" \
-            -t "${{ env.RELEASE_PRIVATE_REPOSITORY }}:v${{ env.VERSION }}" \
-            "$STAGING_IMAGE"
+            --tag "${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ env.VERSION }}" \
+            --tag "${{ env.RELEASE_PRIVATE_REPOSITORY }}:v${{ env.VERSION }}" \
+            "$validated_image"
 
       - name: Tag platform images in private ECR
         env:
