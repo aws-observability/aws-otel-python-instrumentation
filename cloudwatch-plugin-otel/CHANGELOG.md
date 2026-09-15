@@ -10,6 +10,10 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- Add derived metric dimensions for dependency-edge metrics (messaging operation/consumer-group,
+  peer, GenAI, AWS resource identity, and FaaS semantic-convention attributes)
+  ([#896](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/896))
+
 ## v0.1.0 - 2026-08-14
 
 - Initial span metrics release
