@@ -69,9 +69,9 @@ jobs:
       - name: Assert wheel version matches release version
         run: |
           set -euo pipefail
-          built=$(ls dist/aws_opentelemetry_distro-*-py3-none-any.whl 2>/dev/null | head -1 \
-            | sed -E 's#.*/aws_opentelemetry_distro-(.+)-py3-none-any\.whl#\1#')
-          if [ -z "$built" ]; then echo "ERROR: no wheel found in the downloaded main-build artifacts"; exit 1; fi
+          wheel=$(find dist -maxdepth 1 -name 'aws_opentelemetry_distro-*-py3-none-any.whl' | head -1)
+          if [ -z "$wheel" ]; then echo "ERROR: no wheel found in the downloaded main-build artifacts"; exit 1; fi
+          built=$(basename "$wheel" | sed -E 's#aws_opentelemetry_distro-(.+)-py3-none-any\.whl#\1#')
           if [ "$built" != "${VERSION}" ]; then
             echo "ERROR: main-build wheel version ($built) != requested release version (${VERSION})"
             exit 1
