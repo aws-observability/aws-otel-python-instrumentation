@@ -50,7 +50,6 @@ from plugins.opentelemetry.cloudwatch.span_metrics._constants import (
     RPC_SYSTEM_NAME,
     SERVER_ADDRESS,
     SERVER_PORT,
-    SERVICE_NAME,
     _SpanMetrics,
 )
 from plugins.opentelemetry.cloudwatch.version import __version__
