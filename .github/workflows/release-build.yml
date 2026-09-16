@@ -51,6 +51,9 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           branch: ${{ github.ref_name }}
+          # Pin to the main build of the exact commit being released (not just "latest on branch"),
+          # so the wheel + image promoted are the ones built from this commit.
+          head-sha: ${{ github.sha }}
 
       - name: Download main build artifacts
         env:
@@ -60,6 +63,20 @@ jobs:
           gh run download "$RUN_ID" -n release-artifacts -D dist
           gh run download "$RUN_ID" -n layer.zip -D layer
           gh run download "$RUN_ID" -n staging-image -D staging-ref
+
+      # Guard against a mis-typed version: the wheel built by the selected run must carry the exact
+      # version we're releasing, before anything is published/tagged.
+      - name: Assert wheel version matches release version
+        run: |
+          set -euo pipefail
+          built=$(ls dist/aws_opentelemetry_distro-*-py3-none-any.whl 2>/dev/null | head -1 \
+            | sed -E 's#.*/aws_opentelemetry_distro-(.+)-py3-none-any\.whl#\1#')
+          if [ -z "$built" ]; then echo "ERROR: no wheel found in the downloaded main-build artifacts"; exit 1; fi
+          if [ "$built" != "${VERSION}" ]; then
+            echo "ERROR: main-build wheel version ($built) != requested release version (${VERSION})"
+            exit 1
+          fi
+          echo "Wheel version matches requested release version: ${VERSION}"
 
       - name: Upload SDK wheel artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
