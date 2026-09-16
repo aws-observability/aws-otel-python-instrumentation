@@ -72,7 +72,8 @@ class SpanMetricsConnector(SpanProcessor):
     `SpanMetricsConnector` is an implementation of `SpanProcessor` that derives
     metrics from ended spans, dimensioned by `service.name`, `span.name`,
     `span.kind`, and `status.code` (plus copied low-cardinality HTTP, RPC,
-    database, and messaging semantic-convention attributes):
+    database, messaging, peer (`server.*`), GenAI, AWS resource-identity, and
+    FaaS semantic-convention attributes):
 
     - `traces.span.metrics.calls`: a counter incremented once per span.
     - `traces.span.metrics.duration`: a histogram of span durations, in seconds.
