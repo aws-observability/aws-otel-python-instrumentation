@@ -40,6 +40,10 @@ from plugins.opentelemetry.cloudwatch.span_metrics._constants import (
     MESSAGING_OPERATION_NAME,
     MESSAGING_OPERATION_TYPE,
     MESSAGING_SYSTEM,
+    NET_HOST_NAME,
+    NET_HOST_PORT,
+    NET_PEER_NAME,
+    NET_PEER_PORT,
     RPC_METHOD,
     RPC_SERVICE,
     RPC_SYSTEM,
@@ -175,8 +179,8 @@ class SpanMetricsConnector(SpanProcessor):
         self._copy(attributes, span_attributes, MESSAGING_OPERATION_TYPE)
         self._copy(attributes, span_attributes, MESSAGING_CONSUMER_GROUP_NAME)
         # Peer (https://opentelemetry.io/docs/specs/semconv/registry/attributes/server/)
-        self._copy(attributes, span_attributes, SERVER_ADDRESS)
-        self._copy(attributes, span_attributes, SERVER_PORT)
+        self._copy(attributes, span_attributes, SERVER_ADDRESS, NET_PEER_NAME, NET_HOST_NAME)
+        self._copy(attributes, span_attributes, SERVER_PORT, NET_PEER_PORT, NET_HOST_PORT)
         # GenAI (https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-metrics/)
         self._copy(attributes, span_attributes, GEN_AI_REQUEST_MODEL)
         self._copy(attributes, span_attributes, GEN_AI_PROVIDER_NAME)

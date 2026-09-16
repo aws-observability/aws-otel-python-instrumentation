@@ -451,6 +451,37 @@ class TestSpanMetricsConnectorDerivedAttributes(SpanMetricsConnectorTestBase):
         self.assertEqual(calls.attributes[SERVER_PORT], 8443)
         self.assertNotIn("network.peer.address", calls.attributes)
 
+    def test_legacy_peer_attributes_pass_through_under_legacy_keys(self):
+        calls = self.record_span(
+            "peer-legacy-client",
+            kind=SpanKind.CLIENT,
+            attributes={"net.peer.name": "payments.example.com", "net.peer.port": 8443},
+        )
+        self.assertEqual(calls.attributes["net.peer.name"], "payments.example.com")
+        self.assertEqual(calls.attributes["net.peer.port"], 8443)
+        self.assertNotIn(SERVER_ADDRESS, calls.attributes)
+        self.assertNotIn(SERVER_PORT, calls.attributes)
+
+    def test_legacy_server_span_peer_attributes_pass_through(self):
+        calls = self.record_span(
+            "peer-legacy-server",
+            kind=SpanKind.SERVER,
+            attributes={"net.host.name": "payments.example.com", "net.host.port": 8443},
+        )
+        self.assertEqual(calls.attributes["net.host.name"], "payments.example.com")
+        self.assertEqual(calls.attributes["net.host.port"], 8443)
+        self.assertNotIn(SERVER_ADDRESS, calls.attributes)
+        self.assertNotIn(SERVER_PORT, calls.attributes)
+
+    def test_current_peer_attributes_win_over_legacy(self):
+        calls = self.record_span(
+            "peer-precedence",
+            kind=SpanKind.CLIENT,
+            attributes={SERVER_ADDRESS: "payments.example.com", "net.peer.name": "legacy.example.com"},
+        )
+        self.assertEqual(calls.attributes[SERVER_ADDRESS], "payments.example.com")
+        self.assertNotIn("net.peer.name", calls.attributes)
+
     def test_gen_ai_attributes_copied(self):
         calls = self.record_span(
             "gen-ai",
@@ -638,12 +669,16 @@ class TestSpanMetricsConnectorPeerFromRealClientSpan(SpanMetricsConnectorTestBas
 
         span = self.get_finished_spans().by_name("GET")
         self.assertEqual(span.kind, SpanKind.CLIENT)
-        self.assertEqual(span.attributes[SERVER_ADDRESS], "127.0.0.1")
 
         calls = self.get_metric_data_point(_SpanMetrics.CALLS_NAME, "GET")
-        self.assertEqual(calls.attributes[SERVER_ADDRESS], "127.0.0.1")
-        # server.port is an int per semconv, copied through as a numeric dimension.
-        self.assertEqual(calls.attributes[SERVER_PORT], self.port)
+        # Older instrumentation emits the pre-1.21 net.peer.* keys, newer emits the stable server.*
+        # keys; either spelling is a valid peer dimension, so accept whichever the installed version
+        # produces.
+        peer_address = calls.attributes.get(SERVER_ADDRESS, calls.attributes.get("net.peer.name"))
+        peer_port = calls.attributes.get(SERVER_PORT, calls.attributes.get("net.peer.port"))
+        self.assertEqual(peer_address, "127.0.0.1")
+        # The peer port is an int per semconv, copied through as a numeric dimension.
+        self.assertEqual(peer_port, self.port)
 
 
 class TestSpanMetricsConnectorHttpServer(SpanMetricsConnectorTestBase):

@@ -67,6 +67,11 @@ MESSAGING_DESTINATION_ANONYMOUS = _semconv(
 _SERVER = "opentelemetry.semconv.attributes.server_attributes"
 SERVER_ADDRESS = _semconv(_SERVER, "SERVER_ADDRESS", "server.address")
 SERVER_PORT = _semconv(_SERVER, "SERVER_PORT", "server.port")
+_NETWORK_INCUBATING = "opentelemetry.semconv._incubating.attributes.network_attributes"
+NET_PEER_NAME = _semconv(_NETWORK_INCUBATING, "NET_PEER_NAME", "net.peer.name")
+NET_HOST_NAME = _semconv(_NETWORK_INCUBATING, "NET_HOST_NAME", "net.host.name")
+NET_PEER_PORT = _semconv(_NETWORK_INCUBATING, "NET_PEER_PORT", "net.peer.port")
+NET_HOST_PORT = _semconv(_NETWORK_INCUBATING, "NET_HOST_PORT", "net.host.port")
 
 # GenAI (https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-metrics/)
 _GEN_AI_INCUBATING = "opentelemetry.semconv._incubating.attributes.gen_ai_attributes"

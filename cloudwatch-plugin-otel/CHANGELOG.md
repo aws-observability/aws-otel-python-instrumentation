@@ -10,9 +10,7 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
-- Add derived metric dimensions for dependency-edge metrics (messaging operation/consumer-group,
-  peer, GenAI, AWS resource identity, and FaaS semantic-convention attributes)
-  ([#896](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/896))
+- Add peer, GenAI, AWS resource-identity, FaaS, and messaging derived dimensions, with legacy net.peer.*/net.host.* fallbacks for server.address/server.port ([#896](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/896))
 
 ## v0.1.0 - 2026-08-14
 
