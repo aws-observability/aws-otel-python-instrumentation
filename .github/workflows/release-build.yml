@@ -14,9 +14,13 @@ env:
   AWS_DEFAULT_REGION: us-east-1
   AWS_PUBLIC_ECR_REGION: us-east-1
   AWS_PRIVATE_ECR_REGION: us-west-2
+  AWS_STAGING_ECR_REGION: us-east-1
   RELEASE_PUBLIC_REPOSITORY: public.ecr.aws/aws-observability/adot-autoinstrumentation-python
   RELEASE_PRIVATE_REPOSITORY: 020628701572.dkr.ecr.us-west-2.amazonaws.com/adot-autoinstrumentation-python
   RELEASE_PRIVATE_REGISTRY: 020628701572.dkr.ecr.us-west-2.amazonaws.com
+  # Main build pushes the validated multi-arch image here (a different AWS account); release promotes it.
+  STAGING_ECR_REGISTRY: 637423224110.dkr.ecr.us-east-1.amazonaws.com
+  STAGING_ECR_REPOSITORY: aws-observability/adot-autoinstrumentation-python-staging
   PACKAGE_NAME: aws-opentelemetry-distro
   VERSION: ${{ github.event.inputs.version }}
   AWS_REGIONS: ${{ github.event.inputs.aws_region }}
@@ -47,6 +51,9 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           branch: ${{ github.ref_name }}
+          # Pin to the main build of the exact commit being released (not just "latest on branch"),
+          # so the wheel + image promoted are the ones built from this commit.
+          head-sha: ${{ github.sha }}
 
       - name: Download main build artifacts
         env:
@@ -55,6 +62,21 @@ jobs:
         run: |
           gh run download "$RUN_ID" -n release-artifacts -D dist
           gh run download "$RUN_ID" -n layer.zip -D layer
+          gh run download "$RUN_ID" -n staging-image -D staging-ref
+
+      # Guard against a mis-typed version: the wheel built by the selected run must carry the exact
+      # version we're releasing, before anything is published/tagged.
+      - name: Assert wheel version matches release version
+        run: |
+          set -euo pipefail
+          wheel=$(find dist -maxdepth 1 -name 'aws_opentelemetry_distro-*-py3-none-any.whl' | head -1)
+          if [ -z "$wheel" ]; then echo "ERROR: no wheel found in the downloaded main-build artifacts"; exit 1; fi
+          built=$(basename "$wheel" | sed -E 's#aws_opentelemetry_distro-(.+)-py3-none-any\.whl#\1#')
+          if [ "$built" != "${VERSION}" ]; then
+            echo "ERROR: main-build wheel version ($built) != requested release version (${VERSION})"
+            exit 1
+          fi
+          echo "Wheel version matches requested release version: ${VERSION}"
 
       - name: Upload SDK wheel artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
@@ -73,6 +95,12 @@ jobs:
         with:
           name: layer.zip
           path: layer/${{ env.LAYER_ARTIFACT_NAME }}
+
+      - name: Upload staging image reference
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
+        with:
+          name: staging-image
+          path: staging-ref/staging-image.txt
 
       - name: Set up regions matrix
         id: set-matrix
@@ -96,6 +124,20 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 #3.11.1
+
+      # Promotion source: assume the role that main-build uses to push to the staging ECR, so we can
+      # pull the validated image back. NOTE: this needs pull (ecr:BatchGetImage /
+      # GetDownloadUrlForLayer) on the staging repo -- push perms alone are not enough.
+      - name: Configure AWS credentials for staging ECR (image source)
+        uses: aws-actions/configure-aws-credentials@a03048d87541d1d9fcf2ecf528a4a65ba9bd7838 #v5.0.0
+        with:
+          role-to-assume: ${{ secrets.AWS_ASSUME_ROLE_ARN }}
+          aws-region: ${{ env.AWS_STAGING_ECR_REGION }}
+
+      - name: Log in to staging ECR
+        uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 #v3.5.0
+        with:
+          registry: ${{ env.STAGING_ECR_REGISTRY }}
 
       - name: Configure AWS credentials for private ECR
         uses: aws-actions/configure-aws-credentials@a03048d87541d1d9fcf2ecf528a4a65ba9bd7838 #v5.0.0
@@ -149,16 +191,30 @@ jobs:
           verbose: true
           packages-dir: dist-pypi
 
-      - name: Build and push image
-        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 #v6.18.0
+      # The digest of the image main-build already built, scanned, and E2E-tested -- recorded by that
+      # same run and downloaded above. Promoting this exact digest (not a rebuild) is what lets us
+      # ship precisely the validated image.
+      - name: Download validated image reference
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
         with:
-          push: true
-          context: .
-          file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
-          tags: |
-            ${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ env.VERSION }}
-            ${{ env.RELEASE_PRIVATE_REPOSITORY }}:v${{ env.VERSION }}
+          name: staging-image
+          path: staging-image
+
+      - name: Promote validated main-build image to release ECRs
+        run: |
+          set -euo pipefail
+
+          # e.g. 637...amazonaws.com/aws-observability/adot-autoinstrumentation-python-staging@sha256:<digest>
+          validated_image="$(cat staging-image/staging-image.txt)"
+          echo "Promoting validated image: $validated_image"
+
+          # Copy that one multi-arch image (all architectures + attestations) into both release
+          # repos under the v<version> tag. imagetools copies the manifest by reference, so no
+          # rebuild happens and the released bits are identical to what main-build validated.
+          docker buildx imagetools create \
+            --tag "${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ env.VERSION }}" \
+            --tag "${{ env.RELEASE_PRIVATE_REPOSITORY }}:v${{ env.VERSION }}" \
+            "$validated_image"
 
       - name: Tag platform images in private ECR
         env:
