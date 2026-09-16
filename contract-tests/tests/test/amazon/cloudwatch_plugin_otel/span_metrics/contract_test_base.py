@@ -291,13 +291,28 @@ class SpanMetricsContractTestBase(TestCase):
         calls = self._get_latest_data_point(metrics, "traces.span.metrics.calls", expected)
         calls_attributes = self._attributes(calls.attributes)
         self.assertGreaterEqual(getattr(calls, calls.WhichOneof("value")), 1)
-        self.assertEqual(calls_attributes[SERVICE_NAME], "cloudwatch-plugin-otel-contract-test")
+        # service.name lives on the metric RESOURCE, never on the datapoint.
+        self.assertNotIn(SERVICE_NAME, calls_attributes)
+        self._assert_calls_metric_resource_service_name(metrics)
         self.assertEqual(calls_attributes["aws.otel.span.metrics.schema"], "v1")
         self.assertTrue(calls_attributes["aws.otel.extension.lib.version"])
 
         duration = self._get_latest_data_point(metrics, "traces.span.metrics.duration", calls_attributes)
         self.assertGreaterEqual(duration.count, 1)
         self.assertGreaterEqual(duration.sum, 0)
+
+    def _assert_calls_metric_resource_service_name(self, metrics: List[ResourceScopeMetric]) -> None:
+        """The metric's resource must carry the app's configured service.name (with its exact value —
+        the SDK unconditionally provides an unknown_service default, so key presence alone proves
+        nothing) and the calls counter must use the {call} unit."""
+        for resource_scope_metric in metrics:
+            if resource_scope_metric.metric.name != "traces.span.metrics.calls":
+                continue
+            resource_attributes = self._attributes(resource_scope_metric.resource_metrics.resource.attributes)
+            self.assertEqual(resource_attributes.get(SERVICE_NAME), "cloudwatch-plugin-otel-contract-test")
+            self.assertEqual(resource_scope_metric.metric.unit, "{call}")
+            return
+        self.fail("no traces.span.metrics.calls metric found")
 
     def _get_latest_data_point(
         self,

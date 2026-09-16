@@ -1,128 +1,69 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import asyncio
-import atexit
-import json
 import os
 import traceback
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from threading import Thread
-from typing import Tuple
+from typing import Union
 
 from llama_index.core import Document, Settings, VectorStoreIndex
 from llama_index.core.agent.workflow import AgentWorkflow, FunctionAgent
 from llama_index.core.base.llms.types import ChatMessage, MessageRole
 from llama_index.core.embeddings import MockEmbedding
 from llama_index.core.tools import FunctionTool
+from llama_index.llms.bedrock_converse import BedrockConverse
 from llama_index.llms.openai import OpenAI
-from typing_extensions import override
+from mock_llm import (
+    MOCK_BEDROCK_PORT,
+    MOCK_LLM_PORT,
+    reset_bedrock_call_count,
+    reset_llm_call_count,
+    start_servers,
+    store_agent_output,
+)
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import Response
+from starlette.routing import Route
 
-_PORT: int = 8080
-_MOCK_LLM_PORT: int = 8081
-
+os.environ["AWS_ACCESS_KEY_ID"] = "fake-key"
+os.environ["AWS_SECRET_ACCESS_KEY"] = "fake-key"
+os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
 os.environ["OPENAI_API_KEY"] = "fake-key"
 
-_llm_call_count = 0
 
+class RequestHandler:
+    def __init__(self, path: str) -> None:
+        self.path = path
 
-class MockOpenAIHandler(BaseHTTPRequestHandler):
-
-    # pylint: disable=invalid-name
-    def do_POST(self):
-        global _llm_call_count  # pylint: disable=global-statement
-        _llm_call_count += 1
-
-        content_length = int(self.headers.get("Content-Length", 0))
-        request_body = self.rfile.read(content_length).decode("utf-8")
-        request_data = json.loads(request_body) if content_length > 0 else {}
-
-        has_tools = "tools" in request_data and len(request_data.get("tools", [])) > 0
-
-        if has_tools:
-            if _llm_call_count % 2 == 1:
-                content = (
-                    "Thought: I need to calculate the sum of 5 and 3.\n"
-                    "Action: calculate_sum\n"
-                    'Action Input: {"a": 5, "b": 3}'
-                )
-            else:
-                content = "Thought: I now know the final answer.\nFinal Answer: The sum of 5 and 3 is 8."
-
-            response = {
-                "id": "chatcmpl-mock-tool",
-                "object": "chat.completion",
-                "created": 1234567890,
-                "model": "gpt-4",
-                "choices": [
-                    {
-                        "index": 0,
-                        "message": {"role": "assistant", "content": content},
-                        "finish_reason": "stop",
-                    }
-                ],
-                "usage": {"prompt_tokens": 50, "completion_tokens": 20, "total_tokens": 70},
-            }
-        else:
-            response = {
-                "id": "chatcmpl-mock",
-                "object": "chat.completion",
-                "created": 1234567890,
-                "model": "gpt-4",
-                "choices": [
-                    {
-                        "index": 0,
-                        "message": {
-                            "role": "assistant",
-                            "content": "This is a mock response from the fake OpenAI API.",
-                        },
-                        "finish_reason": "stop",
-                    }
-                ],
-                "usage": {"prompt_tokens": 25, "completion_tokens": 50, "total_tokens": 75},
-            }
-
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        self.wfile.write(json.dumps(response).encode())
-
-    def log_message(self, format, *args):  # pylint: disable=redefined-builtin
-        pass
-
-
-class RequestHandler(BaseHTTPRequestHandler):
-    main_status: int = 200
-
-    @override
-    # pylint: disable=invalid-name
-    def do_GET(self):
-        if self.in_path("llamaindex"):
-            self._handle_llamaindex_request()
-        self._end_request(self.main_status)
+    def handle(self) -> Response:
+        if not self.in_path("llamaindex"):
+            return Response(status_code=404)
+        return self._handle_llamaindex_request()
 
     def in_path(self, sub_path: str) -> bool:
         return sub_path in self.path
 
-    def _handle_llamaindex_request(self) -> None:
+    def _handle_llamaindex_request(self) -> Response:
         if self.in_path("workflow"):
-            self._run_workflow()
+            handler = self._run_workflow
         elif self.in_path("agent"):
-            self._run_agent()
+            handler = self._run_agent
         elif self.in_path("chat"):
-            self._run_chat()
+            handler = self._run_chat
         elif self.in_path("query"):
-            self._run_query()
+            handler = self._run_query
         elif self.in_path("embedding"):
-            self._run_embedding()
+            handler = self._run_embedding
         elif self.in_path("tool"):
-            self._run_tool_call()
+            handler = self._run_tool_call
         else:
-            set_main_status(404)
+            return Response(status_code=404)
 
-    def _run_agent(self) -> None:  # pylint: disable=no-self-use
-        global _llm_call_count  # pylint: disable=global-statement
-        _llm_call_count = 0
-        set_main_status(200)
+        handler()
+        return Response(status_code=200)
+
+    def _run_agent(self) -> None:
+        self._reset_model_call_count()
 
         try:
 
@@ -132,15 +73,10 @@ class RequestHandler(BaseHTTPRequestHandler):
             def multiply(a: float, b: float) -> float:
                 return a * b
 
-            llm = OpenAI(
-                model="gpt-4",
-                api_base=f"http://localhost:{_MOCK_LLM_PORT}/v1",
-                temperature=0.7,
-                max_tokens=100,
-            )
+            llm = self._create_llm()
 
             agent = FunctionAgent(
-                tools=[multiply, get_greeting],
+                tools=[multiply, get_greeting, store_agent_output],
                 llm=llm,
                 name="TestAgent",
                 description="A test agent that greets and multiplies.",
@@ -159,10 +95,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             print(f"Error in _run_agent: {exc}")
             traceback.print_exc()
 
-    def _run_workflow(self) -> None:  # pylint: disable=no-self-use
-        global _llm_call_count  # pylint: disable=global-statement
-        _llm_call_count = 0
-        set_main_status(200)
+    def _run_workflow(self) -> None:
+        self._reset_model_call_count()
 
         try:
 
@@ -172,15 +106,10 @@ class RequestHandler(BaseHTTPRequestHandler):
             def multiply(a: float, b: float) -> float:
                 return a * b
 
-            llm = OpenAI(
-                model="gpt-4",
-                api_base=f"http://localhost:{_MOCK_LLM_PORT}/v1",
-                temperature=0.7,
-                max_tokens=100,
-            )
+            llm = self._create_llm()
 
             greeter = FunctionAgent(
-                tools=[get_greeting],
+                tools=[get_greeting, store_agent_output],
                 llm=llm,
                 name="Greeter",
                 description="Greets people by name.",
@@ -189,7 +118,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 streaming=False,
             )
             calculator = FunctionAgent(
-                tools=[multiply],
+                tools=[multiply, store_agent_output],
                 llm=llm,
                 name="Calculator",
                 description="Multiplies numbers.",
@@ -201,7 +130,9 @@ class RequestHandler(BaseHTTPRequestHandler):
             )
 
             async def run_workflow():
-                return await workflow.run(user_msg="Please greet the world")
+                workflow_response = await workflow.run(user_msg="Please greet the world")
+                await calculator.run("Multiply 3.5 by 3.5 and store the result")
+                return workflow_response
 
             response = asyncio.run(run_workflow())
             print(f"Workflow response: {response}")
@@ -210,16 +141,11 @@ class RequestHandler(BaseHTTPRequestHandler):
             print(f"Error in _run_workflow: {exc}")
             traceback.print_exc()
 
-    def _run_chat(self) -> None:  # pylint: disable=no-self-use
-        set_main_status(200)
+    def _run_chat(self) -> None:
+        self._reset_model_call_count()
 
         try:
-            llm = OpenAI(
-                model="gpt-4",
-                api_base=f"http://localhost:{_MOCK_LLM_PORT}/v1",
-                temperature=0.7,
-                max_tokens=100,
-            )
+            llm = self._create_llm()
 
             messages = [
                 ChatMessage(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
@@ -232,16 +158,11 @@ class RequestHandler(BaseHTTPRequestHandler):
             print(f"Error in _run_chat: {exc}")
             traceback.print_exc()
 
-    def _run_query(self) -> None:  # pylint: disable=no-self-use
-        set_main_status(200)
+    def _run_query(self) -> None:
+        self._reset_model_call_count()
 
         try:
-            llm = OpenAI(
-                model="gpt-4",
-                api_base=f"http://localhost:{_MOCK_LLM_PORT}/v1",
-                temperature=0.7,
-                max_tokens=100,
-            )
+            llm = self._create_llm()
             embed_model = MockEmbedding(embed_dim=384)
 
             Settings.llm = llm
@@ -261,9 +182,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             print(f"Error in _run_query: {exc}")
             traceback.print_exc()
 
-    def _run_embedding(self) -> None:  # pylint: disable=no-self-use
-        set_main_status(200)
-
+    @staticmethod
+    def _run_embedding() -> None:
         try:
             embed_model = MockEmbedding(embed_dim=384)
 
@@ -274,10 +194,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             print(f"Error in _run_embedding: {exc}")
             traceback.print_exc()
 
-    def _run_tool_call(self) -> None:  # pylint: disable=no-self-use
-        global _llm_call_count  # pylint: disable=global-statement
-        _llm_call_count = 0
-        set_main_status(200)
+    def _run_tool_call(self) -> None:
+        self._reset_model_call_count()
 
         try:
 
@@ -290,12 +208,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             sum_tool = FunctionTool.from_defaults(fn=calculate_sum)
             multiply_tool = FunctionTool.from_defaults(fn=multiply)
 
-            llm = OpenAI(
-                model="gpt-4",
-                api_base=f"http://localhost:{_MOCK_LLM_PORT}/v1",
-                temperature=0.7,
-                max_tokens=100,
-            )
+            llm = self._create_llm()
 
             messages = [
                 ChatMessage(role=MessageRole.USER, content="What is 5 + 3?"),
@@ -308,31 +221,37 @@ class RequestHandler(BaseHTTPRequestHandler):
             print(f"Error in _run_tool_call: {exc}")
             traceback.print_exc()
 
-    def _end_request(self, status_code: int):
-        self.send_response_only(status_code)
-        self.end_headers()
+    def _create_llm(self) -> Union[BedrockConverse, OpenAI]:
+        if "bedrock" in self.path:
+            return BedrockConverse(
+                model="anthropic.claude-3-haiku-20240307-v1:0",
+                region_name="us-east-1",
+                endpoint_url=f"http://localhost:{MOCK_BEDROCK_PORT}",
+                aws_access_key_id="fake-key",
+                aws_secret_access_key="fake-key",
+                temperature=0.7,
+                max_tokens=100,
+            )
+        return OpenAI(
+            model="gpt-4",
+            api_base=f"http://localhost:{MOCK_LLM_PORT}/v1",
+            temperature=0.7,
+            max_tokens=100,
+        )
+
+    def _reset_model_call_count(self) -> None:
+        if "bedrock" in self.path:
+            reset_bedrock_call_count()
+        else:
+            reset_llm_call_count()
 
 
-def set_main_status(status: int) -> None:
-    RequestHandler.main_status = status
+def handle_request(request: Request) -> Response:
+    return RequestHandler(request.url.path).handle()
 
 
-def main() -> None:
-    # Start mock OpenAI API server
-    mock_llm_server = ThreadingHTTPServer(("0.0.0.0", _MOCK_LLM_PORT), MockOpenAIHandler)
-    mock_llm_thread = Thread(target=mock_llm_server.serve_forever, daemon=True)
-    mock_llm_thread.start()
-
-    # Start main test server
-    server_address: Tuple[str, int] = ("0.0.0.0", _PORT)
-    server = ThreadingHTTPServer(server_address, RequestHandler)
-    atexit.register(server.shutdown)
-    atexit.register(mock_llm_server.shutdown)
-    server_thread = Thread(target=server.serve_forever)
-    server_thread.start()
-    print("Ready")
-    server_thread.join()
+app = Starlette(routes=[Route("/{path:path}", handle_request, methods=["GET"])])
 
 
 if __name__ == "__main__":
-    main()
+    start_servers(app)

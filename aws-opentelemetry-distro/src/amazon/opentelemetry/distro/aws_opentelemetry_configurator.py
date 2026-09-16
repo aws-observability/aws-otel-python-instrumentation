@@ -22,6 +22,7 @@ from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSample
 from amazon.opentelemetry.distro.attribute_propagating_span_processor_builder import (
     AttributePropagatingSpanProcessorBuilder,
 )
+from amazon.opentelemetry.distro.attribute_redacting_span_processor import AttributeRedactingSpanProcessor
 from amazon.opentelemetry.distro.aws_batch_unsampled_span_processor import BatchUnsampledSpanProcessor
 from amazon.opentelemetry.distro.aws_lambda_span_processor import AwsLambdaSpanProcessor
 from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder import (
@@ -31,7 +32,7 @@ from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSp
 from amazon.opentelemetry.distro.exporter.console.logs.compact_console_log_exporter import (
     CompactConsoleLogRecordExporter,
 )
-from amazon.opentelemetry.distro.gen_ai_nested_client_span_processor import GenAiNestedClientSpanProcessor
+from amazon.opentelemetry.distro.gen_ai_nested_client_span_processor import GenAINestedClientSpanProcessor
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler._aws_xray_adaptive_sampling_config import (
     _AnomalyCaptureLimit,
@@ -109,7 +110,6 @@ OTEL_EXPORTER_OTLP_TRACES_ENDPOINT = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
 OTEL_EXPORTER_OTLP_LOGS_ENDPOINT = "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"
 OTEL_EXPORTER_OTLP_METRICS_ENDPOINT = "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"
 OTEL_EXPORTER_OTLP_LOGS_HEADERS = "OTEL_EXPORTER_OTLP_LOGS_HEADERS"
-OTEL_AWS_ENHANCED_CODE_ATTRIBUTES = "OTEL_AWS_EXPERIMENTAL_CODE_ATTRIBUTES"
 AWS_XRAY_ADAPTIVE_SAMPLING_CONFIG = "AWS_XRAY_ADAPTIVE_SAMPLING_CONFIG"
 
 OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS = "OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS"
@@ -338,6 +338,15 @@ def _init_tracing(
         sampler=sampler,
         resource=resource,
     )
+
+    # This processor modifies span kind in on_end, so it must run before batch
+    # processors to ensure exporters observe the updated kind.
+    if is_agent_observability_enabled():
+        trace_provider.add_span_processor(GenAINestedClientSpanProcessor())
+
+    # This processor modifies attributes in on_end, so it must run before batch
+    # processors to ensure exporters observe the redacted values.
+    trace_provider.add_span_processor(AttributeRedactingSpanProcessor())
 
     for _, exporter_class in exporters.items():
         exporter_args: Dict[str, any] = {}
@@ -586,13 +595,6 @@ def _customize_logs_exporter(log_exporter: LogRecordExporter) -> LogRecordExport
 
 
 def _customize_span_processors(provider: TracerProvider, resource: Resource, sampler: Sampler) -> None:
-
-    if is_enhanced_code_attributes() is True:
-        # pylint: disable=import-outside-toplevel
-        from amazon.opentelemetry.distro.code_correlation import CodeAttributesSpanProcessor
-
-        provider.add_span_processor(CodeAttributesSpanProcessor())
-
     # Add LambdaSpanProcessor to list of processors regardless of application signals.
     if _is_lambda_environment():
         provider.add_span_processor(AwsLambdaSpanProcessor())
@@ -606,7 +608,6 @@ def _customize_span_processors(provider: TracerProvider, resource: Resource, sam
     # and quality degradation that sampling could miss.
     if is_agent_observability_enabled():
         _export_unsampled_span_for_agent_observability(provider, resource)
-        provider.add_span_processor(GenAiNestedClientSpanProcessor())
         baggage_keys.add("session.id")
 
     provider.add_span_processor(BaggageSpanProcessor(lambda key: key in baggage_keys))
@@ -763,23 +764,6 @@ def _is_application_signals_runtime_enabled():
     return _is_application_signals_enabled() and (
         os.environ.get(APPLICATION_SIGNALS_RUNTIME_ENABLED_CONFIG, "true").lower() == "true"
     )
-
-
-def is_enhanced_code_attributes() -> bool:
-    """
-    Get the enhanced code attributes enabled status from environment variable.
-
-    Returns:
-        True if OTEL_AWS_ENHANCED_CODE_ATTRIBUTES is set to 'true'
-        else False
-    """
-    env_value = os.environ.get(OTEL_AWS_ENHANCED_CODE_ATTRIBUTES, "false")
-
-    env_value_lower = env_value.strip().lower()
-    if env_value_lower == "true":
-        return True
-
-    return False
 
 
 def _is_lambda_environment():

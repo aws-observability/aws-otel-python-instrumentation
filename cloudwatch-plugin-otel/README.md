@@ -6,13 +6,14 @@ Amazon CloudWatch plugin for OpenTelemetry.
 
 The span metrics instrumentor registers a span processor that emits:
 
-- `traces.span.metrics.calls`, a counter incremented once per ended span.
+- `traces.span.metrics.calls`, a counter (unit `{call}`) incremented once per ended span.
 - `traces.span.metrics.duration`, a histogram of span duration in seconds.
 
 Both metrics use the `cloudwatch.plugin.otel.span_metrics` instrumentation
-scope. They include `service.name`, `span.name`, `span.kind`, `status.code`, and
-supported HTTP, RPC, database, messaging, and error semantic-convention
-attributes when those attributes are present on the span.
+scope. They include `span.name`, `span.kind`, `status.code`, and supported
+HTTP, RPC, database, messaging, and error semantic-convention attributes when
+those attributes are present on the span. `service.name` is carried by the
+metric's resource (the host SDK's resource), not duplicated on each datapoint.
 
 The instrumentor also wraps the active root sampler. A `DROP` decision becomes
 `RECORD_ONLY`, allowing the span processor to derive metrics without changing

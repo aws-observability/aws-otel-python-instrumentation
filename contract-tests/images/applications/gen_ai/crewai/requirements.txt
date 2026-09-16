@@ -1,1 +1,3 @@
-crewai>=1.9.0
+crewai[bedrock]>=1.10.0
+starlette
+uvicorn

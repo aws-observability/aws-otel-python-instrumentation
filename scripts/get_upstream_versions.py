@@ -13,7 +13,6 @@ import requests
 INDEPENDENT_DEPS = [
     "opentelemetry-sdk-extension-aws",
     "opentelemetry-propagator-aws-xray",
-    "opentelemetry-instrumentation-openai-agents-v2",
 ]
 
 

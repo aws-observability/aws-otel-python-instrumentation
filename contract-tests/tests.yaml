@@ -20,7 +20,6 @@ tests:
   - name: requests
     paths:
       - requests
-      - misc/code_attributes_test.py
     versions:
       - "3.10"
       - "3.11"
@@ -28,8 +27,6 @@ tests:
       - "3.13"
       - "3.14"
   - name: django
-    # misc/ is split by app image: code_attributes_test uses the requests image (in the requests
-    # entry); the rest use the django image, listed explicitly here.
     paths:
       - django
       - runtime

@@ -7,12 +7,13 @@ import asyncio
 import json
 import os
 import sys
+import threading
 import unittest
 from typing import Any, Dict, Optional, Sequence
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
-from conftest import validate_otel_genai_schema
+from conftest import call_mock_llm, validate_otel_genai_schema
 
 if sys.version_info < (3, 10) or sys.version_info >= (3, 14):
     raise unittest.SkipTest("crewai requires >=3.10, <3.14")
@@ -20,6 +21,7 @@ if sys.version_info < (3, 10) or sys.version_info >= (3, 14):
 from crewai import LLM, Agent, Crew, Task
 from crewai.events import crewai_event_bus
 from crewai.events.types.llm_events import LLMCallCompletedEvent, LLMCallStartedEvent, LLMCallType
+from crewai.llms.base_llm import BaseLLM, llm_call_context
 from crewai.tools import tool
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
@@ -27,6 +29,7 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
     OPERATION_INVOKE_WORKFLOW,
 )
 from amazon.opentelemetry.distro.instrumentation.crewai import CrewAIInstrumentor
+from opentelemetry.instrumentation.threading import ThreadingInstrumentor
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -38,14 +41,19 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_OPERATION_NAME,
     GEN_AI_OUTPUT_MESSAGES,
     GEN_AI_PROVIDER_NAME,
+    GEN_AI_REQUEST_CHOICE_COUNT,
     GEN_AI_REQUEST_FREQUENCY_PENALTY,
     GEN_AI_REQUEST_MAX_TOKENS,
     GEN_AI_REQUEST_MODEL,
     GEN_AI_REQUEST_PRESENCE_PENALTY,
+    GEN_AI_REQUEST_SEED,
     GEN_AI_REQUEST_STOP_SEQUENCES,
+    GEN_AI_REQUEST_STREAM,
     GEN_AI_REQUEST_TEMPERATURE,
+    GEN_AI_REQUEST_TOP_K,
     GEN_AI_REQUEST_TOP_P,
     GEN_AI_RESPONSE_FINISH_REASONS,
+    GEN_AI_RESPONSE_ID,
     GEN_AI_RESPONSE_MODEL,
     GEN_AI_SYSTEM_INSTRUCTIONS,
     GEN_AI_TOOL_CALL_ARGUMENTS,
@@ -54,8 +62,11 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_TOOL_DESCRIPTION,
     GEN_AI_TOOL_NAME,
     GEN_AI_TOOL_TYPE,
+    GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS,
+    GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS,
     GEN_AI_USAGE_INPUT_TOKENS,
     GEN_AI_USAGE_OUTPUT_TOKENS,
+    GEN_AI_USAGE_REASONING_OUTPUT_TOKENS,
     GenAiProviderNameValues,
 )
 from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
@@ -73,8 +84,11 @@ class TestCrewAIInstrumentor(TestCase):
         self.tracer_provider.add_span_processor(SimpleSpanProcessor(self.span_exporter))
         self.instrumentor = CrewAIInstrumentor()
         self.instrumentor.instrument(tracer_provider=self.tracer_provider)
+        self.threading_instrumentor = ThreadingInstrumentor()
+        self.threading_instrumentor.instrument()
 
     def tearDown(self):
+        self.threading_instrumentor.uninstrument()
         self.instrumentor.uninstrument()
         self.span_exporter.clear()
         self._restore_env()
@@ -97,8 +111,96 @@ class TestCrewAIInstrumentor(TestCase):
             "anthropic.claude-3-haiku-20240307-v1:0",
         )
 
+        self.span_exporter.clear()
+        model = "anthropic.claude-fable-5"
+        llm = LLM(
+            model=f"bedrock/{model}",
+            temperature=0.7,
+            top_p=0.9,
+            max_tokens=100,
+            stream=False,
+            additional_model_request_fields={"top_k": 40},
+            region_name="us-east-1",
+            aws_access_key_id="fake-key",
+            aws_secret_access_key="fake-key",
+        )
+        llm.stop = "STOP"
+
+        def invoke_llm(client):
+            # CrewAI has no public seam for replacing the provider client with the mock transport.
+            if hasattr(llm, "_client"):
+                llm._client = client
+            else:
+                llm.client = client
+            llm.call([{"role": "user", "content": "Hello"}])
+
+        call_mock_llm("bedrock", invoke_llm_callback=invoke_llm)
+
+        chat_span = self._find_span(f"chat {model}")
+        self.assertIsNotNone(chat_span)
+        self.assertEqual(chat_span.attributes[GEN_AI_PROVIDER_NAME], GenAiProviderNameValues.AWS_BEDROCK.value)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_MODEL], model)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_TEMPERATURE], 0.7)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_TOP_P], 0.9)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_TOP_K], 40)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_MAX_TOKENS], 100)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_STOP_SEQUENCES], ("STOP",))
+        self.assertIs(chat_span.attributes[GEN_AI_REQUEST_STREAM], False)
+
     def test_openai_crew_kickoff(self):
         self._run_crew_kickoff_test("openai/gpt-4", GenAiProviderNameValues.OPENAI.value, "gpt-4")
+
+        from amazon.opentelemetry.distro.instrumentation.crewai._event_handler import OpenTelemetryEventHandler
+
+        attributes = {}
+        OpenTelemetryEventHandler._set_llm_request_span_attributes(
+            attributes, LLM(model="openai/gpt-4", is_litellm=True)
+        )
+        self.assertNotIn(GEN_AI_REQUEST_STOP_SEQUENCES, attributes)
+
+        model = "gpt-5.6-sol"
+
+        for provider, is_litellm in (("openai", False), ("litellm", True)):
+            with self.subTest(client=provider):
+                self.span_exporter.clear()
+                llm = LLM(
+                    model=f"openai/{model}",
+                    is_litellm=is_litellm,
+                    temperature=1.0,
+                    top_p=0.9,
+                    max_completion_tokens=100,
+                    frequency_penalty=0.5,
+                    presence_penalty=0.3,
+                    seed=42,
+                    stream=False,
+                    n=2,
+                    stop=["STOP"],
+                )
+
+                def invoke_llm(client):
+                    if client is not None:
+                        # CrewAI has no public seam for replacing the provider client with the mock transport.
+                        if hasattr(llm, "_client"):
+                            llm._client = client
+                        else:
+                            llm.client = client
+                    llm.call([{"role": "user", "content": "Hello"}])
+
+                call_mock_llm(provider, invoke_llm_callback=invoke_llm)
+
+                chat_span = self._find_span(f"chat {model}")
+                self.assertIsNotNone(chat_span)
+                self.assertEqual(chat_span.attributes[GEN_AI_PROVIDER_NAME], GenAiProviderNameValues.OPENAI.value)
+                self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_MODEL], model)
+                self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_TEMPERATURE], 1.0)
+                self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_TOP_P], 0.9)
+                self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_MAX_TOKENS], 100)
+                self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_FREQUENCY_PENALTY], 0.5)
+                self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_PRESENCE_PENALTY], 0.3)
+                self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_STOP_SEQUENCES], ("STOP",))
+                self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_SEED], 42)
+                self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_CHOICE_COUNT], 2)
+                self.assertIs(chat_span.attributes[GEN_AI_REQUEST_STREAM], False)
 
     def test_anthropic_crew_kickoff(self):
         self._run_crew_kickoff_test(
@@ -106,6 +208,110 @@ class TestCrewAIInstrumentor(TestCase):
             GenAiProviderNameValues.ANTHROPIC.value,
             "claude-3-sonnet-20240229",
         )
+
+        self.span_exporter.clear()
+        model = "claude-fable-5"
+        llm = LLM(
+            model=f"anthropic/{model}",
+            temperature=1.0,
+            top_p=0.9,
+            top_k=40,
+            max_tokens=100,
+            stream=False,
+        )
+        llm.stop = ["STOP"]
+        if hasattr(llm, "stop_sequences"):
+            llm.stop_sequences = ["STOP"]
+
+        def invoke_llm(client):
+            # CrewAI has no public seam for replacing the provider client with the mock transport.
+            if hasattr(llm, "_client"):
+                llm._client = client
+            else:
+                llm.client = client
+            llm.call([{"role": "user", "content": "Hello"}])
+
+        call_mock_llm("anthropic", invoke_llm_callback=invoke_llm)
+
+        chat_span = self._find_span(f"chat {model}")
+        self.assertIsNotNone(chat_span)
+        self.assertEqual(chat_span.attributes[GEN_AI_PROVIDER_NAME], GenAiProviderNameValues.ANTHROPIC.value)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_MODEL], model)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_TEMPERATURE], 1.0)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_TOP_P], 0.9)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_TOP_K], 40)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_MAX_TOKENS], 100)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_STOP_SEQUENCES], ("STOP",))
+        self.assertIs(chat_span.attributes[GEN_AI_REQUEST_STREAM], False)
+
+    def test_llm_call_uses_effective_request_attributes_from_started_event(self):
+        if "temperature" not in LLMCallStartedEvent.model_fields:
+            self.skipTest("crewai <1.11.0 does not report effective request attributes on LLMCallStartedEvent")
+
+        llm = LLM(
+            model="openai/gpt-4",
+            is_litellm=True,
+            temperature=0.7,
+            top_p=0.9,
+            max_tokens=200,
+            frequency_penalty=0.5,
+            presence_penalty=0.3,
+            seed=42,
+            stream=True,
+            n=1,
+            stop=["SOURCE_STOP"],
+        )
+        start_event = LLMCallStartedEvent(
+            call_id="c1",
+            messages=[{"role": "user", "content": "Hello"}],
+            temperature=0.0,
+            top_p=0.0,
+            max_tokens=100,
+            frequency_penalty=0.0,
+            presence_penalty=0.0,
+            seed=0,
+            stream=False,
+            n=2,
+            stop_sequences=["EVENT_STOP"],
+        )
+        crewai_event_bus.emit(llm, start_event)
+        crewai_event_bus.emit(
+            llm,
+            LLMCallCompletedEvent(
+                call_id="c1",
+                response="Hello",
+                call_type=LLMCallType.LLM_CALL,
+                started_event_id=start_event.event_id,
+                finish_reason="length",
+                response_id="resp_123",
+                usage={
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "cached_prompt_tokens": 3,
+                    "cache_creation_tokens": 2,
+                    "reasoning_tokens": 4,
+                },
+            ),
+        )
+
+        chat_span = self._find_span("chat gpt-4")
+        self.assertIsNotNone(chat_span)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_TEMPERATURE], 0.0)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_TOP_P], 0.0)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_MAX_TOKENS], 100)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_FREQUENCY_PENALTY], 0.0)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_PRESENCE_PENALTY], 0.0)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_SEED], 0)
+        self.assertIs(chat_span.attributes[GEN_AI_REQUEST_STREAM], False)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_CHOICE_COUNT], 2)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_STOP_SEQUENCES], ("EVENT_STOP",))
+        self.assertEqual(chat_span.attributes[GEN_AI_RESPONSE_FINISH_REASONS], ("length",))
+        self.assertEqual(chat_span.attributes[GEN_AI_RESPONSE_ID], "resp_123")
+        self.assertEqual(chat_span.attributes[GEN_AI_USAGE_INPUT_TOKENS], 10)
+        self.assertEqual(chat_span.attributes[GEN_AI_USAGE_OUTPUT_TOKENS], 5)
+        self.assertEqual(chat_span.attributes[GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS], 3)
+        self.assertEqual(chat_span.attributes[GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS], 2)
+        self.assertEqual(chat_span.attributes[GEN_AI_USAGE_REASONING_OUTPUT_TOKENS], 4)
 
     def test_azure_crew_kickoff(self):
         self._run_crew_kickoff_test("azure/gpt-4", GenAiProviderNameValues.AZURE_AI_OPENAI.value, "gpt-4")
@@ -369,6 +575,218 @@ class TestCrewAIInstrumentor(TestCase):
         self._assert_span_parent(self._find_span("execute_tool tool_b"), agent_span)
         self._assert_spans_all_ended()
 
+    def test_async_task_parenting(self):
+        llm_a = LLM(model="openai/gpt-4", is_litellm=True)
+        llm_b = LLM(model="openai/gpt-4", is_litellm=True)
+        llm_c = LLM(model="openai/gpt-4", is_litellm=True)
+        agent_a = Agent(role="AsyncTaskA", goal="Complete A", backstory="Async A.", llm=llm_a, tools=[])
+        agent_b = Agent(role="AsyncTaskB", goal="Complete B", backstory="Async B.", llm=llm_b, tools=[])
+        agent_c = Agent(role="AsyncTaskC", goal="Combine results", backstory="Combine.", llm=llm_c, tools=[])
+        task_a = Task(
+            description="Complete async task A.",
+            expected_output="A.",
+            agent=agent_a,
+            async_execution=True,
+        )
+        task_b = Task(
+            description="Complete async task B.",
+            expected_output="B.",
+            agent=agent_b,
+            async_execution=True,
+        )
+        task_c = Task(
+            description="Combine async task results.",
+            expected_output="Combined.",
+            agent=agent_c,
+            context=[task_a, task_b],
+        )
+        crew = Crew(
+            name="AsyncTaskCrew",
+            agents=[agent_a, agent_b, agent_c],
+            tasks=[task_a, task_b, task_c],
+        )
+
+        with patch("litellm.completion", return_value=self._mock_response("Final Answer: Done")):
+            crew.kickoff()
+
+        crew_span = self._find_span("invoke_workflow AsyncTaskCrew")
+        for role in ("AsyncTaskA", "AsyncTaskB", "AsyncTaskC"):
+            self._assert_span_parent(self._find_span(f"invoke_agent {role}"), crew_span)
+        self._assert_spans_all_ended()
+
+    def test_multiple_tool_calls(self):
+        @tool
+        def tool_a(value: str) -> str:
+            """Tool A."""
+            return f"A: {value}"
+
+        @tool
+        def tool_b(value: str) -> str:
+            """Tool B."""
+            return f"B: {value}"
+
+        llm = LLM(model="openai/gpt-4", is_litellm=True)
+        llm.supports_function_calling = lambda: True
+        agent = Agent(role="Parallel", goal="Use tools", backstory="Agent.", llm=llm, tools=[tool_a, tool_b])
+        crew = Crew(
+            name="ParallelToolCrew",
+            agents=[agent],
+            tasks=[Task(description="Use both tools.", expected_output="Results.", agent=agent)],
+        )
+
+        with patch(
+            "litellm.completion",
+            side_effect=[
+                self._mock_response(
+                    tool_calls=[
+                        self._mock_tool_call("c1", "tool_a", '{"value": "1"}'),
+                        self._mock_tool_call("c2", "tool_b", '{"value": "2"}'),
+                    ]
+                ),
+                self._mock_response("Final Answer: Done!"),
+            ],
+        ):
+            crew.kickoff()
+
+        agent_span = self._find_span("invoke_agent Parallel")
+        self._assert_span_parent(self._find_span("execute_tool tool_a"), agent_span)
+        self._assert_span_parent(self._find_span("execute_tool tool_b"), agent_span)
+        chat_spans = [span for span in self.span_exporter.get_finished_spans() if span.name == "chat gpt-4"]
+        self.assertEqual(len(chat_spans), 2)
+        self.assertTrue(all(span.parent.span_id == agent_span.context.span_id for span in chat_spans))
+        tool_call_names = [
+            part["name"]
+            for span in chat_spans
+            if GEN_AI_OUTPUT_MESSAGES in span.attributes
+            for message in json.loads(span.attributes[GEN_AI_OUTPUT_MESSAGES])
+            for part in message["parts"]
+            if part["type"] == "tool_call"
+        ]
+        self.assertCountEqual(tool_call_names, ["tool_a", "tool_b"])
+        self._assert_spans_all_ended()
+
+    def test_native_tool_failure_does_not_end_agent_span(self):
+        @tool
+        def bad_native_tool(value: str) -> str:
+            """A native-provider tool that fails."""
+            raise ValueError(f"Tool failed: {value}")
+
+        class NativeToolFailureLLM(BaseLLM):
+            def supports_function_calling(self):
+                return True
+
+            def call(
+                self,
+                messages,
+                tools=None,
+                callbacks=None,
+                available_functions=None,
+                from_task=None,
+                from_agent=None,
+                response_model=None,
+            ):
+                with llm_call_context():
+                    native_functions = {bad_native_tool.name: bad_native_tool.func}
+                    self._emit_call_started_event(
+                        messages,
+                        tools,
+                        callbacks,
+                        native_functions,
+                        from_task,
+                        from_agent,
+                    )
+                    self._handle_tool_execution(
+                        bad_native_tool.name,
+                        {"value": "x"},
+                        native_functions,
+                        from_task,
+                        from_agent,
+                    )
+                    return "Final Answer: Recovered from tool failure."
+
+        llm = NativeToolFailureLLM(model="native-test", provider="openai")
+        agent = Agent(
+            role="NativeTool",
+            goal="Use a tool",
+            backstory="Agent.",
+            llm=llm,
+            tools=[bad_native_tool],
+        )
+        task = Task(description="Use the native tool.", expected_output="Result.", agent=agent)
+        crew = Crew(name="NativeToolCrew", agents=[agent], tasks=[task])
+
+        crew.kickoff()
+
+        crew_span = self._find_span("invoke_workflow NativeToolCrew")
+        agent_span = self._find_span("invoke_agent NativeTool")
+        tool_span = self._find_span("execute_tool bad_native_tool")
+        self.assertEqual(tool_span.status.status_code.name, "ERROR")
+        self.assertEqual(agent_span.status.status_code.name, "OK")
+        self._assert_span_parent(agent_span, crew_span)
+        self._assert_span_parent(tool_span, agent_span)
+        self._assert_spans_all_ended()
+
+    def test_retry_cleanup(self):
+        class RetryLLM(BaseLLM):
+            def __init__(self, **kwargs):
+                super().__init__(**kwargs)
+                object.__setattr__(self, "attempts", 0)
+
+            def call(
+                self,
+                messages,
+                tools=None,
+                callbacks=None,
+                available_functions=None,
+                from_task=None,
+                from_agent=None,
+                response_model=None,
+            ):
+                with llm_call_context():
+                    self._emit_call_started_event(
+                        messages,
+                        tools,
+                        callbacks,
+                        available_functions,
+                        from_task,
+                        from_agent,
+                    )
+                    object.__setattr__(self, "attempts", self.attempts + 1)
+                    if self.attempts == 1:
+                        self._emit_call_failed_event("Transient failure", from_task, from_agent)
+                        raise ValueError("Transient failure")
+                    response = "Final Answer: Retry succeeded."
+                    self._emit_call_completed_event(
+                        response,
+                        LLMCallType.LLM_CALL,
+                        from_task,
+                        from_agent,
+                        messages,
+                    )
+                    return response
+
+        llm = RetryLLM(model="retry-test", provider="openai")
+        agent = Agent(
+            role="RetryAgent",
+            goal="Retry once",
+            backstory="Agent.",
+            llm=llm,
+            tools=[],
+            max_retry_limit=1,
+        )
+        task = Task(description="Retry once.", expected_output="Success.", agent=agent)
+        crew = Crew(name="RetryCrew", agents=[agent], tasks=[task])
+
+        crew.kickoff()
+
+        self.assertEqual(llm.attempts, 2)
+        agent_spans = [
+            span for span in self.span_exporter.get_finished_spans() if span.name == "invoke_agent RetryAgent"
+        ]
+        self.assertEqual(len(agent_spans), 2)
+        self.assertTrue(any(span.status.status_code.name == "OK" for span in agent_spans))
+        self._assert_spans_all_ended()
+
     def test_multiple_agents_sequential_tasks(self):
         @tool
         def t1(v: str) -> str:
@@ -627,6 +1045,313 @@ class TestCrewAIInstrumentor(TestCase):
         self._assert_span_parent(a2_span, crew_span)
         self._assert_spans_all_ended()
 
+    def test_concurrent_crews_have_isolated_span_cleanup(self):
+        crew_a_entered_llm = threading.Event()
+        crew_b_entered_llm = threading.Event()
+        crew_a_completed = threading.Event()
+
+        shared_llm = LLM(model="openai/gpt-4o-mini", is_litellm=True)
+        agent_a = Agent(role="ConcurrentA", goal="Complete A", backstory="A.", llm=shared_llm, tools=[])
+        agent_b = Agent(role="ConcurrentB", goal="Complete B", backstory="B.", llm=shared_llm, tools=[])
+        crew_a = Crew(
+            name="ConcurrentCrewA",
+            agents=[agent_a],
+            tasks=[Task(description="Run A.", expected_output="A.", agent=agent_a)],
+        )
+        crew_b = Crew(
+            name="ConcurrentCrewB",
+            agents=[agent_b],
+            tasks=[Task(description="Run B.", expected_output="B.", agent=agent_b)],
+        )
+
+        def wait_for(event: threading.Event, description: str) -> None:
+            if not event.wait(timeout=10):
+                raise TimeoutError(f"Timed out waiting for {description}")
+
+        def coordinated_response(messages):
+            prompt = str(messages)
+            if "Run A." in prompt:
+                crew_a_entered_llm.set()
+                wait_for(crew_b_entered_llm, "Crew B to enter its LLM call")
+                return self._mock_response("Final Answer: A")
+            if "Run B." in prompt:
+                crew_b_entered_llm.set()
+                wait_for(crew_a_entered_llm, "Crew A to enter its LLM call")
+                wait_for(crew_a_completed, "Crew A to complete")
+                return self._mock_response("Final Answer: B")
+            raise AssertionError(f"Unexpected messages: {messages}")
+
+        async def mock_acompletion(*args, **kwargs):
+            return await asyncio.to_thread(coordinated_response, kwargs.get("messages"))
+
+        def mock_completion(*args, **kwargs):
+            return coordinated_response(kwargs.get("messages"))
+
+        async def run():
+            async def run_crew_a():
+                result = await crew_a.akickoff()
+                crew_a_completed.set()
+                return result
+
+            with patch("litellm.acompletion", side_effect=mock_acompletion), patch(
+                "litellm.completion", side_effect=mock_completion
+            ):
+                await asyncio.wait_for(
+                    asyncio.gather(run_crew_a(), crew_b.akickoff()),
+                    timeout=20,
+                )
+
+        asyncio.run(run())
+
+        workflow_a = self._find_span("invoke_workflow ConcurrentCrewA")
+        workflow_b = self._find_span("invoke_workflow ConcurrentCrewB")
+        agent_span_a = self._find_span("invoke_agent ConcurrentA")
+        agent_span_b = self._find_span("invoke_agent ConcurrentB")
+        self.assertIsNotNone(workflow_a)
+        self.assertIsNotNone(workflow_b)
+        self.assertIsNotNone(agent_span_a)
+        self.assertIsNotNone(agent_span_b)
+        self._assert_span_parent(agent_span_a, workflow_a)
+        self._assert_span_parent(agent_span_b, workflow_b)
+        self._assert_spans_all_ended()
+
+    def test_concurrent_crew_trace_map(self):
+        crew_a_entered_llm = threading.Event()
+        crew_b_entered_llm = threading.Event()
+        crew_a_completed = threading.Event()
+        test_tracer = self.tracer_provider.get_tracer("test")
+
+        shared_llm = LLM(model="openai/gpt-4o-mini", is_litellm=True)
+        agent_a = Agent(role="ConcurrentA", goal="Complete A", backstory="A.", llm=shared_llm, tools=[])
+        agent_b = Agent(role="ConcurrentB", goal="Complete B", backstory="B.", llm=shared_llm, tools=[])
+        crew_a = Crew(
+            name="ConcurrentCrewA",
+            agents=[agent_a],
+            tasks=[Task(description="Run A.", expected_output="A.", agent=agent_a)],
+        )
+        crew_b = Crew(
+            name="ConcurrentCrewB",
+            agents=[agent_b],
+            tasks=[Task(description="Run B.", expected_output="B.", agent=agent_b)],
+        )
+
+        def wait_for(event: threading.Event, description: str) -> None:
+            if not event.wait(timeout=10):
+                raise TimeoutError(f"Timed out waiting for {description}")
+
+        def coordinated_response(messages):
+            prompt = str(messages)
+            if "Run A." in prompt:
+                crew_a_entered_llm.set()
+                wait_for(crew_b_entered_llm, "Crew B to enter its LLM call")
+                return self._mock_response("Final Answer: A")
+            if "Run B." in prompt:
+                crew_b_entered_llm.set()
+                wait_for(crew_a_entered_llm, "Crew A to enter its LLM call")
+                wait_for(crew_a_completed, "Crew A to complete")
+                return self._mock_response("Final Answer: B")
+            raise AssertionError(f"Unexpected messages: {messages}")
+
+        async def mock_acompletion(*args, **kwargs):
+            return await asyncio.to_thread(coordinated_response, kwargs.get("messages"))
+
+        def mock_completion(*args, **kwargs):
+            return coordinated_response(kwargs.get("messages"))
+
+        async def run():
+            async def run_crew_a():
+                with test_tracer.start_as_current_span("concurrent_request_a"):
+                    result = await crew_a.akickoff()
+                    crew_a_completed.set()
+                    return result
+
+            async def run_crew_b():
+                with test_tracer.start_as_current_span("concurrent_request_b"):
+                    return await crew_b.akickoff()
+
+            with patch("litellm.acompletion", side_effect=mock_acompletion), patch(
+                "litellm.completion", side_effect=mock_completion
+            ):
+                await asyncio.wait_for(
+                    asyncio.gather(run_crew_a(), run_crew_b()),
+                    timeout=20,
+                )
+
+        asyncio.run(run())
+
+        workflow_a = self._find_span("invoke_workflow ConcurrentCrewA")
+        workflow_b = self._find_span("invoke_workflow ConcurrentCrewB")
+        agent_span_a = self._find_span("invoke_agent ConcurrentA")
+        agent_span_b = self._find_span("invoke_agent ConcurrentB")
+        request_a = self._find_span("concurrent_request_a")
+        request_b = self._find_span("concurrent_request_b")
+        self.assertIsNotNone(workflow_a)
+        self.assertIsNotNone(workflow_b)
+        self.assertIsNotNone(agent_span_a)
+        self.assertIsNotNone(agent_span_b)
+        self._assert_span_parent(workflow_a, request_a)
+        self._assert_span_parent(workflow_b, request_b)
+        self._assert_span_parent(agent_span_a, workflow_a)
+        self._assert_span_parent(agent_span_b, workflow_b)
+        self.assertNotEqual(request_a.context.trace_id, request_b.context.trace_id)
+        self._assert_trace_spans(
+            request_a,
+            [
+                "concurrent_request_a",
+                "invoke_workflow ConcurrentCrewA",
+                "invoke_agent ConcurrentA",
+                "chat gpt-4o-mini",
+            ],
+        )
+        self._assert_trace_spans(
+            request_b,
+            [
+                "concurrent_request_b",
+                "invoke_workflow ConcurrentCrewB",
+                "invoke_agent ConcurrentB",
+                "chat gpt-4o-mini",
+            ],
+        )
+        self._assert_spans_all_ended()
+
+    def test_concurrent_crew_same_instance_isolation(self):
+        first_call_entered = threading.Event()
+        release_first_call = threading.Event()
+        call_count_lock = threading.Lock()
+        call_count = 0
+        llm = LLM(model="openai/gpt-4o-mini", is_litellm=True)
+        agent = Agent(
+            role="SharedCrewAgent",
+            goal="Complete task",
+            backstory="Agent.",
+            llm=llm,
+            tools=[],
+            max_retry_limit=0,
+        )
+        crew = Crew(
+            name="SharedCrew",
+            agents=[agent],
+            tasks=[Task(description="Run shared crew.", expected_output="Done.", agent=agent)],
+        )
+
+        def concurrent_response(*args, **kwargs):
+            nonlocal call_count
+            with call_count_lock:
+                call_count += 1
+                current_call = call_count
+            if current_call == 1:
+                first_call_entered.set()
+                if not release_first_call.wait(timeout=10):
+                    raise TimeoutError("Timed out waiting to release the first LLM call")
+            return self._mock_response("Final Answer: Done")
+
+        def kickoff_result():
+            try:
+                return crew.kickoff()
+            except Exception as error:  # pylint: disable=broad-except
+                return error
+
+        async def run():
+            with patch("litellm.completion", side_effect=concurrent_response):
+                first_kickoff = asyncio.create_task(asyncio.to_thread(kickoff_result))
+                entered = await asyncio.to_thread(first_call_entered.wait, 10)
+                if not entered:
+                    raise TimeoutError("Timed out waiting for the first LLM call")
+                try:
+                    second_result = await asyncio.to_thread(kickoff_result)
+                finally:
+                    release_first_call.set()
+                return await first_kickoff, second_result
+
+        first_result, second_result = asyncio.run(asyncio.wait_for(run(), timeout=20))
+
+        self.assertNotIsInstance(first_result, Exception)
+        if isinstance(second_result, Exception):
+            self.assertIsInstance(second_result, RuntimeError)
+            self.assertIn("already running", str(second_result))
+        workflow_spans = [
+            span for span in self.span_exporter.get_finished_spans() if span.name == "invoke_workflow SharedCrew"
+        ]
+        agent_spans = [
+            span for span in self.span_exporter.get_finished_spans() if span.name == "invoke_agent SharedCrewAgent"
+        ]
+        self.assertEqual(len(workflow_spans), 2)
+        self.assertEqual(len(agent_spans), 2)
+        self.assertIn("OK", [span.status.status_code.name for span in workflow_spans])
+        self.assertCountEqual(
+            [span.parent.span_id for span in agent_spans],
+            [span.context.span_id for span in workflow_spans],
+        )
+        self._assert_spans_all_ended()
+
+    def test_concurrent_crew_failure_isolation(self):
+        crew_b_entered_llm = threading.Event()
+        crew_a_failed = threading.Event()
+        shared_llm = LLM(model="openai/gpt-4o-mini", is_litellm=True)
+        agent_a = Agent(
+            role="FailingConcurrentAgent",
+            goal="Fail",
+            backstory="Agent.",
+            llm=shared_llm,
+            tools=[],
+            max_retry_limit=0,
+        )
+        agent_b = Agent(role="SuccessfulConcurrentAgent", goal="Complete", backstory="Agent.", llm=shared_llm, tools=[])
+        crew_a = Crew(
+            name="FailingConcurrentCrew",
+            agents=[agent_a],
+            tasks=[Task(description="Run failing crew.", expected_output="Failure.", agent=agent_a)],
+        )
+        crew_b = Crew(
+            name="SuccessfulConcurrentCrew",
+            agents=[agent_b],
+            tasks=[Task(description="Run successful crew.", expected_output="Success.", agent=agent_b)],
+        )
+
+        def wait_for(event: threading.Event, description: str) -> None:
+            if not event.wait(timeout=10):
+                raise TimeoutError(f"Timed out waiting for {description}")
+
+        def coordinated_response(*args, **kwargs):
+            messages = str(kwargs.get("messages"))
+            if "Run failing crew." in messages:
+                wait_for(crew_b_entered_llm, "successful crew to enter its LLM call")
+                raise RuntimeError("Crew A failed")
+            if "Run successful crew." in messages:
+                crew_b_entered_llm.set()
+                wait_for(crew_a_failed, "failing crew to finish cleanup")
+                return self._mock_response("Final Answer: Success")
+            raise AssertionError(f"Unexpected messages: {kwargs.get('messages')}")
+
+        def run_failing_crew():
+            try:
+                return crew_a.kickoff()
+            finally:
+                crew_a_failed.set()
+
+        async def run():
+            with patch("litellm.completion", side_effect=coordinated_response):
+                return await asyncio.wait_for(
+                    asyncio.gather(
+                        asyncio.to_thread(run_failing_crew),
+                        asyncio.to_thread(crew_b.kickoff),
+                        return_exceptions=True,
+                    ),
+                    timeout=20,
+                )
+
+        failing_result, successful_result = asyncio.run(run())
+
+        self.assertIsInstance(failing_result, RuntimeError)
+        self.assertNotIsInstance(successful_result, Exception)
+        failing_workflow = self._find_span("invoke_workflow FailingConcurrentCrew")
+        successful_workflow = self._find_span("invoke_workflow SuccessfulConcurrentCrew")
+        successful_agent = self._find_span("invoke_agent SuccessfulConcurrentAgent")
+        self.assertEqual(failing_workflow.status.status_code.name, "ERROR")
+        self.assertEqual(successful_workflow.status.status_code.name, "OK")
+        self._assert_span_parent(successful_agent, successful_workflow)
+        self._assert_spans_all_ended()
+
     def _run_crew_kickoff_test(self, model: str, provider: str, model_id: str):
         test_tracer = self.tracer_provider.get_tracer("test")
         tc = self._mock_tool_call()
@@ -637,7 +1362,16 @@ class TestCrewAIInstrumentor(TestCase):
             with test_tracer.start_as_current_span("custom_downstream_span"):
                 return f"Hello, {name}!"
 
-        llm = LLM(model=model, is_litellm=True, temperature=0.7, max_tokens=1024)
+        llm = LLM(
+            model=model,
+            is_litellm=True,
+            temperature=0.7,
+            top_p=0.9,
+            max_tokens=1024,
+            frequency_penalty=0.1,
+            presence_penalty=0.2,
+            stop=["STOP"],
+        )
         llm.supports_function_calling = lambda: True
         agent = Agent(
             role="Greeter",
@@ -693,9 +1427,13 @@ class TestCrewAIInstrumentor(TestCase):
                 GEN_AI_AGENT_ID: str(crew.agents[0].id),
                 GEN_AI_AGENT_DESCRIPTION: "Greet the user",
                 GEN_AI_REQUEST_TEMPERATURE: 0.7,
+                GEN_AI_REQUEST_TOP_P: 0.9,
                 GEN_AI_REQUEST_MAX_TOKENS: 1024,
+                GEN_AI_REQUEST_FREQUENCY_PENALTY: 0.1,
+                GEN_AI_REQUEST_PRESENCE_PENALTY: 0.2,
             },
         )
+        self.assertIn("STOP", agent_span.attributes[GEN_AI_REQUEST_STOP_SEQUENCES])
 
         agent_input_messages = json.loads(agent_span.attributes[GEN_AI_INPUT_MESSAGES])
         validate_otel_genai_schema(agent_input_messages, "gen-ai-input-messages")
@@ -800,11 +1538,21 @@ class TestCrewAIInstrumentor(TestCase):
             format(parent.context.span_id, "016x"),
         )
 
+    def _assert_trace_spans(self, trace_span: ReadableSpan, expected_names: Sequence[str]):
+        trace_id = trace_span.context.trace_id
+        trace_spans = [span for span in self.span_exporter.get_finished_spans() if span.context.trace_id == trace_id]
+        self.assertCountEqual([span.name for span in trace_spans], expected_names)
+
     def _assert_spans_all_ended(self):
         for span in self.span_exporter.get_finished_spans():
             self.assertIsNotNone(span.end_time, f"Span {span.name} was not ended")
         self.assertEqual(
             len(self.instrumentor._handler._event_id_to_span._data), 0, "Leaked entries in event_id_to_span map"
+        )
+        self.assertEqual(
+            len(self.instrumentor._handler._task_or_agent_id_to_started_llm_event_id._data),
+            0,
+            "Leaked entries in task_or_agent_id_to_started_llm_event_id map",
         )
 
     def _find_span(self, name_contains: str) -> Optional[ReadableSpan]:

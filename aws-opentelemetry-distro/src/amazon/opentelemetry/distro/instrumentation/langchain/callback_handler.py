@@ -1,25 +1,30 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+# pylint: disable=too-many-lines
 
 from __future__ import annotations
 
 import logging
 from contextvars import Token
-from typing import TYPE_CHECKING, Any, Optional
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Literal, Optional
 from uuid import UUID
 
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import convert_to_messages
+from langchain_core.outputs import ChatGenerationChunk, GenerationChunk
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
     PROVIDER_MAP,
     DictWithLock,
     content_to_parts,
+    first_not_none,
     serialize_to_json_string,
     skip_instrumentation_if_suppressed,
     to_tool_attribute_value,
     try_detach,
 )
+from amazon.opentelemetry.distro.instrumentation.langchain.wrapper import PregelWrapper
 from opentelemetry import context
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_AGENT_NAME,
@@ -27,11 +32,14 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_OPERATION_NAME,
     GEN_AI_OUTPUT_MESSAGES,
     GEN_AI_PROVIDER_NAME,
+    GEN_AI_REQUEST_CHOICE_COUNT,
     GEN_AI_REQUEST_FREQUENCY_PENALTY,
     GEN_AI_REQUEST_MAX_TOKENS,
     GEN_AI_REQUEST_MODEL,
     GEN_AI_REQUEST_PRESENCE_PENALTY,
+    GEN_AI_REQUEST_SEED,
     GEN_AI_REQUEST_STOP_SEQUENCES,
+    GEN_AI_REQUEST_STREAM,
     GEN_AI_REQUEST_TEMPERATURE,
     GEN_AI_REQUEST_TOP_K,
     GEN_AI_REQUEST_TOP_P,
@@ -45,8 +53,12 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_TOOL_DESCRIPTION,
     GEN_AI_TOOL_NAME,
     GEN_AI_TOOL_TYPE,
+    GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS,
+    GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS,
     GEN_AI_USAGE_INPUT_TOKENS,
     GEN_AI_USAGE_OUTPUT_TOKENS,
+    GEN_AI_USAGE_REASONING_OUTPUT_TOKENS,
+    GEN_AI_WORKFLOW_NAME,
     GenAiOperationNameValues,
 )
 from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
@@ -63,6 +75,22 @@ _logger = logging.getLogger(__name__)
 
 LANGGRAPH_STEP_SPAN_ATTR = "langgraph.step"
 LANGGRAPH_NODE_SPAN_ATTR = "langgraph.node"
+
+
+@dataclass
+class _AgentContent:
+    input_messages: Optional[list[dict[str, Any]]] = None
+    output_messages: Optional[list[dict[str, Any]]] = None
+    system_instructions: Optional[list[dict[str, Any]]] = None
+
+
+@dataclass
+class _SpanEntry:
+    # Run that created this span, so a skipped child run sharing this entry cannot end it.
+    run_id: UUID
+    span: Span
+    token: Token
+    agent_content: Optional[_AgentContent] = None
 
 
 class _BaseCallbackManagerInitWrapper:
@@ -96,6 +124,8 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         super().__init__()
         self.tracer = tracer
         self.should_suppress_internal_chains = should_suppress_internal_chains
+        # Every callback run maps directly to its own span entry or the nearest
+        # ancestor span entry when that run is intentionally suppressed.
         self.run_id_to_span_map: DictWithLock = DictWithLock()
 
     @skip_instrumentation_if_suppressed
@@ -129,7 +159,14 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
 
         if system_instructions:
             self._set_span_attribute(span, GEN_AI_SYSTEM_INSTRUCTIONS, serialize_to_json_string(system_instructions))
-        self._set_llm_request_span_attributes(span, kwargs, serialized=serialized_kwargs, model_name=model_name)
+        self._set_llm_request_span_attributes(
+            span, kwargs, serialized=serialized_kwargs, model_name=model_name, metadata=metadata
+        )
+        self._update_agent_span_content(
+            run_id,
+            input_messages=conversation or None,
+            system_instructions=system_instructions or None,
+        )
 
     @skip_instrumentation_if_suppressed
     def on_llm_start(
@@ -158,28 +195,49 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         self._set_langgraph_span_attributes(span, metadata)
         self._set_span_attribute(span, GEN_AI_PROVIDER_NAME, provider)
         self._set_span_attribute(span, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.TEXT_COMPLETION.value)
-        self._set_span_attribute(
-            span,
-            GEN_AI_INPUT_MESSAGES,
-            serialize_to_json_string([{"role": "user", "parts": [{"type": "text", "content": p}]} for p in prompts]),
+        input_messages = [{"role": "user", "parts": [{"type": "text", "content": p}]} for p in prompts]
+        self._set_span_attribute(span, GEN_AI_INPUT_MESSAGES, serialize_to_json_string(input_messages))
+        self._set_llm_request_span_attributes(
+            span, kwargs, serialized=serialized_kwargs, model_name=model_name, metadata=metadata
         )
-        self._set_llm_request_span_attributes(span, kwargs, serialized=serialized_kwargs, model_name=model_name)
+        self._update_agent_span_content(
+            run_id,
+            input_messages=input_messages or None,
+        )
 
     @skip_instrumentation_if_suppressed
-    def on_llm_end(self, response: LLMResult, *, run_id: UUID, **kwargs: Any) -> None:
+    def on_llm_end(  # pylint: disable=too-many-locals
+        self, response: LLMResult, *, run_id: UUID, **kwargs: Any
+    ) -> None:
 
-        entry = self._safe_get_span(run_id)
+        entry = self._safe_get_owned_span(run_id)
         if not entry:
+            self._end_span(run_id)
             return
-        span, _ = entry
+        span = entry.span
         llm_output: dict | None = response.llm_output
         model: str | None = (llm_output.get("model_name") or llm_output.get("model_id")) if llm_output else None
         response_id: str | None = llm_output.get("id") if llm_output else None
-        input_tokens, output_tokens = self._extract_token_usage(response)
+        (
+            input_tokens,
+            output_tokens,
+            cache_read_input_tokens,
+            cache_creation_input_tokens,
+            reasoning_output_tokens,
+        ) = self._extract_token_usage(response)
+
+        streamed: bool = False
+        for generations in response.generations:
+            for generation in generations:
+                if isinstance(generation, (ChatGenerationChunk, GenerationChunk)):
+                    streamed = True
+        if streamed:
+            self._set_span_attribute(span, GEN_AI_REQUEST_STREAM, True)
 
         if response.generations:
             output_messages = self._format_lc_llm_output(response.generations)
             self._set_span_attribute(span, GEN_AI_OUTPUT_MESSAGES, serialize_to_json_string(output_messages))
+            self._update_agent_span_content(run_id, output_messages=output_messages or None)
             finish_reasons = [
                 self._extract_finish_reason(getattr(gen, "message", None), getattr(gen, "generation_info", None))
                 for batch in response.generations
@@ -192,11 +250,16 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         self._set_span_attribute(span, GEN_AI_RESPONSE_ID, response_id)
         self._set_span_attribute(span, GEN_AI_USAGE_INPUT_TOKENS, input_tokens)
         self._set_span_attribute(span, GEN_AI_USAGE_OUTPUT_TOKENS, output_tokens)
+        self._set_span_attribute(span, GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS, cache_read_input_tokens)
+        self._set_span_attribute(span, GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS, cache_creation_input_tokens)
+        self._set_span_attribute(span, GEN_AI_USAGE_REASONING_OUTPUT_TOKENS, reasoning_output_tokens)
 
         self._end_span(run_id)
 
     @staticmethod
-    def _extract_token_usage(response: LLMResult) -> tuple[int | None, int | None]:
+    def _extract_token_usage(
+        response: LLMResult,
+    ) -> tuple[int | None, int | None, int | None, int | None, int | None]:
         llm_output = response.llm_output
         usage: dict = (llm_output.get("token_usage") or llm_output.get("usage") or {}) if llm_output else {}
 
@@ -222,7 +285,32 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             or usage.get("output_tokens")
             or usage_metadata.get("output_tokens")
         )
-        return input_tokens, output_tokens
+        input_token_details = usage_metadata.get("input_token_details") or {}
+        output_token_details = usage_metadata.get("output_token_details") or {}
+        cache_read_input_tokens = first_not_none(
+            usage.get("cache_read_input_tokens"),
+            usage.get("cached_prompt_tokens"),
+            input_token_details.get("cache_read"),
+            input_token_details.get("cached_tokens"),
+        )
+        cache_creation_input_tokens = first_not_none(
+            usage.get("cache_creation_input_tokens"),
+            usage.get("cache_creation_tokens"),
+            input_token_details.get("cache_creation"),
+            input_token_details.get("cache_write_tokens"),
+        )
+        reasoning_output_tokens = first_not_none(
+            usage.get("reasoning_tokens"),
+            output_token_details.get("reasoning"),
+            output_token_details.get("reasoning_tokens"),
+        )
+        return (
+            input_tokens,
+            output_tokens,
+            cache_read_input_tokens,
+            cache_creation_input_tokens,
+            reasoning_output_tokens,
+        )
 
     def on_llm_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> None:
         self._handle_error(error, run_id, **kwargs)
@@ -241,6 +329,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
 
         name: str | None = self._get_name_from_callback(serialized, **kwargs)
         if self._should_skip_chain(serialized, name, metadata):
+            self.run_id_to_span_map.put(run_id, self._safe_get_span(parent_run_id))
             return
 
         # AgentExecutor is the legacy LangChain agent node, lc_agent_name metadata was added in
@@ -248,45 +337,98 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         # otherwise if no name is given it defaults to "LangGraph".
         # langgraph_node check ensures we only match against agent nodes, not unwanted
         # internal nodes.
-        is_agent_chain: bool = bool(name) and (
-            "AgentExecutor" in name or name == "LangGraph" or name == (metadata or {}).get("lc_agent_name")
+        # Explicit OTel markers take precedence, while Pregel.stream/astream provides
+        # the automatic fallback for raw StateGraph invocations.
+        chain_metadata = metadata or {}
+        pregel_agent_name = PregelWrapper.get_active_agent_name()
+        declared_agent_name = chain_metadata.get("agent_name")
+        lc_agent_name = chain_metadata.get("lc_agent_name")
+        # Does the explicit OTel agent name belong to the graph currently being classified?
+        does_declared_agent_name_apply = self._does_metadata_name_apply_to_current_graph(
+            name, declared_agent_name, chain_metadata
         )
+        # Does LangChain's native agent name belong to the graph currently being classified?
+        does_lc_agent_name_apply = self._does_metadata_name_apply_to_current_graph(name, lc_agent_name, chain_metadata)
+        chain_type = self._classify_chain(name, metadata)
+        is_agent_chain = chain_type == "agent"
+        is_workflow_chain = chain_type == "workflow"
 
         provider: str | None = self._extract_llm_provider(serialized, kwargs)
-        agent_name: str | None = (metadata.get("lc_agent_name") if metadata else None) or (
-            name if is_agent_chain else None
+        agent_name: str | None = (
+            (
+                (declared_agent_name if does_declared_agent_name_apply else None)
+                or (lc_agent_name if does_lc_agent_name_apply else None)
+                or (pregel_agent_name if name == pregel_agent_name else None)
+                or name
+            )
+            if is_agent_chain
+            else None
         )
-        operation: str = GenAiOperationNameValues.INVOKE_AGENT.value if is_agent_chain else "chain"
-        span_name: str = f"{operation} {name}" if name else operation
+        operation: str = (
+            GenAiOperationNameValues.INVOKE_AGENT.value
+            if is_agent_chain
+            else GenAiOperationNameValues.INVOKE_WORKFLOW.value if is_workflow_chain else "chain"
+        )
+        operation_target = agent_name if is_agent_chain else name
+        span_name: str = f"{operation} {operation_target}" if operation_target else operation
 
         span: Span = self._start_span(run_id, parent_run_id, span_name)
 
         self._set_langgraph_span_attributes(span, metadata)
-        self._set_span_attribute(span, GEN_AI_PROVIDER_NAME, provider)
+        if not is_agent_chain:
+            self._set_span_attribute(span, GEN_AI_PROVIDER_NAME, provider)
         if is_agent_chain:
             self._set_span_attribute(span, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.INVOKE_AGENT.value)
+        if is_workflow_chain:
+            self._set_span_attribute(span, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.INVOKE_WORKFLOW.value)
+            self._set_span_attribute(span, GEN_AI_WORKFLOW_NAME, name)
+
+        if is_agent_chain or is_workflow_chain:
+            if is_agent_chain:
+                entry = self._safe_get_owned_span(run_id)
+                if entry:
+                    entry.agent_content = _AgentContent()
             payload = inputs.get("messages") or inputs.get("input") if isinstance(inputs, dict) else None
             if payload:
-                _, conversation = self._format_lc_messages(
+                system_instructions, conversation = self._format_lc_messages(
                     [convert_to_messages([payload] if isinstance(payload, str) else payload)]
                 )
                 if conversation:
                     self._set_span_attribute(span, GEN_AI_INPUT_MESSAGES, serialize_to_json_string(conversation))
+                self._update_agent_span_content(
+                    run_id,
+                    input_messages=conversation or None,
+                    system_instructions=system_instructions or None,
+                )
         self._set_span_attribute(span, GEN_AI_AGENT_NAME, agent_name)
 
     @skip_instrumentation_if_suppressed
     def on_chain_end(self, outputs: dict[str, Any], *, run_id: UUID, **kwargs: Any) -> None:
-        entry = self._safe_get_span(run_id)
-        if entry:
-            span, _ = entry
-            payload = outputs.get("messages") or outputs.get("output") if isinstance(outputs, dict) else None
-            if payload and GenAiOperationNameValues.INVOKE_AGENT.value in getattr(span, "name", ""):
-                messages = convert_to_messages([payload] if isinstance(payload, str) else payload)
-                _, conversation = self._format_lc_messages([messages])
-                if conversation:
-                    finish_reason = self._extract_finish_reason(messages[-1]) if messages else "stop"
-                    message = {**conversation[-1], "role": "assistant", "finish_reason": finish_reason}
-                    self._set_span_attribute(span, GEN_AI_OUTPUT_MESSAGES, serialize_to_json_string([message]))
+        entry = self._safe_get_owned_span(run_id)
+        if not entry:
+            self._end_span(run_id)
+            return
+
+        span = entry.span
+        payload = outputs.get("messages") or outputs.get("output") if isinstance(outputs, dict) else None
+        is_agent_or_workflow_span = any(
+            operation in getattr(span, "name", "")
+            for operation in (
+                GenAiOperationNameValues.INVOKE_AGENT.value,
+                GenAiOperationNameValues.INVOKE_WORKFLOW.value,
+            )
+        )
+        is_agent_span = GenAiOperationNameValues.INVOKE_AGENT.value in getattr(span, "name", "")
+        if entry.agent_content is not None and is_agent_span:
+            self._set_agent_span_content(span, entry.agent_content)
+
+        if payload and is_agent_or_workflow_span:
+            messages = convert_to_messages([payload] if isinstance(payload, str) else payload)
+            _, conversation = self._format_lc_messages([messages])
+            if conversation:
+                finish_reason = self._extract_finish_reason(messages[-1]) if messages else "stop"
+                message = {**conversation[-1], "role": "assistant", "finish_reason": finish_reason}
+                self._set_span_attribute(span, GEN_AI_OUTPUT_MESSAGES, serialize_to_json_string([message]))
         self._end_span(run_id)
 
     def on_chain_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> None:
@@ -330,10 +472,11 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
     @skip_instrumentation_if_suppressed
     def on_tool_end(self, output: Any, *, run_id: UUID, **kwargs: Any) -> None:
 
-        entry = self._safe_get_span(run_id)
+        entry = self._safe_get_owned_span(run_id)
         if not entry:
+            self._end_span(run_id)
             return
-        span, _ = entry
+        span = entry.span
         self._set_span_attribute(span, GEN_AI_TOOL_CALL_RESULT, to_tool_attribute_value(output))
         self._end_span(run_id)
 
@@ -471,9 +614,14 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         OpenTelemetryCallbackHandler._set_span_attribute(span, LANGGRAPH_STEP_SPAN_ATTR, metadata.get("langgraph_step"))
         OpenTelemetryCallbackHandler._set_span_attribute(span, LANGGRAPH_NODE_SPAN_ATTR, metadata.get("langgraph_node"))
 
-    def _set_llm_request_span_attributes(
-        self, span: Span, kwargs: dict, serialized: Optional[dict] = None, model_name: Optional[str] = None
-    ):
+    def _set_llm_request_span_attributes(  # pylint: disable=too-many-locals
+        self,
+        span: Span,
+        kwargs: dict,
+        serialized: Optional[dict] = None,
+        model_name: Optional[str] = None,
+        metadata: Optional[dict] = None,
+    ) -> None:
         config = serialized or {}
         model = self._extract_llm_model_id(kwargs, config) or model_name
         if model:
@@ -483,27 +631,216 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         params: dict[str, Any] = (
             kwargs.get("invocation_params", {}).get("params") or kwargs.get("invocation_params") or kwargs
         )
+        additional_model_request_fields = (
+            params.get("additional_model_request_fields") or config.get("additional_model_request_fields") or {}
+        )
+
+        params_model_kwargs = {**(params.get("model_kwargs") or {}), **(params.get("extra_body") or {})}
+        config_model_kwargs = {**(config.get("model_kwargs") or {}), **(config.get("extra_body") or {})}
+        nested_additional_model_request_fields = (
+            first_not_none(
+                params_model_kwargs.get("additional_model_request_fields"),
+                config_model_kwargs.get("additional_model_request_fields"),
+            )
+            or {}
+        )
+        max_tokens = first_not_none(
+            params.get("max_tokens"),
+            params.get("max_new_tokens"),
+            params.get("max_output_tokens"),
+            params.get("max_completion_tokens"),
+            params.get("ls_max_tokens"),
+            params_model_kwargs.get("max_tokens"),
+            params_model_kwargs.get("max_new_tokens"),
+            params_model_kwargs.get("max_output_tokens"),
+            params_model_kwargs.get("max_completion_tokens"),
+            params_model_kwargs.get("ls_max_tokens"),
+            (metadata or {}).get("max_tokens"),
+            (metadata or {}).get("max_new_tokens"),
+            (metadata or {}).get("max_output_tokens"),
+            (metadata or {}).get("max_completion_tokens"),
+            (metadata or {}).get("ls_max_tokens"),
+            config.get("max_tokens"),
+            config.get("max_new_tokens"),
+            config.get("max_output_tokens"),
+            config.get("max_completion_tokens"),
+            config.get("ls_max_tokens"),
+            config_model_kwargs.get("max_tokens"),
+            config_model_kwargs.get("max_new_tokens"),
+            config_model_kwargs.get("max_output_tokens"),
+            config_model_kwargs.get("max_completion_tokens"),
+            config_model_kwargs.get("ls_max_tokens"),
+            additional_model_request_fields.get("max_tokens"),
+            additional_model_request_fields.get("max_new_tokens"),
+            additional_model_request_fields.get("max_output_tokens"),
+            additional_model_request_fields.get("max_completion_tokens"),
+            additional_model_request_fields.get("ls_max_tokens"),
+            nested_additional_model_request_fields.get("max_tokens"),
+            nested_additional_model_request_fields.get("max_new_tokens"),
+            nested_additional_model_request_fields.get("max_output_tokens"),
+            nested_additional_model_request_fields.get("max_completion_tokens"),
+            nested_additional_model_request_fields.get("ls_max_tokens"),
+        )
+        self._set_span_attribute(span, GEN_AI_REQUEST_MAX_TOKENS, max_tokens)
         self._set_span_attribute(
             span,
-            GEN_AI_REQUEST_MAX_TOKENS,
-            params.get("max_tokens") or params.get("max_new_tokens") or config.get("max_tokens"),
+            GEN_AI_REQUEST_TEMPERATURE,
+            first_not_none(
+                params.get("temperature"),
+                params.get("ls_temperature"),
+                params_model_kwargs.get("temperature"),
+                params_model_kwargs.get("ls_temperature"),
+                (metadata or {}).get("temperature"),
+                (metadata or {}).get("ls_temperature"),
+                config.get("temperature"),
+                config.get("ls_temperature"),
+                config_model_kwargs.get("temperature"),
+                config_model_kwargs.get("ls_temperature"),
+                additional_model_request_fields.get("temperature"),
+                additional_model_request_fields.get("ls_temperature"),
+                nested_additional_model_request_fields.get("temperature"),
+                nested_additional_model_request_fields.get("ls_temperature"),
+            ),
         )
         self._set_span_attribute(
-            span, GEN_AI_REQUEST_TEMPERATURE, params.get("temperature") or config.get("temperature")
+            span,
+            GEN_AI_REQUEST_TOP_P,
+            first_not_none(
+                params.get("top_p"),
+                params.get("p"),
+                params_model_kwargs.get("top_p"),
+                (metadata or {}).get("top_p"),
+                config.get("top_p"),
+                config_model_kwargs.get("top_p"),
+                additional_model_request_fields.get("top_p"),
+                nested_additional_model_request_fields.get("top_p"),
+            ),
         )
-        self._set_span_attribute(span, GEN_AI_REQUEST_TOP_P, params.get("top_p") or config.get("top_p"))
-        self._set_span_attribute(span, GEN_AI_REQUEST_TOP_K, params.get("top_k") or config.get("top_k"))
+        self._set_span_attribute(
+            span,
+            GEN_AI_REQUEST_TOP_K,
+            first_not_none(
+                params.get("top_k"),
+                params.get("k"),
+                params_model_kwargs.get("top_k"),
+                (metadata or {}).get("top_k"),
+                config.get("top_k"),
+                config_model_kwargs.get("top_k"),
+                additional_model_request_fields.get("top_k"),
+                nested_additional_model_request_fields.get("top_k"),
+            ),
+        )
         self._set_span_attribute(
             span,
             GEN_AI_REQUEST_FREQUENCY_PENALTY,
-            params.get("frequency_penalty") or config.get("frequency_penalty"),
+            first_not_none(
+                params.get("frequency_penalty"),
+                params_model_kwargs.get("frequency_penalty"),
+                (metadata or {}).get("frequency_penalty"),
+                config.get("frequency_penalty"),
+                config_model_kwargs.get("frequency_penalty"),
+                additional_model_request_fields.get("frequency_penalty"),
+                nested_additional_model_request_fields.get("frequency_penalty"),
+            ),
         )
         self._set_span_attribute(
-            span, GEN_AI_REQUEST_PRESENCE_PENALTY, params.get("presence_penalty") or config.get("presence_penalty")
+            span,
+            GEN_AI_REQUEST_PRESENCE_PENALTY,
+            first_not_none(
+                params.get("presence_penalty"),
+                params_model_kwargs.get("presence_penalty"),
+                (metadata or {}).get("presence_penalty"),
+                config.get("presence_penalty"),
+                config_model_kwargs.get("presence_penalty"),
+                additional_model_request_fields.get("presence_penalty"),
+                nested_additional_model_request_fields.get("presence_penalty"),
+            ),
         )
-        stop = params.get("stop") or config.get("stop")
-        if stop:
-            self._set_span_attribute(span, GEN_AI_REQUEST_STOP_SEQUENCES, stop)
+        stop = first_not_none(
+            params.get("stop"),
+            params.get("stop_sequences"),
+            params.get("ls_stop"),
+            params_model_kwargs.get("stop"),
+            params_model_kwargs.get("stop_sequences"),
+            params_model_kwargs.get("ls_stop"),
+            (metadata or {}).get("stop"),
+            (metadata or {}).get("stop_sequences"),
+            (metadata or {}).get("ls_stop"),
+            config.get("stop"),
+            config.get("stop_sequences"),
+            config.get("ls_stop"),
+            config_model_kwargs.get("stop"),
+            config_model_kwargs.get("stop_sequences"),
+            config_model_kwargs.get("ls_stop"),
+            additional_model_request_fields.get("stop"),
+            additional_model_request_fields.get("stop_sequences"),
+            additional_model_request_fields.get("ls_stop"),
+            nested_additional_model_request_fields.get("stop"),
+            nested_additional_model_request_fields.get("stop_sequences"),
+            nested_additional_model_request_fields.get("ls_stop"),
+        )
+        self._set_span_attribute(span, GEN_AI_REQUEST_STOP_SEQUENCES, [stop] if isinstance(stop, str) else stop)
+        self._set_span_attribute(
+            span,
+            GEN_AI_REQUEST_SEED,
+            first_not_none(
+                params.get("seed"),
+                params.get("random_seed"),
+                params_model_kwargs.get("seed"),
+                params_model_kwargs.get("random_seed"),
+                (metadata or {}).get("seed"),
+                (metadata or {}).get("random_seed"),
+                config.get("seed"),
+                config.get("random_seed"),
+                config_model_kwargs.get("seed"),
+                config_model_kwargs.get("random_seed"),
+                additional_model_request_fields.get("seed"),
+                additional_model_request_fields.get("random_seed"),
+                nested_additional_model_request_fields.get("seed"),
+                nested_additional_model_request_fields.get("random_seed"),
+            ),
+        )
+        self._set_span_attribute(
+            span,
+            GEN_AI_REQUEST_CHOICE_COUNT,
+            first_not_none(
+                params.get("choice_count"),
+                params.get("n"),
+                params.get("num_generations"),
+                params_model_kwargs.get("choice_count"),
+                params_model_kwargs.get("n"),
+                (metadata or {}).get("choice_count"),
+                (metadata or {}).get("n"),
+                config.get("choice_count"),
+                config.get("n"),
+                config_model_kwargs.get("choice_count"),
+                config_model_kwargs.get("n"),
+                additional_model_request_fields.get("choice_count"),
+                additional_model_request_fields.get("n"),
+                nested_additional_model_request_fields.get("choice_count"),
+                nested_additional_model_request_fields.get("n"),
+            ),
+        )
+        self._set_span_attribute(
+            span,
+            GEN_AI_REQUEST_STREAM,
+            first_not_none(
+                params.get("stream"),
+                params.get("streaming"),
+                params_model_kwargs.get("stream"),
+                params_model_kwargs.get("streaming"),
+                (metadata or {}).get("stream"),
+                (metadata or {}).get("streaming"),
+                config.get("stream"),
+                config.get("streaming"),
+                config_model_kwargs.get("stream"),
+                config_model_kwargs.get("streaming"),
+                additional_model_request_fields.get("stream"),
+                additional_model_request_fields.get("streaming"),
+                nested_additional_model_request_fields.get("stream"),
+                nested_additional_model_request_fields.get("streaming"),
+            ),
+        )
 
     def _should_skip_chain(
         self, serialized: dict[str, Any], name: Optional[str], metadata: Optional[dict] = None
@@ -535,20 +872,74 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         # We suppress internal nodes that have langgraph metadata, except for nodes that
         # contain the agent name metadata as those are used for invoke_agent spans.
         if metadata and any(k.startswith("langgraph_") for k in metadata):
+            # Is this chain recognized by the original LangGraph agent fallback?
             is_agent = "lc_agent_name" in metadata or (name and ("LangGraph" == name or "AgentExecutor" in name))
-            return not is_agent
+            if is_agent:
+                return False
+
+            return self._classify_chain(name, metadata) == "chain"
         return False
+
+    @classmethod
+    def _is_agent_chain(cls, name: Optional[str], metadata: Optional[dict] = None) -> bool:
+        """Return whether this chain callback should emit an invoke_agent span."""
+        return cls._classify_chain(name, metadata) == "agent"
+
+    @classmethod
+    def _is_workflow_chain(cls, name: Optional[str], metadata: Optional[dict] = None) -> bool:
+        """Return whether this chain callback should emit an invoke_workflow span."""
+        return cls._classify_chain(name, metadata) == "workflow"
+
+    @classmethod
+    def _classify_chain(
+        cls, name: Optional[str], metadata: Optional[dict] = None
+    ) -> Literal["agent", "workflow", "chain"]:
+        """Determine whether this is an agent chain or a workflow chain."""
+        chain_metadata = metadata or {}
+        declared_agent_name = chain_metadata.get("agent_name")
+        # Do the OTel marker fields belong to this graph rather than an enclosing graph?
+        is_otel_marker_for_current_graph = not chain_metadata.get("langgraph_node") or bool(
+            cls._does_metadata_name_apply_to_current_graph(name, declared_agent_name, chain_metadata)
+        )
+        # Does this graph have the OTel workflow marker?
+        has_otel_workflow_marker = is_otel_marker_for_current_graph and chain_metadata.get("otel_workflow_span") is True
+        # Does this graph have an OTel agent marker?
+        has_otel_agent_marker = is_otel_marker_for_current_graph and bool(
+            chain_metadata.get("otel_agent_span") is True
+            or (not has_otel_workflow_marker and (declared_agent_name or chain_metadata.get("agent_type")))
+        )
+        # Does this callback use legacy AgentExecutor naming?
+        is_legacy_agent_executor = bool(name) and "AgentExecutor" in name
+        # Does this callback use naming emitted by LangChain create_agent?
+        is_langchain_create_agent = bool(name) and (name == "LangGraph" or name == chain_metadata.get("lc_agent_name"))
+        # Does this callback name match the StateGraph currently running through Pregel?
+        is_pregel_stategraph = bool(name) and name == PregelWrapper.get_active_agent_name()
+        is_agent_chain = has_otel_agent_marker or (
+            not has_otel_workflow_marker
+            and (is_legacy_agent_executor or is_langchain_create_agent or is_pregel_stategraph)
+        )
+        is_workflow_chain = has_otel_workflow_marker and not has_otel_agent_marker
+        if is_agent_chain:
+            return "agent"
+        if is_workflow_chain:
+            return "workflow"
+        return "chain"
+
+    @staticmethod
+    def _does_metadata_name_apply_to_current_graph(
+        name: Optional[str], metadata_name: Any, metadata: dict[str, Any]
+    ) -> bool:
+        """Return whether a metadata name identifies this graph rather than an enclosing graph."""
+        return bool(metadata_name) and (not metadata.get("langgraph_node") or metadata_name == name)
 
     @skip_instrumentation_if_suppressed
     def _handle_error(self, error: BaseException, run_id: UUID, **kwargs: Any) -> None:
 
-        entry = self._safe_get_span(run_id)
-        if not entry:
-            return
-        span, _ = entry
-        span.record_exception(error)
-        span.set_status(Status(StatusCode.ERROR, str(error)))
-        span.set_attribute(ERROR_TYPE, type(error).__qualname__)
+        entry = self._safe_get_owned_span(run_id)
+        if entry:
+            entry.span.record_exception(error)
+            entry.span.set_status(Status(StatusCode.ERROR, str(error)))
+            entry.span.set_attribute(ERROR_TYPE, type(error).__qualname__)
         self._end_span(run_id)
 
     def _start_span(
@@ -558,24 +949,30 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         span_name: str,
         kind: SpanKind = SpanKind.INTERNAL,
     ) -> Span:
-        parent_entry = self.run_id_to_span_map.get(parent_run_id) if parent_run_id else None
+        parent_entry = self._safe_get_span(parent_run_id)
         if parent_entry:
-            parent_span, _ = parent_entry
-            span = self.tracer.start_span(span_name, context=set_span_in_context(parent_span), kind=kind)
+            span = self.tracer.start_span(span_name, context=set_span_in_context(parent_entry.span), kind=kind)
         else:
             span = self.tracer.start_span(span_name, kind=kind)
 
         token = context.attach(set_span_in_context(span))
-        self.run_id_to_span_map.put(run_id, (span, token))
+        self.run_id_to_span_map.put(
+            run_id,
+            _SpanEntry(
+                run_id=run_id,
+                span=span,
+                token=token,
+                agent_content=parent_entry.agent_content if parent_entry else None,
+            ),
+        )
         return span
 
     def _end_span(self, run_id: UUID) -> None:
         entry = self.run_id_to_span_map.pop(run_id)
-        if not entry:
+        if not entry or entry.run_id != run_id:
             return
-        span, token = entry
-        try_detach(token)
-        span.end()
+        try_detach(entry.token)
+        entry.span.end()
 
     @staticmethod
     def _get_name_from_callback(serialized: dict[str, Any], **kwargs: Any) -> Optional[str]:
@@ -638,8 +1035,41 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
 
         return None
 
-    def _safe_get_span(self, run_id: UUID) -> Optional[tuple[Span, Token]]:
+    def _update_agent_span_content(
+        self,
+        run_id: UUID,
+        input_messages: Optional[list[dict[str, Any]]] = None,
+        output_messages: Optional[list[dict[str, Any]]] = None,
+        system_instructions: Optional[list[dict[str, Any]]] = None,
+    ) -> None:
+        """Collect the first input, latest output, and system instructions for the agent span."""
+        entry = self._safe_get_span(run_id)
+        content = entry.agent_content if entry else None
+        if content is None:
+            return
+        content.input_messages = first_not_none(content.input_messages, input_messages)
+        content.system_instructions = first_not_none(content.system_instructions, system_instructions)
+        content.output_messages = first_not_none(output_messages, content.output_messages)
+
+    def _set_agent_span_content(self, span: Span, content: _AgentContent) -> None:
+        """Set collected content on the internal agent span."""
+        if content.system_instructions:
+            self._set_span_attribute(
+                span, GEN_AI_SYSTEM_INSTRUCTIONS, serialize_to_json_string(content.system_instructions)
+            )
+        if content.input_messages:
+            self._set_span_attribute(span, GEN_AI_INPUT_MESSAGES, serialize_to_json_string(content.input_messages))
+        if content.output_messages:
+            self._set_span_attribute(span, GEN_AI_OUTPUT_MESSAGES, serialize_to_json_string(content.output_messages))
+
+    def _safe_get_span(self, run_id: Optional[UUID]) -> Optional[_SpanEntry]:
+        """Return the span entry mapped to a run, including entries inherited by skipped runs."""
         return self.run_id_to_span_map.get(run_id)
+
+    def _safe_get_owned_span(self, run_id: UUID) -> Optional[_SpanEntry]:
+        """Return a span only when this run created it, so skipped children cannot end ancestor spans."""
+        entry = self._safe_get_span(run_id)
+        return entry if entry and entry.run_id == run_id else None
 
     @staticmethod
     def _set_span_attribute(span: Span, name: str, value: Optional[AttributeValue]):

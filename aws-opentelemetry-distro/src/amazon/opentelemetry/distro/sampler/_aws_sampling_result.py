@@ -38,7 +38,10 @@ class _AwsSamplingResult(SamplingResult):
 
         if self.trace_state is None:
             self.trace_state = TraceState()
-        if self.trace_state.get(self.AWS_XRAY_SAMPLING_RULE_TRACE_STATE_KEY) is None:
+        # Only add the sampling rule hash to the trace state when we actually have one. Calling
+        # TraceState.add with a None value is a no-op that also logs a noisy WARNING on every span
+        # creation ("Invalid key/value pair (xrsr, None) found."). See issue #874.
+        if sampling_rule_hash is not None and self.trace_state.get(self.AWS_XRAY_SAMPLING_RULE_TRACE_STATE_KEY) is None:
             self.trace_state = self.trace_state.add(self.AWS_XRAY_SAMPLING_RULE_TRACE_STATE_KEY, sampling_rule_hash)
 
         self._sampling_rule_name = sampling_rule_name

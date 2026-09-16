@@ -69,6 +69,7 @@ from logging import ERROR, Logger, getLogger
 from amazon.opentelemetry.distro._utils import (
     OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS,
     get_aws_region,
+    get_env,
     is_agent_observability_enabled,
     is_installed,
 )
@@ -116,6 +117,8 @@ _load._logger.setLevel(LEVELS.get(os.environ.get(OTEL_PYTHON_LOG_LEVEL, "error")
 #   "auto" (default, also when unset): load aws_* unless a same-library third-party is registered.
 #   "enabled" : load all aws_* unconditionally.
 #   "disabled": skip all aws_*.
+AWS_GENAI_INSTRUMENTATION = "AWS_GENAI_INSTRUMENTATION"
+# Legacy: use AWS_GENAI_INSTRUMENTATION.
 AWS_AGENTIC_INSTRUMENTATION = "AWS_AGENTIC_INSTRUMENTATION"
 
 # Maps third-party instrumentor entry point names to their AWS native equivalents.
@@ -128,10 +131,6 @@ _THIRDPARTY_TO_AWS_NATIVE = {
     "mcp": "aws_mcp",
     "openai_agents": "aws_openai_agents",
 }
-
-# Dist names owned by ADOT that register entry points with the same names as third-party ones.
-# These are excluded from third-party detection to avoid false positives.
-_ADOT_OWNED_DISTS = {"opentelemetry-instrumentation-openai-agents-v2"}
 
 
 class AwsOpenTelemetryDistro(OpenTelemetryDistro):
@@ -261,10 +260,9 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
         """Skip AWS native agentic instrumentors that should not load.
 
         When agent observability is enabled:
-        - Skip ADOT-owned dists that duplicate an aws_* entry point (e.g. openai-agents-v2).
-        - AWS_AGENTIC_INSTRUMENTATION (auto/enabled/disabled) governs the aws_* side only.
-          See the constant docstring for semantics. Third-party instrumentors are never
-          touched here.
+        - AWS_GENAI_INSTRUMENTATION or AWS_AGENTIC_INSTRUMENTATION
+          (auto/enabled/disabled) governs the aws_* side only. Third-party
+          instrumentors are never touched here.
         """
         if is_agent_observability_enabled() and self._should_skip_instrumentor(entry_point):
             return
@@ -272,19 +270,19 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
 
     @staticmethod
     def _should_skip_instrumentor(entry_point):
-        if entry_point.dist and entry_point.dist.name in _ADOT_OWNED_DISTS:
-            return True
-
         is_native = entry_point.name in _THIRDPARTY_TO_AWS_NATIVE.values()
         if not is_native:
             return False
 
-        raw_mode = os.environ.get(AWS_AGENTIC_INSTRUMENTATION, "auto")
+        mode_variable = (
+            AWS_GENAI_INSTRUMENTATION if AWS_GENAI_INSTRUMENTATION in os.environ else AWS_AGENTIC_INSTRUMENTATION
+        )
+        raw_mode = get_env(AWS_GENAI_INSTRUMENTATION, AWS_AGENTIC_INSTRUMENTATION, "auto")
         mode = raw_mode.lower()
         if mode not in ("auto", "enabled", "disabled"):
             _logger.warning(
                 "Unknown %s=%r — falling back to 'auto'. Valid values: auto, enabled, disabled.",
-                AWS_AGENTIC_INSTRUMENTATION,
+                mode_variable,
                 raw_mode,
             )
             mode = "auto"
@@ -292,15 +290,11 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
         if mode == "enabled":
             return False
         if mode == "disabled":
-            _logger.debug("Skipping %s: AWS_AGENTIC_INSTRUMENTATION=disabled", entry_point.name)
+            _logger.debug("Skipping %s: %s=disabled", entry_point.name, mode_variable)
             return True
 
         # mode == "auto": skip the native side if a same-library third-party is registered.
-        third_party_names = {
-            ep.name
-            for ep in entry_points(group="opentelemetry_instrumentor")
-            if not (ep.dist and ep.dist.name in _ADOT_OWNED_DISTS)
-        }
+        third_party_names = {ep.name for ep in entry_points(group="opentelemetry_instrumentor")}
         for tp_name, aws_name in _THIRDPARTY_TO_AWS_NATIVE.items():
             if entry_point.name == aws_name and tp_name in third_party_names:
                 _logger.debug("Skipping %s: third-party %s is registered", aws_name, tp_name)

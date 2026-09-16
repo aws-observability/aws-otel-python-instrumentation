@@ -1,1 +1,12 @@
 crewai[litellm,anthropic,bedrock,azure-ai-inference,google-genai]>=1.10.0,<2
+# Python 3.10 ONLY: cap litellm below 1.97.0. Two separate upstream breakages force this, and both are
+# specific to 3.10 (litellm 1.97.0+ works on 3.11+, so those envs stay uncapped and test the latest):
+#   1. On 3.10, litellm 1.97.0's `litellm.types.utils.Message` references `ChatCompletionReasoningSummaryTextBlock`,
+#      which is not resolvable in that module's namespace on 3.10, so the pydantic model is never finalized and
+#      constructing `Message(...)` raises PydanticUserError ("`Message` is not fully defined"). Our tests build
+#      litellm's `Message` directly, so every crew-kickoff test fails. (Constructs fine on 3.11+.)
+#   2. litellm 1.98.0 (2026-08-22) imports `NotRequired` from `typing` (3.11+ only), so it fails to import
+#      on Python 3.10 entirely (crewai then reports the LiteLLM fallback as "not installed").
+# 1.96.2 is the newest release that imports on 3.10 AND has a constructible `Message`. Lift this cap once
+# litellm ships a release that both imports on 3.10 and defines `Message` fully. Upstream: BerriAI/litellm.
+litellm<1.97.0; python_version == "3.10"

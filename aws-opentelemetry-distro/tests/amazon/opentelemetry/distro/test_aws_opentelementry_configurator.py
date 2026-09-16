@@ -13,12 +13,12 @@ from requests import Session
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_LOCAL_SERVICE, AWS_SERVICE_TYPE
 from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSampler
 from amazon.opentelemetry.distro.attribute_propagating_span_processor import AttributePropagatingSpanProcessor
+from amazon.opentelemetry.distro.attribute_redacting_span_processor import AttributeRedactingSpanProcessor
 from amazon.opentelemetry.distro.aws_batch_unsampled_span_processor import BatchUnsampledSpanProcessor
 from amazon.opentelemetry.distro.aws_lambda_span_processor import AwsLambdaSpanProcessor
 from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter import AwsMetricAttributesSpanExporter
 from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     LAMBDA_SPAN_EXPORT_BATCH_SIZE,
-    OTEL_AWS_ENHANCED_CODE_ATTRIBUTES,
     OTEL_EXPORTER_OTLP_LOGS_ENDPOINT,
     OTEL_EXPORTER_OTLP_LOGS_HEADERS,
     OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
@@ -42,13 +42,13 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     _fetch_logs_header,
     _init_logging,
     _init_serviceevents,
+    _init_tracing,
     _is_application_signals_enabled,
     _is_application_signals_runtime_enabled,
     _is_defer_to_workers_enabled,
     _is_serviceevents_enabled,
     _is_wsgi_master_process,
     _parse_config_string,
-    is_enhanced_code_attributes,
 )
 from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetryDistro
 from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetricsProcessor
@@ -63,7 +63,7 @@ from amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_r
 )
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_log_record_exporter import OTLPAwsLogRecordExporter
 from amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter import OTLPAwsSpanExporter
-from amazon.opentelemetry.distro.gen_ai_nested_client_span_processor import GenAiNestedClientSpanProcessor
+from amazon.opentelemetry.distro.gen_ai_nested_client_span_processor import GenAINestedClientSpanProcessor
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler._aws_xray_sampling_client import _AwsXRaySamplingClient
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
@@ -606,14 +606,29 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ["AGENT_OBSERVABILITY_ENABLED"] = "true"
         os.environ["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"] = "https://xray.us-east-1.amazonaws.com/v1/traces"
         _customize_span_processors(mock_tracer_provider, Resource.get_empty(), mock_sampler)
-        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 3)
+        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 2)
+        self.assertIsInstance(
+            mock_tracer_provider.add_span_processor.call_args_list[0].args[0], BatchUnsampledSpanProcessor
+        )
+        self.assertIsInstance(mock_tracer_provider.add_span_processor.call_args_list[1].args[0], BaggageSpanProcessor)
 
-        first_processor = mock_tracer_provider.add_span_processor.call_args_list[0].args[0]
-        self.assertIsInstance(first_processor, BatchUnsampledSpanProcessor)
-        second_processor = mock_tracer_provider.add_span_processor.call_args_list[1].args[0]
-        self.assertIsInstance(second_processor, GenAiNestedClientSpanProcessor)
-        third_processor = mock_tracer_provider.add_span_processor.call_args_list[2].args[0]
-        self.assertIsInstance(third_processor, BaggageSpanProcessor)
+        trace_provider = MagicMock()
+        batch_processor = MagicMock()
+        exporter = MagicMock()
+        with patch.multiple(
+            "amazon.opentelemetry.distro.aws_opentelemetry_configurator",
+            TracerProvider=MagicMock(return_value=trace_provider),
+            BatchSpanProcessor=MagicMock(return_value=batch_processor),
+            _customize_span_exporter=MagicMock(return_value=exporter),
+            _customize_span_processors=MagicMock(),
+            set_tracer_provider=MagicMock(),
+        ):
+            _init_tracing({"otlp": MagicMock(return_value=exporter)})
+
+        processors = [call.args[0] for call in trace_provider.add_span_processor.call_args_list]
+        self.assertIsInstance(processors[0], GenAINestedClientSpanProcessor)
+        self.assertIsInstance(processors[1], AttributeRedactingSpanProcessor)
+        self.assertIs(processors[2], batch_processor)
 
         os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
         os.environ.pop("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", None)
@@ -1016,76 +1031,15 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.setdefault("AGENT_OBSERVABILITY_ENABLED", "true")
         os.environ.setdefault("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "https://xray.us-east-1.amazonaws.com/v1/traces")
         _customize_span_processors(mock_tracer_provider, Resource.get_empty(), mock_sampler)
-        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 5)
+        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 4)
 
         processors = [call.args[0] for call in mock_tracer_provider.add_span_processor.call_args_list]
         self.assertIsInstance(processors[0], BatchUnsampledSpanProcessor)
-        self.assertIsInstance(processors[1], GenAiNestedClientSpanProcessor)
-        self.assertIsInstance(processors[2], BaggageSpanProcessor)
-        self.assertIsInstance(processors[3], AttributePropagatingSpanProcessor)
-        self.assertIsInstance(processors[4], AwsSpanMetricsProcessor)
+        self.assertIsInstance(processors[1], BaggageSpanProcessor)
+        self.assertIsInstance(processors[2], AttributePropagatingSpanProcessor)
+        self.assertIsInstance(processors[3], AwsSpanMetricsProcessor)
 
         os.environ.pop("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
-
-    def test_customize_span_processors_with_code_correlation_enabled(self):
-        """Test that CodeAttributesSpanProcessor is added when code correlation is enabled"""
-        mock_tracer_provider: TracerProvider = MagicMock()
-        mock_sampler: Sampler = MagicMock()
-
-        # Clean up environment to ensure consistent test state
-        os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
-        os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
-        os.environ.pop(OTEL_AWS_ENHANCED_CODE_ATTRIBUTES, None)
-
-        # Test without code correlation enabled - should only add BaggageSpanProcessor
-        _customize_span_processors(mock_tracer_provider, Resource.get_empty(), mock_sampler)
-        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 1)
-        self.assertIsInstance(mock_tracer_provider.add_span_processor.call_args_list[0].args[0], BaggageSpanProcessor)
-
-        mock_tracer_provider.reset_mock()
-
-        # Test with code correlation enabled - should add CodeAttributesSpanProcessor
-        os.environ[OTEL_AWS_ENHANCED_CODE_ATTRIBUTES] = "true"
-
-        with patch(
-            "amazon.opentelemetry.distro.code_correlation.CodeAttributesSpanProcessor"
-        ) as mock_code_processor_class:
-            mock_code_processor_instance = MagicMock()
-            mock_code_processor_class.return_value = mock_code_processor_instance
-
-            _customize_span_processors(mock_tracer_provider, Resource.get_empty(), mock_sampler)
-
-            # Verify CodeAttributesSpanProcessor was created and added
-            mock_code_processor_class.assert_called_once()
-            mock_tracer_provider.add_span_processor.assert_any_call(mock_code_processor_instance)
-
-        mock_tracer_provider.reset_mock()
-
-        # Test with code correlation enabled along with application signals
-        os.environ[OTEL_AWS_ENHANCED_CODE_ATTRIBUTES] = "true"
-        os.environ["OTEL_AWS_APPLICATION_SIGNALS_ENABLED"] = "True"
-        os.environ["OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED"] = "False"
-
-        with patch(
-            "amazon.opentelemetry.distro.code_correlation.CodeAttributesSpanProcessor"
-        ) as mock_code_processor_class:
-            mock_code_processor_instance = MagicMock()
-            mock_code_processor_class.return_value = mock_code_processor_instance
-
-            _customize_span_processors(mock_tracer_provider, Resource.get_empty(), mock_sampler)
-
-            self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 4)
-
-            processors = [c.args[0] for c in mock_tracer_provider.add_span_processor.call_args_list]
-            self.assertEqual(processors[0], mock_code_processor_instance)
-            self.assertIsInstance(processors[1], BaggageSpanProcessor)
-            self.assertIsInstance(processors[2], AttributePropagatingSpanProcessor)
-            self.assertIsInstance(processors[3], AwsSpanMetricsProcessor)
-
-        # Clean up
-        os.environ.pop(OTEL_AWS_ENHANCED_CODE_ATTRIBUTES, None)
-        os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
-        os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", None)
 
     def test_customize_span_processors_lambda(self):
         mock_tracer_provider: TracerProvider = MagicMock()
@@ -1792,66 +1746,6 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
                 self.assertIsNone(result)
                 mock_logger.error.assert_called_once()
-
-    def test_is_enhanced_code_attributes(self):
-        """Test is_enhanced_code_attributes function with various environment variable values"""
-        # Test when environment variable is not set (default state)
-        os.environ.pop(OTEL_AWS_ENHANCED_CODE_ATTRIBUTES, None)
-        result = is_enhanced_code_attributes()
-        self.assertFalse(result)
-
-        # Test when environment variable is set to 'true' (case insensitive)
-        os.environ[OTEL_AWS_ENHANCED_CODE_ATTRIBUTES] = "true"
-        result = is_enhanced_code_attributes()
-        self.assertTrue(result)
-
-        os.environ[OTEL_AWS_ENHANCED_CODE_ATTRIBUTES] = "TRUE"
-        result = is_enhanced_code_attributes()
-        self.assertTrue(result)
-
-        os.environ[OTEL_AWS_ENHANCED_CODE_ATTRIBUTES] = "True"
-        result = is_enhanced_code_attributes()
-        self.assertTrue(result)
-
-        # Test when environment variable is set to 'false' (case insensitive)
-        os.environ[OTEL_AWS_ENHANCED_CODE_ATTRIBUTES] = "false"
-        result = is_enhanced_code_attributes()
-        self.assertFalse(result)
-
-        os.environ[OTEL_AWS_ENHANCED_CODE_ATTRIBUTES] = "FALSE"
-        result = is_enhanced_code_attributes()
-        self.assertFalse(result)
-
-        os.environ[OTEL_AWS_ENHANCED_CODE_ATTRIBUTES] = "False"
-        result = is_enhanced_code_attributes()
-        self.assertFalse(result)
-
-        # Test with leading/trailing whitespace
-        os.environ[OTEL_AWS_ENHANCED_CODE_ATTRIBUTES] = "  true  "
-        result = is_enhanced_code_attributes()
-        self.assertTrue(result)
-
-        os.environ[OTEL_AWS_ENHANCED_CODE_ATTRIBUTES] = "  false  "
-        result = is_enhanced_code_attributes()
-        self.assertFalse(result)
-
-        # Test invalid values (should return False)
-        os.environ[OTEL_AWS_ENHANCED_CODE_ATTRIBUTES] = "invalid"
-        result = is_enhanced_code_attributes()
-        self.assertFalse(result)
-
-        # Test another invalid value
-        os.environ[OTEL_AWS_ENHANCED_CODE_ATTRIBUTES] = "yes"
-        result = is_enhanced_code_attributes()
-        self.assertFalse(result)
-
-        # Test empty string (invalid)
-        os.environ[OTEL_AWS_ENHANCED_CODE_ATTRIBUTES] = ""
-        result = is_enhanced_code_attributes()
-        self.assertFalse(result)
-
-        # Clean up
-        os.environ.pop(OTEL_AWS_ENHANCED_CODE_ATTRIBUTES, None)
 
 
 def validate_distro_environ():
