@@ -5,8 +5,8 @@ This instrumentation traces client and server operations performed with the
 `Model Context Protocol Python SDK <https://github.com/modelcontextprotocol/python-sdk>`_
 and emits telemetry that follows OpenTelemetry's semantic conventions.
 
-This instrumentation supports version 1.x of the MCP Python SDK. MCP Python SDK
-2.x is not currently supported.
+**This instrumentation supports version 1.x of the MCP Python SDK. MCP Python
+SDK 2.x is not currently supported.**
 
 Features
 --------

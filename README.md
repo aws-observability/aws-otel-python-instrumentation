@@ -75,8 +75,8 @@ CREWAI_DISABLE_TELEMETRY=true</code></pre>
       <td>
         <p><strong>We recommend setting <code>AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT=true</code> to keep captured content in span attributes.</strong> The current default is <code>false</code>: captured content is removed from span attributes and routed to a separate logs pipeline. If that logs pipeline is disabled, the content is discarded.</p>
         <blockquote>
-          <p>[!NOTE]</p>
-          <p><strong>In a future release, routing captured content to the separate logs pipeline will become <em>OPT-IN</em>.</strong></p>
+          <p>[!WARNING]</p>
+          <p><strong><code>AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT</code> will be deprecated in a future release.</strong> As we align with the latest OTel GenAI semantic conventions, captured content will remain in span attributes.</p>
         </blockquote>
         <br>
         <blockquote>
@@ -117,11 +117,11 @@ CREWAI_DISABLE_TELEMETRY=true</code></pre>
         </blockquote>
       </td>
       <td>
-        <p>Set to <code>disabled</code> to disable all of the above instrumentations. Set to <code>enabled</code> to force all of the above instrumentations to load.</p>
+        <p>Set to <code>disabled</code> to force all of the above instrumentations to remain disabled. Set to <code>enabled</code> to force all of the above instrumentations to load.</p>
         <blockquote>
           <p>[!NOTE]</p>
           <p>When agent observability is enabled (<code>AGENT_OBSERVABILITY_ENABLED=true</code>), instrumentation is skipped when a conflicting third-party instrumentation is detected for the same framework.</p>
-          <p>You may set <code>AWS_GENAI_INSTRUMENTATION=disabled</code> to disable all of the above instrumentations if you are using another instrumentation source and automatic detection does not work. If another third-party instrumentation is installed, you should uninstall it or otherwise resolve any dependency conflicts before using the above instrumentations.</p>
+          <p>You may set <code>AWS_GENAI_INSTRUMENTATION=disabled</code> to force all of the above instrumentations to remain disabled if you are using another instrumentation source and automatic detection does not work. If another third-party instrumentation is installed, you should uninstall it or otherwise resolve any dependency conflicts before using the above instrumentations.</p>
           <p>You may set <code>AWS_GENAI_INSTRUMENTATION=enabled</code> to force the above instrumentations to load. We recommend that you do not use this setting when third-party instrumentation for the same framework is enabled, because both instrumentations may run and produce duplicate or inconsistent telemetry.</p>
         </blockquote>
         <br>
