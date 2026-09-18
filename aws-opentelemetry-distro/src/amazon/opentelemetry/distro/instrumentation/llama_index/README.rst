@@ -17,11 +17,23 @@ Features
 Installation
 ------------
 
-Install the distribution and a supported LlamaIndex core version:
+Install the distribution and supported LlamaIndex core and workflows versions:
 
 ::
 
-    pip install aws-opentelemetry-distro "llama-index-core>=0.13.0,<1"
+    pip install aws-opentelemetry-distro \
+        "llama-index-core>=0.13.0,<1" \
+        "llama-index-workflows>=1.0.1,!=2.24.0,<3"
+
+Known issue
+-----------
+
+``llama-index-workflows==2.24.0`` is not supported. That release can fail while
+initializing LlamaIndex agents with
+``TypeError: unhashable type: 'FunctionAgent'`` before any model or tool runs.
+Because execution stops before those operations occur, the expected model,
+tool, and downstream spans are not created. Install a workflows version
+matching ``>=1.0.1,!=2.24.0,<3``.
 
 Usage
 -----

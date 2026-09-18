@@ -28,7 +28,7 @@ instrumentation for the following frameworks and SDKs:
 
 - [CrewAI](https://github.com/aws-observability/aws-otel-python-instrumentation/blob/main/aws-opentelemetry-distro/src/amazon/opentelemetry/distro/instrumentation/crewai/README.rst) (`crewai >= 1.10.0, < 2`)
 - [LangChain](https://github.com/aws-observability/aws-otel-python-instrumentation/blob/main/aws-opentelemetry-distro/src/amazon/opentelemetry/distro/instrumentation/langchain/README.rst) (`langchain >= 0.3.21, < 2`)
-- [LlamaIndex](https://github.com/aws-observability/aws-otel-python-instrumentation/blob/main/aws-opentelemetry-distro/src/amazon/opentelemetry/distro/instrumentation/llama_index/README.rst) (`llama-index-core >= 0.13.0, < 1`)
+- [LlamaIndex](https://github.com/aws-observability/aws-otel-python-instrumentation/blob/main/aws-opentelemetry-distro/src/amazon/opentelemetry/distro/instrumentation/llama_index/README.rst) (`llama-index-core >= 0.13.0, < 1`; `llama-index-workflows >= 1.0.1, != 2.24.0, < 3`)
 - [Model Context Protocol (MCP)](https://github.com/aws-observability/aws-otel-python-instrumentation/blob/main/aws-opentelemetry-distro/src/amazon/opentelemetry/distro/instrumentation/mcp/README.rst) (`mcp >= 1.10.0, < 2`)
 - [OpenAI Agents SDK](https://github.com/aws-observability/aws-otel-python-instrumentation/blob/main/aws-opentelemetry-distro/src/amazon/opentelemetry/distro/instrumentation/openai_agents/README.rst) (`openai-agents >= 0.3.3, < 1`)
 
