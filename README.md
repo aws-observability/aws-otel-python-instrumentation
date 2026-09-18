@@ -21,6 +21,115 @@ Check out the [getting started documentation](https://aws-otel.github.io/docs/ge
 ## Supported Python libraries and frameworks
 For the complete list of supported frameworks, please refer to the [OpenTelemetry for Python documentation](https://github.com/open-telemetry/opentelemetry-python-contrib/blob/main/instrumentation/README.md).
 
+## Generative AI
+
+As of version `0.20.0`, this distribution officially supports Generative AI
+instrumentation for the following frameworks and SDKs:
+
+- [CrewAI](https://github.com/aws-observability/aws-otel-python-instrumentation/blob/main/aws-opentelemetry-distro/src/amazon/opentelemetry/distro/instrumentation/crewai/README.rst) (`crewai >= 1.10.0, < 2`)
+- [LangChain](https://github.com/aws-observability/aws-otel-python-instrumentation/blob/main/aws-opentelemetry-distro/src/amazon/opentelemetry/distro/instrumentation/langchain/README.rst) (`langchain >= 0.3.21, < 2`)
+- [LlamaIndex](https://github.com/aws-observability/aws-otel-python-instrumentation/blob/main/aws-opentelemetry-distro/src/amazon/opentelemetry/distro/instrumentation/llama_index/README.rst) (`llama-index-core >= 0.13.0, < 1`)
+- [Model Context Protocol (MCP)](https://github.com/aws-observability/aws-otel-python-instrumentation/blob/main/aws-opentelemetry-distro/src/amazon/opentelemetry/distro/instrumentation/mcp/README.rst) (`mcp >= 1.10.0, < 2`)
+- [OpenAI Agents SDK](https://github.com/aws-observability/aws-otel-python-instrumentation/blob/main/aws-opentelemetry-distro/src/amazon/opentelemetry/distro/instrumentation/openai_agents/README.rst) (`openai-agents >= 0.3.3, < 1`)
+
+These instrumentations provide end-to-end visibility into agent applications,
+including framework orchestration, model calls, tool invocations, and downstream
+dependencies.
+
+### Configuration
+
+<table>
+  <thead>
+    <tr>
+      <th>Environment variable</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>AGENT_OBSERVABILITY_ENABLED</code></td>
+      <td>
+        <p>Set to <code>true</code> to enable agent-observability defaults. The default is <code>false</code>.</p>
+        <p>When enabled, the following environment variable defaults are applied unless you have already configured them:</p>
+        <pre><code>OTEL_TRACES_EXPORTER=otlp
+OTEL_LOGS_EXPORTER=otlp
+OTEL_METRICS_EXPORTER=awsemf
+OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true
+OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://xray.&lt;region&gt;.amazonaws.com/v1/traces
+OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=https://logs.&lt;region&gt;.amazonaws.com/v1/logs
+OTEL_PYTHON_DISABLED_INSTRUMENTATIONS=http,sqlalchemy,psycopg2,pymysql,sqlite3,aiopg,asyncpg,mysql_connector,urllib3,requests,system_metrics,google-genai,jinja2
+OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED=true
+OTEL_PYTHON_LOG_CORRELATION=true
+OTEL_AWS_APPLICATION_SIGNALS_ENABLED=false
+OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS=false
+CREWAI_DISABLE_TELEMETRY=true</code></pre>
+        <blockquote>
+          <p>[!NOTE]</p>
+          <p>The trace and log endpoints are configured only when <code>OTEL_EXPORTER_OTLP_ENDPOINT</code> is not set and an AWS Region can be determined.</p>
+        </blockquote>
+        <br>
+      </td>
+    </tr>
+    <tr>
+      <td><code>AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT</code></td>
+      <td>
+        <p><strong>We recommend setting <code>AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT=true</code> to keep captured content in span attributes.</strong> The current default is <code>false</code>: captured content is removed from span attributes and routed to a separate logs pipeline. If that logs pipeline is disabled, the content is discarded.</p>
+        <blockquote>
+          <p>[!WARNING]</p>
+          <p><strong><code>AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT</code> will be deprecated in a future release.</strong> As we align with the latest OTel GenAI semantic conventions, captured content will remain in span attributes.</p>
+        </blockquote>
+        <br>
+        <blockquote>
+          <p>[!NOTE]</p>
+          <p>For context about why this environment variable exists, OTel recently replaced per-message events with structured attributes in Semantic Conventions v1.37.0.</p>
+          <ul>
+            <li><a href="https://github.com/open-telemetry/semantic-conventions/releases/tag/v1.37.0"><code>https://github.com/open-telemetry/semantic-conventions/releases/tag/v1.37.0</code></a></li>
+            <li><a href="https://github.com/open-telemetry/semantic-conventions/pull/2179"><code>https://github.com/open-telemetry/semantic-conventions/pull/2179</code></a></li>
+          </ul>
+        </blockquote>
+        <br>
+      </td>
+    </tr>
+    <tr>
+      <td><code>AWS_REDACT_SPAN_ATTRIBUTES</code></td>
+      <td>
+        <p>Your spans may contain sensitive information from LLM interactions, such as your users' prompt data and tool call information; use <code>AWS_REDACT_SPAN_ATTRIBUTES</code> to specify a comma-separated list of span attributes to redact. Matching values in spans, span events, and span links are all replaced with <code>REDACTED</code>. Note that this applies to all span attributes, not just those produced by this distribution's instrumentations.</p>
+        <p>Supports wildcard patterns.</p>
+        <p><strong>Examples:</strong></p>
+        <p>To redact specific sensitive data GenAI attributes:</p>
+        <pre><code>export AWS_REDACT_SPAN_ATTRIBUTES='gen_ai.input.messages,gen_ai.output.messages'</code></pre>
+        <p>To redact multiple attributes matching a pattern:</p>
+        <pre><code>export AWS_REDACT_SPAN_ATTRIBUTES='llm.input_messages.*,llm.output_messages.*'</code></pre>
+        <blockquote>
+          <p>[!WARNING]</p>
+          <p>Redaction occurs in-process within the agent, before telemetry is exported. This may affect other integrations that rely on these attribute values.</p>
+        </blockquote>
+        <br>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p><code>AWS_GENAI_INSTRUMENTATION</code></p>
+        <br>
+        <blockquote>
+          <p>[!NOTE]</p>
+          <p><code>AWS_AGENTIC_INSTRUMENTATION</code> is the legacy environment variable name and remains supported as a fallback when <code>AWS_GENAI_INSTRUMENTATION</code> is not set.</p>
+        </blockquote>
+      </td>
+      <td>
+        <p>Set to <code>disabled</code> to force all of the above instrumentations to remain disabled. Set to <code>enabled</code> to force all of the above instrumentations to load.</p>
+        <blockquote>
+          <p>[!NOTE]</p>
+          <p>When agent observability is enabled (<code>AGENT_OBSERVABILITY_ENABLED=true</code>), instrumentation is skipped when a conflicting third-party instrumentation is detected for the same framework.</p>
+          <p>You may set <code>AWS_GENAI_INSTRUMENTATION=disabled</code> to force all of the above instrumentations to remain disabled if you are using another instrumentation source and automatic detection does not work. If another third-party instrumentation is installed, you should uninstall it or otherwise resolve any dependency conflicts before using the above instrumentations.</p>
+          <p>You may set <code>AWS_GENAI_INSTRUMENTATION=enabled</code> to force the above instrumentations to load. We recommend that you do not use this setting when third-party instrumentation for the same framework is enabled, because both instrumentations may run and produce duplicate or inconsistent telemetry.</p>
+        </blockquote>
+        <br>
+      </td>
+    </tr>
+  </tbody>
+</table>
+
 ## Support
 
 Please note that as per policy, we're providing support via GitHub on a best effort basis. However, if you have AWS Enterprise Support you can create a ticket and we will provide direct support within the respective SLAs.
