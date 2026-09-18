@@ -5,6 +5,11 @@ import os
 from typing import Any, Dict, Optional
 
 from plugins.opentelemetry.cloudwatch.span_metrics._constants import (
+    AWS_DYNAMODB_TABLE_NAMES,
+    AWS_LAMBDA_INVOKED_ARN,
+    AWS_S3_BUCKET,
+    AWS_SNS_TOPIC_ARN,
+    AWS_SQS_QUEUE_URL,
     DB_CASSANDRA_TABLE,
     DB_COLLECTION_NAME,
     DB_COSMOSDB_CONTAINER,
@@ -15,21 +20,36 @@ from plugins.opentelemetry.cloudwatch.span_metrics._constants import (
     DB_SYSTEM,
     DB_SYSTEM_NAME,
     ERROR_TYPE,
+    FAAS_INVOKED_NAME,
+    FAAS_INVOKED_PROVIDER,
+    FAAS_INVOKED_REGION,
+    FAAS_TRIGGER,
+    GEN_AI_OPERATION_NAME,
+    GEN_AI_PROVIDER_NAME,
+    GEN_AI_REQUEST_MODEL,
     HTTP_METHOD,
     HTTP_REQUEST_METHOD,
     HTTP_RESPONSE_STATUS_CODE,
     HTTP_ROUTE,
     HTTP_STATUS_CODE,
+    MESSAGING_CONSUMER_GROUP_NAME,
     MESSAGING_DESTINATION,
     MESSAGING_DESTINATION_ANONYMOUS,
     MESSAGING_DESTINATION_NAME,
     MESSAGING_DESTINATION_TEMPORARY,
     MESSAGING_OPERATION_NAME,
+    MESSAGING_OPERATION_TYPE,
     MESSAGING_SYSTEM,
+    NET_HOST_NAME,
+    NET_HOST_PORT,
+    NET_PEER_NAME,
+    NET_PEER_PORT,
     RPC_METHOD,
     RPC_SERVICE,
     RPC_SYSTEM,
     RPC_SYSTEM_NAME,
+    SERVER_ADDRESS,
+    SERVER_PORT,
     _SpanMetrics,
 )
 from plugins.opentelemetry.cloudwatch.version import __version__
@@ -154,8 +174,30 @@ class SpanMetricsConnector(SpanProcessor):
             DB_CASSANDRA_TABLE,
             DB_COSMOSDB_CONTAINER,
         )
+        # Messaging (https://opentelemetry.io/docs/specs/semconv/messaging/messaging-metrics/)
         self._copy(attributes, span_attributes, MESSAGING_SYSTEM)
         self._copy(attributes, span_attributes, MESSAGING_OPERATION_NAME)
+        self._copy(attributes, span_attributes, MESSAGING_OPERATION_TYPE)
+        self._copy(attributes, span_attributes, MESSAGING_CONSUMER_GROUP_NAME)
+        # Peer (https://opentelemetry.io/docs/specs/semconv/registry/attributes/server/)
+        self._copy(attributes, span_attributes, SERVER_ADDRESS, NET_PEER_NAME, NET_HOST_NAME)
+        self._copy(attributes, span_attributes, SERVER_PORT, NET_PEER_PORT, NET_HOST_PORT)
+        # GenAI (https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-metrics/)
+        self._copy(attributes, span_attributes, GEN_AI_REQUEST_MODEL)
+        self._copy(attributes, span_attributes, GEN_AI_PROVIDER_NAME)
+        self._copy(attributes, span_attributes, GEN_AI_OPERATION_NAME)
+        # AWS resource identity (https://opentelemetry.io/docs/specs/semconv/registry/attributes/aws/)
+        self._copy(attributes, span_attributes, AWS_S3_BUCKET)
+        # aws.dynamodb.table_names is a string array per semconv; copied through unchanged, not normalized.
+        self._copy(attributes, span_attributes, AWS_DYNAMODB_TABLE_NAMES)
+        self._copy(attributes, span_attributes, AWS_LAMBDA_INVOKED_ARN)
+        self._copy(attributes, span_attributes, AWS_SNS_TOPIC_ARN)
+        self._copy(attributes, span_attributes, AWS_SQS_QUEUE_URL)
+        # FaaS (https://opentelemetry.io/docs/specs/semconv/registry/attributes/faas/)
+        self._copy(attributes, span_attributes, FAAS_INVOKED_NAME)
+        self._copy(attributes, span_attributes, FAAS_INVOKED_PROVIDER)
+        self._copy(attributes, span_attributes, FAAS_INVOKED_REGION)
+        self._copy(attributes, span_attributes, FAAS_TRIGGER)
 
         if (
             span_attributes.get(MESSAGING_DESTINATION_TEMPORARY) is not True

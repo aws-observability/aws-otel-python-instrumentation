@@ -10,6 +10,7 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- Add peer, GenAI, AWS resource-identity, FaaS, and messaging derived dimensions, with legacy net.peer.*/net.host.* fallbacks for server.address/server.port ([#896](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/896))
 - `service.name` is no longer emitted as a metric datapoint attribute; it is carried by the
   metric's resource (the host SDK's resource). Consumers reading `service.name` from datapoint
   dimensions must read it from the resource instead.
