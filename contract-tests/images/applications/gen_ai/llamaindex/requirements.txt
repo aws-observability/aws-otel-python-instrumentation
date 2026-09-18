@@ -1,5 +1,6 @@
 llama-index>=0.10.0
-llama-index-core>=0.10.0
+llama-index-core>=0.13.0,<1
+llama-index-workflows>=1.0.1,!=2.24.0,<3
 llama-index-llms-bedrock-converse
 llama-index-llms-openai>=0.1.0
 starlette
