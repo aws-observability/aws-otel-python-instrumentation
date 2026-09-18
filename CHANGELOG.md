@@ -18,6 +18,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   ([#893](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/893))
 - fix: restrict native GenAI instrumentations to supported dependency major versions
   ([#884](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/884))
+- fix(llamaindex): exclude broken `llama-index-workflows` 2.24.0 from supported dependencies
+  ([#898](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/898))
 - fix(langchain): propagate first input, last output, and system instructions to internal agent spans
   ([#889](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/889))
 - feat: redact span, span event, and span link attributes via `AWS_REDACT_SPAN_ATTRIBUTES`
