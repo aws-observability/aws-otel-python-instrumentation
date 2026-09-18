@@ -104,6 +104,15 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         self.instrumentor.uninstrument()
         self.span_exporter.clear()
 
+    def test_instrumentation_dependencies(self):
+        self.assertEqual(
+            self.instrumentor.instrumentation_dependencies(),
+            (
+                "llama-index-core >= 0.13.0, < 1",
+                "llama-index-workflows >= 1.0.1, != 2.24.0, < 3",
+            ),
+        )
+
     def test_llm_chat_start_event(self):
         from llama_index.core.instrumentation.events.llm import LLMChatStartEvent
 
