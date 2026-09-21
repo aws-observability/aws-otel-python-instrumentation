@@ -19,7 +19,10 @@ class LlamaIndexInstrumentor(BaseInstrumentor):  # type: ignore
     _event_handler = None
 
     def instrumentation_dependencies(self) -> Collection[str]:  # pylint: disable=no-self-use
-        return ("llama-index-core >= 0.13.0, < 1",)
+        return (
+            "llama-index-core >= 0.13.0, < 1",
+            "llama-index-workflows >= 1.0.1, != 2.24.0, < 3",
+        )
 
     def _instrument(self, **kwargs: Any) -> None:  # pylint: disable=no-self-use
         tracer_provider = kwargs.get("tracer_provider") or trace.get_tracer_provider()
