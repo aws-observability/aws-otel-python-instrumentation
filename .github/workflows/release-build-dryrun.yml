@@ -63,6 +63,33 @@ jobs:
           gh run download "$RUN_ID" -n layer.zip -D layer
           gh run download "$RUN_ID" -n staging-image -D staging-ref
 
+      # DRY RUN evidence: print what the resolved MAIN BUILD produced vs what RELEASE will promote,
+      # and confirm the run we picked was built from the exact commit being released.
+      - name: "DRY RUN: artifact identity (main-build vs promoted)"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ steps.main_build.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          run_sha=$(gh api "repos/${{ github.repository }}/actions/runs/$RUN_ID" --jq '.head_sha')
+          wheel=$(find dist -maxdepth 1 -name 'aws_opentelemetry_distro-*-py3-none-any.whl' | head -1)
+          built=$(basename "$wheel" | sed -E 's#aws_opentelemetry_distro-(.+)-py3-none-any\.whl#\1#')
+          ref=$(cat staging-ref/staging-image.txt)
+          echo "=== MAIN BUILD (resolved run $RUN_ID) ==="
+          echo "  built from commit: $run_sha"
+          echo "  wheel version:     $built"
+          echo "  staging image ref: $ref"
+          echo "=== RELEASE (would promote) ==="
+          echo "  release commit:    ${{ github.sha }}"
+          echo "  wheel version:     $built"
+          echo "  staging image ref: $ref"
+          echo "=== CHECK ==="
+          if [ "$run_sha" = "${{ github.sha }}" ]; then
+            echo "PASS: promoted artifacts come from the main build of the exact release commit"
+          else
+            echo "FAIL: resolved run commit ($run_sha) != release commit (${{ github.sha }})"; exit 1
+          fi
+
       # Guard against a mis-typed version: the wheel built by the selected run must carry the exact
       # version we're releasing, before anything is published/tagged.
       - name: Assert wheel version matches release version
@@ -183,7 +210,7 @@ jobs:
 
       # The step below publishes to TestPyPI in order to catch any issues
       - name: Publish to TestPyPI
-        if: false  # DRY RUN: consequence step disabled
+        if: false  # DRY RUN: publish disabled
         uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e #v1.13.0
         with:
           repository-url: https://test.pypi.org/legacy/
@@ -194,7 +221,7 @@ jobs:
 
       # Publish to prod PyPI
       - name: Publish to PyPI
-        if: false  # DRY RUN: consequence step disabled
+        if: false  # DRY RUN: publish disabled
         uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e #v1.13.0
         with:
           skip-existing: true
@@ -202,7 +229,7 @@ jobs:
           packages-dir: dist-pypi
 
       - name: Promote validated main-build image to release ECRs
-        if: false  # DRY RUN: consequence step disabled
+        if: false  # DRY RUN: publish disabled
         run: |
           set -euo pipefail
 
@@ -219,7 +246,7 @@ jobs:
             "$validated_image"
 
       - name: Tag platform images in private ECR
-        if: false  # DRY RUN: consequence step disabled
+        if: false  # DRY RUN: publish disabled
         env:
           REPO_NAME: adot-autoinstrumentation-python
           VERSION: ${{ env.VERSION }}
@@ -298,7 +325,7 @@ jobs:
           done
   
   publish-layer-prod:
-    if: false  # DRY RUN: all-write job disabled (downstream jobs cascade-skip)
+    if: false  # DRY RUN: all-write job disabled (downstream cascade-skips)
     runs-on: ubuntu-latest
     needs: [download-artifacts, publish-sdk]
     strategy:
