@@ -1,4 +1,4 @@
-name: Release Build
+name: Release Build (DRY RUN - no publish)
 on:
   workflow_dispatch:
     inputs:
@@ -37,7 +37,6 @@ permissions:
 
 jobs:
   download-artifacts:
-    environment: Release
     runs-on: ubuntu-latest
     outputs:
       aws_regions_json: ${{ steps.set-matrix.outputs.aws_regions_json }}
@@ -184,6 +183,7 @@ jobs:
 
       # The step below publishes to TestPyPI in order to catch any issues
       - name: Publish to TestPyPI
+        if: false  # DRY RUN: consequence step disabled
         uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e #v1.13.0
         with:
           repository-url: https://test.pypi.org/legacy/
@@ -194,6 +194,7 @@ jobs:
 
       # Publish to prod PyPI
       - name: Publish to PyPI
+        if: false  # DRY RUN: consequence step disabled
         uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e #v1.13.0
         with:
           skip-existing: true
@@ -201,6 +202,7 @@ jobs:
           packages-dir: dist-pypi
 
       - name: Promote validated main-build image to release ECRs
+        if: false  # DRY RUN: consequence step disabled
         run: |
           set -euo pipefail
 
@@ -217,6 +219,7 @@ jobs:
             "$validated_image"
 
       - name: Tag platform images in private ECR
+        if: false  # DRY RUN: consequence step disabled
         env:
           REPO_NAME: adot-autoinstrumentation-python
           VERSION: ${{ env.VERSION }}
@@ -295,6 +298,7 @@ jobs:
           done
   
   publish-layer-prod:
+    if: false  # DRY RUN: all-write job disabled (downstream jobs cascade-skip)
     runs-on: ubuntu-latest
     needs: [download-artifacts, publish-sdk]
     strategy:
