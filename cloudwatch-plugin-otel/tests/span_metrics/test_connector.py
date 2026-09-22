@@ -17,6 +17,7 @@ from plugins.opentelemetry.cloudwatch.version import __version__
 from sqlalchemy import create_engine, text
 
 from opentelemetry.environment_variables import OTEL_METRICS_EXPORTER
+from opentelemetry.instrumentation._semconv import _OpenTelemetrySemanticConventionStability
 from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
 from opentelemetry.instrumentation.flask import FlaskInstrumentor
 from opentelemetry.instrumentation.requests import RequestsInstrumentor
@@ -25,6 +26,13 @@ from opentelemetry.instrumentation.sqlite3 import SQLite3Instrumentor
 from opentelemetry.metrics import NoOpMeterProvider
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan
+from opentelemetry.semconv._incubating.attributes.aws_attributes import (
+    AWS_DYNAMODB_TABLE_NAMES,
+    AWS_LAMBDA_INVOKED_ARN,
+    AWS_S3_BUCKET,
+    AWS_SNS_TOPIC_ARN,
+    AWS_SQS_QUEUE_URL,
+)
 from opentelemetry.semconv._incubating.attributes.db_attributes import (
     DB_CASSANDRA_TABLE,
     DB_COLLECTION_NAME,
@@ -36,12 +44,25 @@ from opentelemetry.semconv._incubating.attributes.db_attributes import (
     DB_SYSTEM,
     DB_SYSTEM_NAME,
 )
+from opentelemetry.semconv._incubating.attributes.faas_attributes import (
+    FAAS_INVOKED_NAME,
+    FAAS_INVOKED_PROVIDER,
+    FAAS_INVOKED_REGION,
+    FAAS_TRIGGER,
+)
+from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
+    GEN_AI_OPERATION_NAME,
+    GEN_AI_PROVIDER_NAME,
+    GEN_AI_REQUEST_MODEL,
+)
 from opentelemetry.semconv._incubating.attributes.http_attributes import HTTP_METHOD, HTTP_STATUS_CODE
 from opentelemetry.semconv._incubating.attributes.messaging_attributes import (
+    MESSAGING_CONSUMER_GROUP_NAME,
     MESSAGING_DESTINATION_ANONYMOUS,
     MESSAGING_DESTINATION_NAME,
     MESSAGING_DESTINATION_TEMPORARY,
     MESSAGING_OPERATION_NAME,
+    MESSAGING_OPERATION_TYPE,
     MESSAGING_SYSTEM,
 )
 from opentelemetry.semconv._incubating.attributes.rpc_attributes import (
@@ -52,6 +73,7 @@ from opentelemetry.semconv._incubating.attributes.rpc_attributes import (
 )
 from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
 from opentelemetry.semconv.attributes.http_attributes import HTTP_REQUEST_METHOD, HTTP_RESPONSE_STATUS_CODE, HTTP_ROUTE
+from opentelemetry.semconv.attributes.server_attributes import SERVER_ADDRESS, SERVER_PORT
 from opentelemetry.semconv.attributes.service_attributes import SERVICE_NAME
 from opentelemetry.semconv.trace import SpanAttributes
 from opentelemetry.test.test_base import TestBase
@@ -413,6 +435,138 @@ class TestSpanMetricsConnector(SpanMetricsConnectorTestBase):
         self.assertEqual(duration_points, [])
 
 
+class TestSpanMetricsConnectorDerivedAttributes(SpanMetricsConnectorTestBase):
+    """Deterministic per-family checks for the derived semantic-convention attributes.
+
+    Each family (messaging op/consumer-group, peer, GenAI, AWS resource identity, FaaS) is copied
+    through when present on the span, and keys outside the allowlist are dropped.
+    """
+
+    def test_messaging_operation_type_and_consumer_group_copied(self):
+        calls = self.record_span(
+            "messaging-op-type",
+            kind=SpanKind.CONSUMER,
+            attributes={
+                MESSAGING_SYSTEM: "kafka",
+                MESSAGING_OPERATION_TYPE: "receive",
+                MESSAGING_CONSUMER_GROUP_NAME: "order-processors",
+            },
+        )
+        self.assertEqual(calls.attributes[MESSAGING_OPERATION_TYPE], "receive")
+        self.assertEqual(calls.attributes[MESSAGING_CONSUMER_GROUP_NAME], "order-processors")
+
+    def test_peer_attributes_copied(self):
+        calls = self.record_span(
+            "peer",
+            kind=SpanKind.CLIENT,
+            attributes={
+                SERVER_ADDRESS: "payments.example.com",
+                SERVER_PORT: 8443,
+                "network.peer.address": "10.0.0.1",  # not allowlisted
+            },
+        )
+        self.assertEqual(calls.attributes[SERVER_ADDRESS], "payments.example.com")
+        # server.port is an int per semconv, not a string dimension.
+        self.assertEqual(calls.attributes[SERVER_PORT], 8443)
+        self.assertNotIn("network.peer.address", calls.attributes)
+
+    def test_legacy_peer_attributes_pass_through_under_legacy_keys(self):
+        calls = self.record_span(
+            "peer-legacy-client",
+            kind=SpanKind.CLIENT,
+            attributes={"net.peer.name": "payments.example.com", "net.peer.port": 8443},
+        )
+        self.assertEqual(calls.attributes["net.peer.name"], "payments.example.com")
+        self.assertEqual(calls.attributes["net.peer.port"], 8443)
+        self.assertNotIn(SERVER_ADDRESS, calls.attributes)
+        self.assertNotIn(SERVER_PORT, calls.attributes)
+
+    def test_legacy_server_span_peer_attributes_pass_through(self):
+        calls = self.record_span(
+            "peer-legacy-server",
+            kind=SpanKind.SERVER,
+            attributes={"net.host.name": "payments.example.com", "net.host.port": 8443},
+        )
+        self.assertEqual(calls.attributes["net.host.name"], "payments.example.com")
+        self.assertEqual(calls.attributes["net.host.port"], 8443)
+        self.assertNotIn(SERVER_ADDRESS, calls.attributes)
+        self.assertNotIn(SERVER_PORT, calls.attributes)
+
+    def test_current_peer_attributes_win_over_legacy(self):
+        calls = self.record_span(
+            "peer-precedence",
+            kind=SpanKind.CLIENT,
+            attributes={SERVER_ADDRESS: "payments.example.com", "net.peer.name": "legacy.example.com"},
+        )
+        self.assertEqual(calls.attributes[SERVER_ADDRESS], "payments.example.com")
+        self.assertNotIn("net.peer.name", calls.attributes)
+
+    def test_gen_ai_attributes_copied(self):
+        calls = self.record_span(
+            "gen-ai",
+            kind=SpanKind.CLIENT,
+            attributes={
+                GEN_AI_REQUEST_MODEL: "claude-sonnet-4",
+                GEN_AI_PROVIDER_NAME: "aws.bedrock",
+                GEN_AI_OPERATION_NAME: "chat",
+            },
+        )
+        self.assertEqual(calls.attributes[GEN_AI_REQUEST_MODEL], "claude-sonnet-4")
+        self.assertEqual(calls.attributes[GEN_AI_PROVIDER_NAME], "aws.bedrock")
+        self.assertEqual(calls.attributes[GEN_AI_OPERATION_NAME], "chat")
+
+    def test_aws_resource_identity_attributes_copied(self):
+        calls = self.record_span(
+            "aws-resource-identity",
+            kind=SpanKind.CLIENT,
+            attributes={
+                AWS_S3_BUCKET: "my-bucket",
+                AWS_DYNAMODB_TABLE_NAMES: ("orders", "items"),
+                AWS_LAMBDA_INVOKED_ARN: "arn:aws:lambda:us-east-1:123:function:fn",
+                AWS_SNS_TOPIC_ARN: "arn:aws:sns:us-east-1:123:topic",
+                AWS_SQS_QUEUE_URL: "https://sqs.us-east-1.amazonaws.com/123/queue",
+            },
+        )
+        self.assertEqual(calls.attributes[AWS_S3_BUCKET], "my-bucket")
+        # table_names stays a sequence per semconv; copied through unchanged, not normalized to a scalar.
+        self.assertEqual(tuple(calls.attributes[AWS_DYNAMODB_TABLE_NAMES]), ("orders", "items"))
+        self.assertEqual(calls.attributes[AWS_LAMBDA_INVOKED_ARN], "arn:aws:lambda:us-east-1:123:function:fn")
+        self.assertEqual(calls.attributes[AWS_SNS_TOPIC_ARN], "arn:aws:sns:us-east-1:123:topic")
+        self.assertEqual(calls.attributes[AWS_SQS_QUEUE_URL], "https://sqs.us-east-1.amazonaws.com/123/queue")
+
+    def test_faas_attributes_copied(self):
+        calls = self.record_span(
+            "faas",
+            kind=SpanKind.CLIENT,
+            attributes={
+                FAAS_INVOKED_NAME: "my-function",
+                FAAS_INVOKED_PROVIDER: "aws",
+                FAAS_INVOKED_REGION: "us-east-1",
+                FAAS_TRIGGER: "http",
+            },
+        )
+        self.assertEqual(calls.attributes[FAAS_INVOKED_NAME], "my-function")
+        self.assertEqual(calls.attributes[FAAS_INVOKED_PROVIDER], "aws")
+        self.assertEqual(calls.attributes[FAAS_INVOKED_REGION], "us-east-1")
+        self.assertEqual(calls.attributes[FAAS_TRIGGER], "http")
+
+    def test_not_allowlisted_key_dropped(self):
+        calls = self.record_span(
+            "not-allowlisted",
+            kind=SpanKind.CLIENT,
+            attributes={
+                SERVER_ADDRESS: "payments.example.com",
+                "aws.dynamodb.item_collection_metrics": "x",  # not allowlisted
+                "gen_ai.prompt": "secret",  # not allowlisted
+                "faas.name": "local-fn",  # not allowlisted (only faas.invoked_* are)
+            },
+        )
+        self.assertEqual(calls.attributes[SERVER_ADDRESS], "payments.example.com")
+        self.assertNotIn("aws.dynamodb.item_collection_metrics", calls.attributes)
+        self.assertNotIn("gen_ai.prompt", calls.attributes)
+        self.assertNotIn("faas.name", calls.attributes)
+
+
 class TestSpanMetricsConnectorHttpClient(SpanMetricsConnectorTestBase):
     class _Handler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -478,6 +632,72 @@ class TestSpanMetricsConnectorHttpClient(SpanMetricsConnectorTestBase):
         self.assertEqual(calls.attributes[HTTP_STATUS_CODE], 201)
         self.assertNotIn(HTTP_REQUEST_METHOD, calls.attributes)
         self.assertNotIn(HTTP_RESPONSE_STATUS_CODE, calls.attributes)
+
+
+class TestSpanMetricsConnectorPeerFromRealClientSpan(SpanMetricsConnectorTestBase):
+    """End-to-end check that server.address flows from a real, instrumented client span.
+
+    Mirrors the Java contract test that drives a real gRPC client call: here a real HTTP request
+    through the requests instrumentor produces the client span. server.address is copied as a string
+    dimension, and the HTTP client span reliably carries it once the instrumentation emits the stable
+    HTTP semantic conventions (OTEL_SEMCONV_STABILITY_OPT_IN=http). This is the end-to-end check for
+    the peer family.
+
+    The other new families (GenAI, FaaS, and the AWS resource-identity keys) stay unit-only: the test
+    harness has no real instrumentation that produces those spans, so they are covered deterministically
+    in TestSpanMetricsConnector instead.
+    """
+
+    class _Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, *args):
+            return
+
+    def setUp(self):
+        super().setUp()
+        self.server = HTTPServer(("127.0.0.1", 0), self._Handler)
+        self.port = self.server.server_address[1]
+        self.server_thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.server_thread.start()
+        # The requests instrumentor emits server.address only under the stable HTTP semconv, gated by
+        # this opt-in. The stability mode is a process-global initialized once from the environment,
+        # so patch the env and reset the cached state to force re-initialization for this test.
+        self._semconv_patch = patch.dict(os.environ, {"OTEL_SEMCONV_STABILITY_OPT_IN": "http"})
+        self._semconv_patch.start()
+        _OpenTelemetrySemanticConventionStability._initialized = False
+        _OpenTelemetrySemanticConventionStability._initialize()
+        RequestsInstrumentor().instrument(tracer_provider=self.tracer_provider)
+
+    def tearDown(self):
+        RequestsInstrumentor().uninstrument()
+        self._semconv_patch.stop()
+        # Reset the process-global stability state so later tests re-read the default environment.
+        _OpenTelemetrySemanticConventionStability._initialized = False
+        _OpenTelemetrySemanticConventionStability._initialize()
+        self.server.shutdown()
+        self.server_thread.join(timeout=5)
+        super().tearDown()
+
+    def test_server_address_flows_from_client_span(self):
+        response = requests.get(f"http://127.0.0.1:{self.port}/ok", timeout=5)
+        self.assertEqual(response.status_code, 200)
+
+        span = self.get_finished_spans().by_name("GET")
+        self.assertEqual(span.kind, SpanKind.CLIENT)
+
+        calls = self.get_metric_data_point(_SpanMetrics.CALLS_NAME, "GET")
+        # Older instrumentation emits the pre-1.21 net.peer.* keys, newer emits the stable server.*
+        # keys; either spelling is a valid peer dimension, so accept whichever the installed version
+        # produces.
+        peer_address = calls.attributes.get(SERVER_ADDRESS, calls.attributes.get("net.peer.name"))
+        peer_port = calls.attributes.get(SERVER_PORT, calls.attributes.get("net.peer.port"))
+        self.assertEqual(peer_address, "127.0.0.1")
+        # The peer port is an int per semconv, copied through as a numeric dimension.
+        self.assertEqual(peer_port, self.port)
 
 
 class TestSpanMetricsConnectorHttpServer(SpanMetricsConnectorTestBase):
