@@ -12,6 +12,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+## v0.20.0 - 2026-09-14
+
 - feat(genai): add AWS-prefixed controls for GenAI instrumentation, MCP HTTP suppression, OpenAI Agents
   trace export, and span attribute redaction; retain `AWS_AGENTIC_INSTRUMENTATION` and
   `OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION` as legacy fallbacks
