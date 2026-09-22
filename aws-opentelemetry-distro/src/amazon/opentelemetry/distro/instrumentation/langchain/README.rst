@@ -21,6 +21,13 @@ Install the distribution and a supported LangChain version:
 
     pip install aws-opentelemetry-distro "langchain>=0.3.21,<2"
 
+Known issue
+-----------
+
+LangChain's asynchronous API, including ``ainvoke`` and ``astream``, is
+currently not supported. There is a known limitation with trace context
+propagation in async calls. The synchronous API is not affected.
+
 Usage
 -----
 
