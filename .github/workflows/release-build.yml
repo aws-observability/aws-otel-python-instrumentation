@@ -180,11 +180,6 @@ jobs:
           name: ${{ env.SOURCE_ARTIFACT_NAME }}
           path: dist-pypi
 
-      # Promote the image BEFORE publishing to PyPI. A PyPI version is permanent (can't be reused,
-      # only yanked), while a release image tag can be overwritten on a re-run. So we push the
-      # recoverable artifact first: if imagetools create fails (staging digest gone, role can't
-      # pull, ECR throttles), the release aborts before vX.Y.Z is ever published to PyPI, avoiding a
-      # permanent PyPI version with no matching image. Download the ref first (a read, not a push).
       - name: Download validated image reference
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
         with:
@@ -224,7 +219,6 @@ jobs:
           skip-existing: true
           verbose: true
           packages-dir: dist-pypi
-
 
       - name: Tag platform images in private ECR
         env:
