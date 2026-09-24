@@ -180,14 +180,32 @@ jobs:
           name: ${{ env.SOURCE_ARTIFACT_NAME }}
           path: dist-pypi
 
-      # Download the validated image reference up front (a read, not a push) so that every step that
-      # actually pushes to a public channel -- PyPI, then the ECR promote -- runs last and back-to-back,
-      # minimizing the window for a partial-published state.
+      # Promote the image BEFORE publishing to PyPI. A PyPI version is permanent (can't be reused,
+      # only yanked), while a release image tag can be overwritten on a re-run. So we push the
+      # recoverable artifact first: if imagetools create fails (staging digest gone, role can't
+      # pull, ECR throttles), the release aborts before vX.Y.Z is ever published to PyPI, avoiding a
+      # permanent PyPI version with no matching image. Download the ref first (a read, not a push).
       - name: Download validated image reference
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
         with:
           name: staging-image
           path: staging-image
+
+      - name: Promote validated main-build image to release ECRs
+        run: |
+          set -euo pipefail
+
+          # e.g. 637...amazonaws.com/aws-observability/adot-autoinstrumentation-python-staging@sha256:<digest>
+          validated_image="$(cat staging-image/staging-image.txt)"
+          echo "Promoting validated image: $validated_image"
+
+          # Copy that one multi-arch image (all architectures + attestations) into both release
+          # repos under the v<version> tag. imagetools copies the manifest by reference, so no
+          # rebuild happens and the released bits are identical to what main-build validated.
+          docker buildx imagetools create \
+            --tag "${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ env.VERSION }}" \
+            --tag "${{ env.RELEASE_PRIVATE_REPOSITORY }}:v${{ env.VERSION }}" \
+            "$validated_image"
 
       # The step below publishes to TestPyPI in order to catch any issues
       - name: Publish to TestPyPI
@@ -207,21 +225,6 @@ jobs:
           verbose: true
           packages-dir: dist-pypi
 
-      - name: Promote validated main-build image to release ECRs
-        run: |
-          set -euo pipefail
-
-          # e.g. 637...amazonaws.com/aws-observability/adot-autoinstrumentation-python-staging@sha256:<digest>
-          validated_image="$(cat staging-image/staging-image.txt)"
-          echo "Promoting validated image: $validated_image"
-
-          # Copy that one multi-arch image (all architectures + attestations) into both release
-          # repos under the v<version> tag. imagetools copies the manifest by reference, so no
-          # rebuild happens and the released bits are identical to what main-build validated.
-          docker buildx imagetools create \
-            --tag "${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ env.VERSION }}" \
-            --tag "${{ env.RELEASE_PRIVATE_REPOSITORY }}:v${{ env.VERSION }}" \
-            "$validated_image"
 
       - name: Tag platform images in private ECR
         env:
