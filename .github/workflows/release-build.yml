@@ -39,6 +39,13 @@ jobs:
   download-artifacts:
     environment: Release
     runs-on: ubuntu-latest
+    # Selects another workflow run and downloads its artifacts cross-run; both the workflow-run
+    # query and the cross-run artifact download require actions: read. The workflow-level
+    # permissions block is declared, so unlisted scopes default to none -- grant it here at job
+    # level only (the publish jobs don't need it).
+    permissions:
+      actions: read
+      contents: read
     outputs:
       aws_regions_json: ${{ steps.set-matrix.outputs.aws_regions_json }}
     steps:
