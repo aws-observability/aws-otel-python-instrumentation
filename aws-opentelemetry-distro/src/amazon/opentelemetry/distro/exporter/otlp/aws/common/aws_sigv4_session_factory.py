@@ -75,8 +75,8 @@ _SIGNAL_TABLE: Tuple[Tuple[str, str, str], ...] = (
 # by the configurator's auto-detection (AWS_TRACES_OTLP_ENDPOINT_PATTERN /
 # AWS_LOGS_OTLP_ENDPOINT_PATTERN) so the two paths agree on what counts as an
 # AWS endpoint.
-_AWS_TRACES_OTLP_ENDPOINT_PATTERN = re.compile(r"https://xray\.([a-z0-9-]+)\.amazonaws\.com/v1/traces$")
-_AWS_LOGS_OTLP_ENDPOINT_PATTERN = re.compile(r"https://logs\.([a-z0-9-]+)\.amazonaws\.com/v1/logs$")
+_AWS_TRACES_OTLP_ENDPOINT_PATTERN = re.compile(r"https://xray\.([a-z0-9-]+)\.amazonaws\.com(?:\.cn)?/v1/traces$")
+_AWS_LOGS_OTLP_ENDPOINT_PATTERN = re.compile(r"https://logs\.([a-z0-9-]+)\.amazonaws\.com(?:\.cn)?/v1/logs$")
 _AWS_METRICS_OTLP_ENDPOINT_PATTERN = re.compile(r"https://monitoring\.([a-z0-9-]+)\.amazonaws\.com/v1/metrics$")
 _INFERENCE_RULES = (
     (lambda endpoint, host: bool(_AWS_TRACES_OTLP_ENDPOINT_PATTERN.match(endpoint)), "xray"),

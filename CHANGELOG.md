@@ -12,6 +12,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- fix(agent-observability): support X-Ray and CloudWatch Logs OTLP endpoints in AWS China regions
+
 ## v0.20.0 - 2026-09-14
 
 - feat(genai): add AWS-prefixed controls for GenAI instrumentation, MCP HTTP suppression, OpenAI Agents

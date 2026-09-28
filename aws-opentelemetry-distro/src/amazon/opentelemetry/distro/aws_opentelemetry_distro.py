@@ -215,11 +215,12 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
             region = get_aws_region()
             if not os.environ.get(OTEL_EXPORTER_OTLP_ENDPOINT):
                 if region:
+                    endpoint_suffix = "amazonaws.com.cn" if region.startswith("cn-") else "amazonaws.com"
                     os.environ.setdefault(
-                        OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, f"https://xray.{region}.amazonaws.com/v1/traces"
+                        OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, f"https://xray.{region}.{endpoint_suffix}/v1/traces"
                     )
                     os.environ.setdefault(
-                        OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, f"https://logs.{region}.amazonaws.com/v1/logs"
+                        OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, f"https://logs.{region}.{endpoint_suffix}/v1/logs"
                     )
                 else:
                     _logger.warning(

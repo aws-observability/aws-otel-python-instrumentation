@@ -171,6 +171,25 @@ class TestAwsOpenTelemetryDistro(TestCase):
         self.assertEqual(os.environ.get(APPLICATION_SIGNALS_ENABLED_CONFIG), "false")
         self.assertEqual(os.environ.get("OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS"), "false")
 
+    def test_configure_with_agent_observability_enabled_in_china_regions(self):
+        """Test that agent observability uses the AWS China DNS suffix in China regions."""
+        for region in ("cn-north-1", "cn-northwest-1"):
+            with self.subTest(region=region):
+                try:
+                    self._configure_with_agent_observability(region)
+
+                    self.assertEqual(
+                        os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT),
+                        f"https://xray.{region}.amazonaws.com.cn/v1/traces",
+                    )
+                    self.assertEqual(
+                        os.environ.get(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT),
+                        f"https://logs.{region}.amazonaws.com.cn/v1/logs",
+                    )
+                finally:
+                    os.environ.pop(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, None)
+                    os.environ.pop(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, None)
+
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.get_aws_region")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.is_agent_observability_enabled")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.apply_instrumentation_patches")
