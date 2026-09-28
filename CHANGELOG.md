@@ -12,6 +12,10 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- fix: support AWS China partition endpoints (`amazonaws.com.cn`) for collector-less CloudWatch Logs and X-Ray
+  OTLP export
+  ([#906](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/906))
+
 ## v0.20.0 - 2026-09-14
 
 - feat(genai): add AWS-prefixed controls for GenAI instrumentation, MCP HTTP suppression, OpenAI Agents
