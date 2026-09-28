@@ -97,5 +97,19 @@ def get_aws_region() -> Optional[str]:
     return botocore_session.get_config_variable("region") if botocore_session else None
 
 
+def get_aws_dns_suffix(region: Optional[str]) -> str:
+    """Return the DNS suffix for the partition a region belongs to.
+
+    The AWS China partition (regions ``cn-north-1`` / ``cn-northwest-1``) serves
+    its endpoints under ``amazonaws.com.cn``; every other partition this distro
+    targets (``aws`` and ``aws-us-gov``) uses ``amazonaws.com``. This is
+    intentionally dependency-free (no botocore required) so it can be used on the
+    default-endpoint path, which must work without botocore installed.
+    """
+    if region and region.startswith("cn-"):
+        return "amazonaws.com.cn"
+    return "amazonaws.com"
+
+
 def is_account_id(input_str: str) -> bool:
     return input_str is not None and input_str.isdigit()

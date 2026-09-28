@@ -116,8 +116,10 @@ OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS = "OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS"
 
 XRAY_SERVICE = "xray"
 LOGS_SERIVCE = "logs"
-AWS_TRACES_OTLP_ENDPOINT_PATTERN = r"https://xray\.([a-z0-9-]+)\.amazonaws\.com/v1/traces$"
-AWS_LOGS_OTLP_ENDPOINT_PATTERN = r"https://logs\.([a-z0-9-]+)\.amazonaws\.com/v1/logs$"
+# The optional ``.cn`` suffix also matches AWS China partition endpoints
+# (``amazonaws.com.cn``) so they are routed through the SigV4 exporter.
+AWS_TRACES_OTLP_ENDPOINT_PATTERN = r"https://xray\.([a-z0-9-]+)\.amazonaws\.com(?:\.cn)?/v1/traces$"
+AWS_LOGS_OTLP_ENDPOINT_PATTERN = r"https://logs\.([a-z0-9-]+)\.amazonaws\.com(?:\.cn)?/v1/logs$"
 
 AWS_OTLP_LOGS_GROUP_HEADER = "x-aws-log-group"
 AWS_OTLP_LOGS_STREAM_HEADER = "x-aws-log-stream"

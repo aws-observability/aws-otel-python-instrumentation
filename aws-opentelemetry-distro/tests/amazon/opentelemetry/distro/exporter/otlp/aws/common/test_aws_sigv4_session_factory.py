@@ -100,6 +100,29 @@ class TestAwsSigV4SessionFactory(TestCase):
 
     @patch(f"{_PROVIDER_MODULE}.IS_BOTOCORE_INSTALLED", True)
     @patch(f"{_PROVIDER_MODULE}._detect_signal_from_stack", return_value="traces")
+    def test_traces_endpoint_china_partition_resolves_xray(self, _mock_signal):
+        # China partition (amazonaws.com.cn) must be recognized so the request is SigV4-signed.
+        os.environ["AWS_REGION"] = "cn-north-1"
+        os.environ[_TRACES_ENDPOINT] = "https://xray.cn-north-1.amazonaws.com.cn/v1/traces"
+
+        session = aws_sigv4_session()
+
+        # pylint: disable=protected-access
+        self.assertEqual(session._service, "xray")
+
+    @patch(f"{_PROVIDER_MODULE}.IS_BOTOCORE_INSTALLED", True)
+    @patch(f"{_PROVIDER_MODULE}._detect_signal_from_stack", return_value="logs")
+    def test_logs_endpoint_china_partition_resolves_logs(self, _mock_signal):
+        os.environ["AWS_REGION"] = "cn-northwest-1"
+        os.environ[_LOGS_ENDPOINT] = "https://logs.cn-northwest-1.amazonaws.com.cn/v1/logs"
+
+        session = aws_sigv4_session()
+
+        # pylint: disable=protected-access
+        self.assertEqual(session._service, "logs")
+
+    @patch(f"{_PROVIDER_MODULE}.IS_BOTOCORE_INSTALLED", True)
+    @patch(f"{_PROVIDER_MODULE}._detect_signal_from_stack", return_value="traces")
     def test_cloudwatch_substring_resolves_cloudwatch(self, _mock_signal):
         os.environ["AWS_REGION"] = "us-east-1"
         os.environ[_TRACES_ENDPOINT] = "https://my-cloudwatch-collector.example.com/v1/traces"

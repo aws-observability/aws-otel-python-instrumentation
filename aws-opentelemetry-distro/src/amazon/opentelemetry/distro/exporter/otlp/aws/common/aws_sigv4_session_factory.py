@@ -28,6 +28,8 @@ Per-signal signing service resolution (highest priority first):
        - ``https://logs.<region>.amazonaws.com/v1/logs``           -> ``logs``
        - ``https://monitoring.<region>.amazonaws.com/v1/metrics``  -> ``monitoring``
        - host contains ``cloudwatch``                              -> ``cloudwatch``
+       (the ``amazonaws.com.cn`` forms of the first three are matched too, for
+       the AWS China partition)
     3. No service resolved -> the factory returns an unsigned session and
        logs a warning, instead of silently signing under a default service
        that the AWS endpoint may reject.
@@ -74,10 +76,13 @@ _SIGNAL_TABLE: Tuple[Tuple[str, str, str], ...] = (
 # The xray and logs URL patterns are kept identical to the ones already used
 # by the configurator's auto-detection (AWS_TRACES_OTLP_ENDPOINT_PATTERN /
 # AWS_LOGS_OTLP_ENDPOINT_PATTERN) so the two paths agree on what counts as an
-# AWS endpoint.
-_AWS_TRACES_OTLP_ENDPOINT_PATTERN = re.compile(r"https://xray\.([a-z0-9-]+)\.amazonaws\.com/v1/traces$")
-_AWS_LOGS_OTLP_ENDPOINT_PATTERN = re.compile(r"https://logs\.([a-z0-9-]+)\.amazonaws\.com/v1/logs$")
-_AWS_METRICS_OTLP_ENDPOINT_PATTERN = re.compile(r"https://monitoring\.([a-z0-9-]+)\.amazonaws\.com/v1/metrics$")
+# AWS endpoint. The optional ``.cn`` suffix covers the AWS China partition
+# (``amazonaws.com.cn``).
+_AWS_TRACES_OTLP_ENDPOINT_PATTERN = re.compile(r"https://xray\.([a-z0-9-]+)\.amazonaws\.com(?:\.cn)?/v1/traces$")
+_AWS_LOGS_OTLP_ENDPOINT_PATTERN = re.compile(r"https://logs\.([a-z0-9-]+)\.amazonaws\.com(?:\.cn)?/v1/logs$")
+_AWS_METRICS_OTLP_ENDPOINT_PATTERN = re.compile(
+    r"https://monitoring\.([a-z0-9-]+)\.amazonaws\.com(?:\.cn)?/v1/metrics$"
+)
 _INFERENCE_RULES = (
     (lambda endpoint, host: bool(_AWS_TRACES_OTLP_ENDPOINT_PATTERN.match(endpoint)), "xray"),
     (lambda endpoint, host: bool(_AWS_LOGS_OTLP_ENDPOINT_PATTERN.match(endpoint)), "logs"),

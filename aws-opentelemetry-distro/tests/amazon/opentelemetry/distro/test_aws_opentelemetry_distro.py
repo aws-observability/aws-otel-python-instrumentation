@@ -173,6 +173,33 @@ class TestAwsOpenTelemetryDistro(TestCase):
 
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.get_aws_region")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.is_agent_observability_enabled")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.is_installed")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.apply_instrumentation_patches")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.OpenTelemetryDistro._configure")
+    def test_configure_agent_observability_china_endpoints(
+        self,
+        mock_super_configure,
+        mock_apply_patches,
+        mock_is_installed,
+        mock_is_agent_observability,
+        mock_get_aws_region,
+    ):
+        """China regions default to the amazonaws.com.cn OTLP endpoints."""
+        mock_is_agent_observability.return_value = True
+        mock_get_aws_region.return_value = "cn-north-1"
+        mock_is_installed.return_value = False
+
+        AwsOpenTelemetryDistro()._configure()
+
+        self.assertEqual(
+            os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT), "https://xray.cn-north-1.amazonaws.com.cn/v1/traces"
+        )
+        self.assertEqual(
+            os.environ.get(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT), "https://logs.cn-north-1.amazonaws.com.cn/v1/logs"
+        )
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.get_aws_region")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.is_agent_observability_enabled")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.apply_instrumentation_patches")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.OpenTelemetryDistro._configure")
     def test_configure_with_agent_observability_no_region(

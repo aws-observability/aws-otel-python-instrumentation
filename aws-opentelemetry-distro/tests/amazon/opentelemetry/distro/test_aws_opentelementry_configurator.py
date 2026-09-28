@@ -39,6 +39,7 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     _customize_span_processors,
     _export_unsampled_span_for_agent_observability,
     _export_unsampled_span_for_lambda,
+    _extract_endpoint_and_region_from_otlp_endpoint,
     _fetch_logs_header,
     _init_logging,
     _init_serviceevents,
@@ -732,9 +733,13 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             "https://xray.us-east-1.amazonaws.com/V1/TRACES",
             "https://XRAY.US-EAST-1.AMAZONAWS.COM/v1/traces",
             "https://xray.us-east-1.AMAZONAWS.COM/V1/traces",
+            "https://xray.cn-north-1.amazonaws.com.cn/v1/traces",
+            "https://XRAY.CN-NORTHWEST-1.AMAZONAWS.COM.CN/V1/TRACES",
         ]
 
         traces_bad_endpoints = [
+            "https://xray.cn-north-1.amazonaws.cn/v1/traces",
+            "https://xray.cn-north-1.amazonaws.com.cn.example.com/v1/traces",
             "http://localhost:4318/v1/traces",
             "http://xray.us-east-1.amazonaws.com/v1/traces",
             "ftp://xray.us-east-1.amazonaws.com/v1/traces",
@@ -805,6 +810,16 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             _customize_span_exporter(OTLPGrpcSpanExporter(), Resource.get_empty()), OTLPGrpcSpanExporter
         )
 
+    def test_extract_endpoint_and_region_from_otlp_endpoint(self):
+        cases = [
+            ("https://xray.us-east-1.amazonaws.com/v1/traces", "us-east-1"),
+            ("https://xray.cn-north-1.amazonaws.com.cn/v1/traces", "cn-north-1"),
+            ("https://LOGS.CN-NORTHWEST-1.AMAZONAWS.COM.CN/V1/LOGS", "cn-northwest-1"),
+        ]
+        for endpoint, expected_region in cases:
+            _, region = _extract_endpoint_and_region_from_otlp_endpoint(endpoint)
+            self.assertEqual(region, expected_region)
+
     def test_customize_logs_exporter_sigv4(self):
         logs_good_endpoints = [
             "https://logs.us-east-1.amazonaws.com/v1/logs",
@@ -822,9 +837,13 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             "https://logs.us-east-1.amazonaws.com/V1/LOGS",
             "https://LOGS.US-EAST-1.AMAZONAWS.COM/v1/logs",
             "https://logs.us-east-1.AMAZONAWS.COM/V1/logs",
+            "https://logs.cn-north-1.amazonaws.com.cn/v1/logs",
+            "https://LOGS.CN-NORTHWEST-1.AMAZONAWS.COM.CN/V1/LOGS",
         ]
 
         logs_bad_endpoints = [
+            "https://logs.cn-north-1.amazonaws.cn/v1/logs",
+            "https://logs.cn-north-1.amazonaws.com.cn.example.com/v1/logs",
             "http://localhost:4318/v1/logs",
             "http://logs.us-east-1.amazonaws.com/v1/logs",
             "ftp://logs.us-east-1.amazonaws.com/v1/logs",

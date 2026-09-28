@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 from amazon.opentelemetry.distro._utils import (
     AGENT_OBSERVABILITY_ENABLED,
     AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT,
+    get_aws_dns_suffix,
     get_aws_region,
     get_aws_session,
     is_agent_observability_enabled,
@@ -178,6 +179,22 @@ class TestUtils(TestCase):
         self.assertEqual(region, "eu-west-1")
 
         os.environ.pop("AWS_DEFAULT_REGION", None)
+
+    def test_get_aws_dns_suffix_china_regions(self):
+        """China regions resolve to the amazonaws.com.cn suffix."""
+        self.assertEqual(get_aws_dns_suffix("cn-north-1"), "amazonaws.com.cn")
+        self.assertEqual(get_aws_dns_suffix("cn-northwest-1"), "amazonaws.com.cn")
+
+    def test_get_aws_dns_suffix_non_china_regions(self):
+        """Commercial and GovCloud regions keep the amazonaws.com suffix."""
+        self.assertEqual(get_aws_dns_suffix("us-west-2"), "amazonaws.com")
+        self.assertEqual(get_aws_dns_suffix("eu-west-1"), "amazonaws.com")
+        self.assertEqual(get_aws_dns_suffix("us-gov-west-1"), "amazonaws.com")
+
+    def test_get_aws_dns_suffix_none_defaults_to_commercial(self):
+        """A missing region falls back to the commercial suffix."""
+        self.assertEqual(get_aws_dns_suffix(None), "amazonaws.com")
+        self.assertEqual(get_aws_dns_suffix(""), "amazonaws.com")
 
     def test_is_genai_content_extraction_opted_out_various_values(self):
         os.environ[AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT] = "true"
