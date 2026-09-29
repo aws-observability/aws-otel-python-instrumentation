@@ -21,10 +21,18 @@ from opentelemetry.proto.collector.metrics.v1.metrics_service_pb2 import (
     ExportMetricsServiceResponse,
 )
 from opentelemetry.proto.collector.metrics.v1.metrics_service_pb2_grpc import add_MetricsServiceServicer_to_server
+from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
+    ExportTraceServiceRequest,
+    ExportTraceServiceResponse,
+)
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2_grpc import add_TraceServiceServicer_to_server
 
 
-def _create_http_handler(logs_collector: MockCollectorLogsService, metrics_collector: MockCollectorMetricsService):
+def _create_http_handler(
+    trace_collector: MockCollectorTraceService,
+    logs_collector: MockCollectorLogsService,
+    metrics_collector: MockCollectorMetricsService,
+):
     """Factory to inject collector instances into HTTP handler (avoids global state)."""
 
     def _read_body(self_handler) -> bytes:
@@ -40,7 +48,17 @@ def _create_http_handler(logs_collector: MockCollectorLogsService, metrics_colle
     class OtlpHttpHandler(BaseHTTPRequestHandler):
         # do_POST is the required BaseHTTPRequestHandler dispatch method name (external API contract).
         def do_POST(self):  # pylint: disable=invalid-name
-            if self.path == "/v1/logs":
+            if self.path == "/v1/traces":
+                body = _read_body(self)
+                request = ExportTraceServiceRequest()
+                request.ParseFromString(body)
+                trace_collector._export_requests.put(request)
+                resp_bytes = ExportTraceServiceResponse().SerializeToString()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/x-protobuf")
+                self.end_headers()
+                self.wfile.write(resp_bytes)
+            elif self.path == "/v1/logs":
                 body = _read_body(self)
                 request = ExportLogsServiceRequest()
                 request.ParseFromString(body)
@@ -90,9 +108,10 @@ def main() -> None:
     mock_collector_server.start()
     atexit.register(mock_collector_server.stop, None)
 
-    # HTTP server on port 4316 (OTLP HTTP /v1/logs and /v1/metrics for the
-    # Dynamic Instrumentation snapshot emitter and the ServiceEvents emitter)
-    handler_class = _create_http_handler(logs_collector, metrics_collector)
+    # HTTP server on port 4316 (OTLP HTTP /v1/traces, /v1/logs and /v1/metrics for
+    # http/protobuf trace exporters, the Dynamic Instrumentation snapshot emitter
+    # and the ServiceEvents emitter)
+    handler_class = _create_http_handler(trace_collector, logs_collector, metrics_collector)
     http_server = HTTPServer(("0.0.0.0", 4316), handler_class)
     http_thread = threading.Thread(target=http_server.serve_forever, daemon=True)
     http_thread.start()
