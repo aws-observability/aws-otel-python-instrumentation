@@ -19,6 +19,7 @@ from amazon.opentelemetry.distro.aws_lambda_span_processor import AwsLambdaSpanP
 from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter import AwsMetricAttributesSpanExporter
 from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     LAMBDA_SPAN_EXPORT_BATCH_SIZE,
+    METRICS_SERVICE,
     OTEL_EXPORTER_OTLP_LOGS_ENDPOINT,
     OTEL_EXPORTER_OTLP_LOGS_HEADERS,
     OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
@@ -32,6 +33,7 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     _custom_import_sampler,
     _customize_log_record_processor,
     _customize_logs_exporter,
+    _customize_metric_exporter,
     _customize_metric_exporters,
     _customize_resource,
     _customize_sampler,
@@ -40,11 +42,13 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     _export_unsampled_span_for_agent_observability,
     _export_unsampled_span_for_lambda,
     _fetch_logs_header,
+    _has_authorization_header,
     _init_logging,
     _init_serviceevents,
     _init_tracing,
     _is_application_signals_enabled,
     _is_application_signals_runtime_enabled,
+    _is_aws_otlp_endpoint,
     _is_defer_to_workers_enabled,
     _is_serviceevents_enabled,
     _is_wsgi_master_process,
@@ -62,6 +66,7 @@ from amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_r
     AwsCloudWatchOtlpBatchLogRecordProcessor,
 )
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_log_record_exporter import OTLPAwsLogRecordExporter
+from amazon.opentelemetry.distro.exporter.otlp.aws.metrics.otlp_aws_metric_exporter import OTLPAwsMetricExporter
 from amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter import OTLPAwsSpanExporter
 from amazon.opentelemetry.distro.gen_ai_nested_client_span_processor import GenAINestedClientSpanProcessor
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
@@ -81,7 +86,10 @@ from opentelemetry.metrics import get_meter_provider
 from opentelemetry.processor.baggage import BaggageSpanProcessor
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor, ConsoleLogRecordExporter
 from opentelemetry.sdk.environment_variables import OTEL_TRACES_SAMPLER, OTEL_TRACES_SAMPLER_ARG
+from opentelemetry.sdk.metrics import Counter
 from opentelemetry.sdk.metrics._internal.export import PeriodicExportingMetricReader
+from opentelemetry.sdk.metrics.export import AggregationTemporality
+from opentelemetry.sdk.metrics.view import LastValueAggregation
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import Span, SpanProcessor, Tracer, TracerProvider
 from opentelemetry.sdk.trace.export import SpanExporter
@@ -1327,6 +1335,193 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertEqual(5, len(views))
 
         os.environ.pop("OTEL_METRIC_EXPORT_INTERVAL", None)
+
+    # --- collector-less OTLP metrics SigV4 -------------------------------------------------
+
+    METRICS_ENDPOINT_KEY = "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"
+
+    def _clear_metrics_env(self):
+        for key in (
+            self.METRICS_ENDPOINT_KEY,
+            "OTEL_EXPORTER_OTLP_METRICS_HEADERS",
+            "OTEL_EXPORTER_OTLP_HEADERS",
+        ):
+            os.environ.pop(key, None)
+
+    def test_is_aws_otlp_endpoint_metrics(self):
+        """monitoring endpoints are recognized in both partitions, and lookalikes are rejected."""
+        good = [
+            "https://monitoring.us-east-1.amazonaws.com/v1/metrics",
+            "https://monitoring.us-west-2.amazonaws.com/v1/metrics",
+            "https://monitoring.cn-north-1.amazonaws.com.cn/v1/metrics",
+            "https://monitoring.cn-northwest-1.amazonaws.com.cn/v1/metrics",
+        ]
+        bad = [
+            # lookalike suffix must not be signed
+            "https://monitoring.cn-north-1.amazonaws.com.cn.evil/v1/metrics",
+            "https://monitoring.us-east-1.amazonaws.com.evil/v1/metrics",
+            # wrong service host
+            "https://xray.us-east-1.amazonaws.com/v1/traces",
+            "https://logs.us-east-1.amazonaws.com/v1/logs",
+            # wrong path
+            "https://monitoring.us-east-1.amazonaws.com/v1/traces",
+            # not https
+            "http://monitoring.us-east-1.amazonaws.com/v1/metrics",
+            # non-AWS
+            "http://localhost:4318/v1/metrics",
+        ]
+
+        for endpoint in good:
+            with self.subTest(endpoint=endpoint):
+                self.assertTrue(_is_aws_otlp_endpoint(endpoint, METRICS_SERVICE))
+
+        for endpoint in bad:
+            with self.subTest(endpoint=endpoint):
+                self.assertFalse(_is_aws_otlp_endpoint(endpoint, METRICS_SERVICE))
+
+    def test_is_aws_otlp_endpoint_unknown_service_returns_false(self):
+        """An unrecognized service no longer falls through to the logs pattern."""
+        self.assertFalse(_is_aws_otlp_endpoint("https://logs.us-east-1.amazonaws.com/v1/logs", "not-a-service"))
+
+    def test_customize_metric_exporter_signs_aws_endpoints(self):
+        """Commercial and China monitoring endpoints select the signing exporter with correct scope."""
+        for region, endpoint in (
+            ("us-east-1", "https://monitoring.us-east-1.amazonaws.com/v1/metrics"),
+            ("cn-north-1", "https://monitoring.cn-north-1.amazonaws.com.cn/v1/metrics"),
+            ("cn-northwest-1", "https://monitoring.cn-northwest-1.amazonaws.com.cn/v1/metrics"),
+        ):
+            with self.subTest(region=region):
+                self._clear_metrics_env()
+                os.environ[self.METRICS_ENDPOINT_KEY] = endpoint
+                try:
+                    result = _customize_metric_exporter(OTLPHttpOTLPMetricExporter(endpoint=endpoint))
+
+                    self.assertIsInstance(result, OTLPAwsMetricExporter)
+                    self.assertIsInstance(result._session, AwsAuthSession)
+                    self.assertEqual(result._session._service, METRICS_SERVICE)
+                    self.assertEqual(result._session._aws_region, region)
+                finally:
+                    self._clear_metrics_env()
+
+    def test_customize_metric_exporter_preserves_temporality_and_aggregation(self):
+        """Replacing the exporter must not silently change what the metrics mean."""
+        endpoint = "https://monitoring.us-east-1.amazonaws.com/v1/metrics"
+        self._clear_metrics_env()
+        os.environ[self.METRICS_ENDPOINT_KEY] = endpoint
+        try:
+            temporality = {Counter: AggregationTemporality.DELTA}
+            aggregation = {Counter: LastValueAggregation()}
+            original = OTLPHttpOTLPMetricExporter(
+                endpoint=endpoint,
+                preferred_temporality=temporality,
+                preferred_aggregation=aggregation,
+            )
+
+            result = _customize_metric_exporter(original)
+
+            self.assertIsInstance(result, OTLPAwsMetricExporter)
+            self.assertEqual(result._preferred_temporality[Counter], AggregationTemporality.DELTA)
+            self.assertIs(result._preferred_aggregation[Counter], aggregation[Counter])
+        finally:
+            self._clear_metrics_env()
+
+    def test_customize_metric_exporter_passthrough_cases(self):
+        """Non-AWS endpoints, unset endpoints, and gRPC exporters are returned untouched."""
+        self._clear_metrics_env()
+        try:
+            # no metrics endpoint configured
+            plain = OTLPHttpOTLPMetricExporter()
+            self.assertIs(_customize_metric_exporter(plain), plain)
+
+            # non-AWS endpoint
+            os.environ[self.METRICS_ENDPOINT_KEY] = "http://localhost:4318/v1/metrics"
+            local = OTLPHttpOTLPMetricExporter(endpoint="http://localhost:4318/v1/metrics")
+            self.assertIs(_customize_metric_exporter(local), local)
+
+            # AWS endpoint but gRPC exporter: warn and leave untouched, never sign
+            os.environ[self.METRICS_ENDPOINT_KEY] = "https://monitoring.us-east-1.amazonaws.com/v1/metrics"
+            grpc_exporter = OTLPGrpcOTLPMetricExporter()
+            self.assertIs(_customize_metric_exporter(grpc_exporter), grpc_exporter)
+        finally:
+            self._clear_metrics_env()
+
+    def test_customize_metric_exporter_global_endpoint_does_not_activate_sigv4(self):
+        """A global OTEL_EXPORTER_OTLP_ENDPOINT must not activate metrics SigV4 (matches traces/logs)."""
+        self._clear_metrics_env()
+        os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = "https://monitoring.us-east-1.amazonaws.com"
+        try:
+            plain = OTLPHttpOTLPMetricExporter()
+            self.assertIs(_customize_metric_exporter(plain), plain)
+        finally:
+            os.environ.pop("OTEL_EXPORTER_OTLP_ENDPOINT", None)
+            self._clear_metrics_env()
+
+    def test_signal_specific_authorization_disables_sigv4(self):
+        """A signal-specific Authorization header is honored and SigV4 is not layered on top."""
+        endpoint = "https://monitoring.us-east-1.amazonaws.com/v1/metrics"
+        self._clear_metrics_env()
+        os.environ[self.METRICS_ENDPOINT_KEY] = endpoint
+        os.environ["OTEL_EXPORTER_OTLP_METRICS_HEADERS"] = "Authorization=Bearer%20token,x-custom=v"
+        try:
+            original = OTLPHttpOTLPMetricExporter(endpoint=endpoint)
+            result = _customize_metric_exporter(original)
+
+            self.assertIs(result, original)
+            self.assertNotIsInstance(result, OTLPAwsMetricExporter)
+        finally:
+            self._clear_metrics_env()
+
+    def test_global_authorization_does_not_disable_sigv4_and_warns(self):
+        """Per the revised rule, only the signal-specific variable selects bearer auth."""
+        endpoint = "https://monitoring.us-east-1.amazonaws.com/v1/metrics"
+        self._clear_metrics_env()
+        os.environ[self.METRICS_ENDPOINT_KEY] = endpoint
+        os.environ["OTEL_EXPORTER_OTLP_HEADERS"] = "Authorization=Bearer%20token"
+        try:
+            with self.assertLogs("amazon.opentelemetry.distro.aws_opentelemetry_configurator", level="WARNING") as logs:
+                result = _customize_metric_exporter(OTLPHttpOTLPMetricExporter(endpoint=endpoint))
+
+            # SigV4 still applied ...
+            self.assertIsInstance(result, OTLPAwsMetricExporter)
+            # ... and the silently-replaced global header is surfaced.
+            self.assertTrue(any("OTEL_EXPORTER_OTLP_HEADERS" in message for message in logs.output))
+        finally:
+            self._clear_metrics_env()
+
+    def test_signal_specific_headers_without_authorization_still_sign(self):
+        """Signal-specific headers that carry no Authorization must not disable SigV4."""
+        endpoint = "https://monitoring.us-east-1.amazonaws.com/v1/metrics"
+        self._clear_metrics_env()
+        os.environ[self.METRICS_ENDPOINT_KEY] = endpoint
+        os.environ["OTEL_EXPORTER_OTLP_METRICS_HEADERS"] = "x-custom=value"
+        try:
+            result = _customize_metric_exporter(OTLPHttpOTLPMetricExporter(endpoint=endpoint))
+            self.assertIsInstance(result, OTLPAwsMetricExporter)
+        finally:
+            self._clear_metrics_env()
+
+    def test_authorization_header_detection_parsing(self):
+        """Header-name parsing: case-insensitive, first '=' split, tolerant of encoded values."""
+        self.assertTrue(_has_authorization_header("Authorization=Bearer%20abc"))
+        self.assertTrue(_has_authorization_header("authorization=Bearer abc"))
+        self.assertTrue(_has_authorization_header("AUTHORIZATION=x"))
+        self.assertTrue(_has_authorization_header("x-a=1, Authorization=Bearer=with=equals"))
+        self.assertTrue(_has_authorization_header(" Authorization =v"))
+        self.assertFalse(_has_authorization_header("x-authorization-extra=v"))
+        self.assertFalse(_has_authorization_header("x-custom=value"))
+        self.assertFalse(_has_authorization_header(""))
+        self.assertFalse(_has_authorization_header(None))
+        # a bare key with no '=' is not a header assignment
+        self.assertFalse(_has_authorization_header("Authorization"))
+
+    def test_create_aws_otlp_exporter_unknown_service_returns_none(self):
+        self.assertIsNone(
+            _create_aws_otlp_exporter(
+                endpoint="https://monitoring.us-east-1.amazonaws.com/v1/metrics",
+                service="not-a-service",
+                region="us-east-1",
+            )
+        )
 
     def customize_exporter_test(
         self, config, executor, default_exporter, expected_exporter_type, expected_session, expected_compression, *args
