@@ -732,6 +732,8 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             "https://xray.us-east-1.amazonaws.com/V1/TRACES",
             "https://XRAY.US-EAST-1.AMAZONAWS.COM/v1/traces",
             "https://xray.us-east-1.AMAZONAWS.COM/V1/traces",
+            "https://xray.cn-north-1.amazonaws.com.cn/v1/traces",
+            "https://xray.cn-northwest-1.amazonaws.com.cn/v1/traces",
         ]
 
         traces_bad_endpoints = [
@@ -758,6 +760,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             "https://xray.us-east-1.amazonaws.com:443/v1/traces",
             "https:/xray.us-east-1.amazonaws.com/v1/traces",
             "https:://xray.us-east-1.amazonaws.com/v1/traces",
+            "https://xray.cn-north-1.amazonaws.com.cn.evil/v1/traces",
         ]
 
         good_configs = []
@@ -805,6 +808,38 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             _customize_span_exporter(OTLPGrpcSpanExporter(), Resource.get_empty()), OTLPGrpcSpanExporter
         )
 
+    def test_customize_aws_exporters_sigv4_in_china_regions(self):
+        """Test that China OTLP endpoints select signed exporters with the correct service and region."""
+        for region in ("cn-north-1", "cn-northwest-1"):
+            with self.subTest(signal="traces", region=region), patch.dict(
+                os.environ,
+                {OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: f"https://xray.{region}.amazonaws.com.cn/v1/traces"},
+            ):
+                exporter = _customize_span_exporter(OTLPSpanExporter(), Resource.get_empty())
+
+                self.assertIsInstance(exporter, OTLPAwsSpanExporter)
+                self.assertIsInstance(exporter._session, AwsAuthSession)
+                self.assertEqual(exporter._session._service, "xray")
+                self.assertEqual(exporter._session._aws_region, region)
+
+            _clear_logs_header_cache()
+            try:
+                with self.subTest(signal="logs", region=region), patch.dict(
+                    os.environ,
+                    {
+                        OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: f"https://logs.{region}.amazonaws.com.cn/v1/logs",
+                        OTEL_EXPORTER_OTLP_LOGS_HEADERS: "x-aws-log-group=test,x-aws-log-stream=test",
+                    },
+                ):
+                    exporter = _customize_logs_exporter(OTLPLogExporter())
+
+                    self.assertIsInstance(exporter, OTLPAwsLogRecordExporter)
+                    self.assertIsInstance(exporter._session, AwsAuthSession)
+                    self.assertEqual(exporter._session._service, "logs")
+                    self.assertEqual(exporter._session._aws_region, region)
+            finally:
+                _clear_logs_header_cache()
+
     def test_customize_logs_exporter_sigv4(self):
         logs_good_endpoints = [
             "https://logs.us-east-1.amazonaws.com/v1/logs",
@@ -822,6 +857,8 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             "https://logs.us-east-1.amazonaws.com/V1/LOGS",
             "https://LOGS.US-EAST-1.AMAZONAWS.COM/v1/logs",
             "https://logs.us-east-1.AMAZONAWS.COM/V1/logs",
+            "https://logs.cn-north-1.amazonaws.com.cn/v1/logs",
+            "https://logs.cn-northwest-1.amazonaws.com.cn/v1/logs",
         ]
 
         logs_bad_endpoints = [
@@ -851,6 +888,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             "https://logs.us-east-1.amazonaws.com/v1/logging",
             "https://logs.us-east-1.amazonaws.com/v1/cloudwatchlogs",
             "https://logs.us-east-1.amazonaws.com/v1/cwlogs",
+            "https://logs.cn-north-1.amazonaws.com.cn.evil/v1/logs",
         ]
 
         logs_bad_headers = [
