@@ -1170,17 +1170,16 @@ def _create_aws_otlp_exporter(
         from amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter import OTLPAwsSpanExporter
 
         if service == XRAY_SERVICE:
+            span_exporter_args = {}
             if is_agent_observability_enabled():
                 # Span exporter needs an instance of logger provider in ai agent
                 # observability case because we need to split input/output prompts
                 # from span attributes and send them to the logs pipeline per
                 # the new Gen AI semantic convention from OTel
                 # ref: https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-events/
-                return OTLPAwsSpanExporter(
-                    session=session, endpoint=endpoint, aws_region=region, logger_provider=get_logger_provider()
-                )
+                span_exporter_args["logger_provider"] = get_logger_provider()
 
-            return OTLPAwsSpanExporter(session=session, endpoint=endpoint, aws_region=region)
+            return OTLPAwsSpanExporter(session=session, endpoint=endpoint, aws_region=region, **span_exporter_args)
 
         if service == LOGS_SERIVCE:
             return OTLPAwsLogRecordExporter(session=session, aws_region=region)
