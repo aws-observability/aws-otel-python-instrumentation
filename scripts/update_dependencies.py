@@ -21,6 +21,8 @@ PYTHON_CORE_DEPS = [
 # Dependencies that use the second version number (opentelemetry-python-contrib)
 CONTRIB_DEPS = [
     "opentelemetry-distro",
+    # Released from opentelemetry-python, but versioned with the contrib version number
+    "opentelemetry-semantic-conventions",
     "opentelemetry-processor-baggage",
     "opentelemetry-propagator-ot-trace",
     "opentelemetry-test-utils",
@@ -161,6 +163,7 @@ def main():
         "aws-opentelemetry-distro/pyproject.toml",
         "contract-tests/images/mock-collector/pyproject.toml",
         "contract-tests/images/mock-collector/requirements.txt",
+        "contract-tests/images/applications/cloudwatch-plugin-otel/requirements.txt",
         "contract-tests/tests/pyproject.toml",
         "lambda-layer/src/tests/requirements.txt",
         "tox.ini",
