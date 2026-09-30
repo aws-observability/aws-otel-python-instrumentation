@@ -1,2 +1,9 @@
-fastapi
+# fastapi 0.142.0 added automatic telemetry that refuses to start the app unless the
+# OTLP protocol is http/protobuf:
+#   "FastAPI automatic telemetry requires the OTLP http/protobuf protocol. Configure other
+#    transports explicitly and pass telemetry={'auto_configure': False} to FastAPI()."
+# ADOT provides the telemetry for these contract tests, so FastAPI's own auto-configuration
+# is not wanted. Capped until the test app opts out explicitly via the telemetry argument,
+# which only exists in 0.142.0+.
+fastapi<0.142.0
 uvicorn
