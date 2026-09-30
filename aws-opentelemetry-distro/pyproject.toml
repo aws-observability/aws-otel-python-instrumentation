@@ -84,6 +84,9 @@ dependencies = [
   "opentelemetry-instrumentation-cassandra == 0.66b0",
   "cachetools == 6.2.4",
   "urllib3 >= 2.7.0; python_version >= '3.10'",
+  # Imported directly by the X-Ray remote sampler, the SigV4 AwsAuthSession used by the AWS OTLP exporters and
+  # Dynamic Instrumentation. No longer a transitive dependency since opentelemetry-exporter-otlp-proto-http 1.45.0.
+  "requests ~= 2.25",
   "protobuf == 6.33.5",
   "pyyaml == 6.0.3",
   # Used by Dynamic Instrumentation to parse ISO-8601 timestamps from polled configurations

@@ -8,8 +8,6 @@ import time
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
-from requests import Session
-
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_LOCAL_SERVICE, AWS_SERVICE_TYPE
 from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSampler
 from amazon.opentelemetry.distro.attribute_propagating_span_processor import AttributePropagatingSpanProcessor
@@ -807,7 +805,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
                 _customize_span_exporter,
                 OTLPSpanExporter(),
                 OTLPSpanExporter,
-                Session,
+                None,
                 Compression.NoCompression,
                 Resource.get_empty(),
             )
@@ -947,7 +945,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         for config in bad_configs:
             _clear_logs_header_cache()
             self.customize_exporter_test(
-                config, _customize_logs_exporter, OTLPLogExporter(), OTLPLogExporter, Session, Compression.NoCompression
+                config, _customize_logs_exporter, OTLPLogExporter(), OTLPLogExporter, None, Compression.NoCompression
             )
 
         self.assertIsInstance(_customize_logs_exporter(OTLPGrpcLogExporter()), OTLPGrpcLogExporter)
@@ -1532,8 +1530,13 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         try:
             result = executor(default_exporter, *args)
             self.assertIsInstance(result, expected_exporter_type)
-            self.assertIsInstance(result._session, expected_session)
-            self.assertEqual(result._compression, expected_compression)
+            # Upstream only uses a requests.Session when one is passed in; otherwise it uses a urllib3 transport.
+            transport_session = getattr(result._client._transport, "_session", None)
+            if expected_session is None:
+                self.assertIsNone(transport_session)
+            else:
+                self.assertIsInstance(transport_session, expected_session)
+            self.assertEqual(result._compression.value, expected_compression.value)
         finally:
             for key in config.keys():
                 os.environ.pop(key, None)

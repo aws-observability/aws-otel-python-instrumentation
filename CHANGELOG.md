@@ -12,6 +12,10 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- chore: update OpenTelemetry dependencies to 1.45.0/0.66b0. The CloudWatch Logs OTLP exporter now relies on the
+  upstream OTLP HTTP client's retry handling, which retries HTTP 429, 502, 503 and 504 and honors `Retry-After`
+  (previously 408, 429 and all 5xx were retried). `requests` is now declared as a direct dependency.
+  ([#905](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/905))
 - fix(agent-observability): support X-Ray and CloudWatch Logs OTLP endpoints in AWS China regions
 - feat(metrics): sign collector-less OTLP metrics with SigV4 when exporting to the CloudWatch Metrics
   OTLP endpoint, in both the commercial and AWS China partitions. Requires
