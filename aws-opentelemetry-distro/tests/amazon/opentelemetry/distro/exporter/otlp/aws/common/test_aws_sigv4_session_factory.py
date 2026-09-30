@@ -159,6 +159,34 @@ class TestAwsSigV4SessionFactory(TestCase):
 
     @patch(f"{_PROVIDER_MODULE}.IS_BOTOCORE_INSTALLED", True)
     @patch(f"{_PROVIDER_MODULE}._detect_signal_from_stack", return_value="metrics")
+    def test_china_metrics_endpoint_resolves_monitoring(self, _mock_signal):
+        """AWS China monitoring endpoints resolve the monitoring signing service and region."""
+        for region in ("cn-north-1", "cn-northwest-1"):
+            with self.subTest(region=region):
+                os.environ["AWS_REGION"] = region
+                os.environ[_METRICS_ENDPOINT] = f"https://monitoring.{region}.amazonaws.com.cn/v1/metrics"
+
+                session = aws_sigv4_session()
+
+                self.assertIsInstance(session, AwsAuthSession)
+                # pylint: disable=protected-access
+                self.assertEqual(session._service, "monitoring")
+                self.assertEqual(session._aws_region, region)
+
+    @patch(f"{_PROVIDER_MODULE}.IS_BOTOCORE_INSTALLED", True)
+    @patch(f"{_PROVIDER_MODULE}._detect_signal_from_stack", return_value="metrics")
+    def test_china_metrics_endpoint_with_untrusted_suffix_falls_back_to_unsigned(self, _mock_signal):
+        """A lookalike host past the China suffix must not be signed."""
+        os.environ["AWS_REGION"] = "cn-north-1"
+        os.environ[_METRICS_ENDPOINT] = "https://monitoring.cn-north-1.amazonaws.com.cn.evil/v1/metrics"
+
+        session = aws_sigv4_session()
+
+        self.assertNotIsInstance(session, AwsAuthSession)
+        self.assertIsInstance(session, requests.Session)
+
+    @patch(f"{_PROVIDER_MODULE}.IS_BOTOCORE_INSTALLED", True)
+    @patch(f"{_PROVIDER_MODULE}._detect_signal_from_stack", return_value="metrics")
     def test_metrics_endpoint_wrong_path_falls_back_to_unsigned(self, _mock_signal):
         """Anchored monitoring rule requires exactly /v1/metrics; other paths must not match."""
         os.environ["AWS_REGION"] = "us-west-2"
