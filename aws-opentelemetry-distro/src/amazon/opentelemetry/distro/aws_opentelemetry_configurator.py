@@ -110,14 +110,47 @@ OTEL_EXPORTER_OTLP_TRACES_ENDPOINT = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
 OTEL_EXPORTER_OTLP_LOGS_ENDPOINT = "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"
 OTEL_EXPORTER_OTLP_METRICS_ENDPOINT = "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"
 OTEL_EXPORTER_OTLP_LOGS_HEADERS = "OTEL_EXPORTER_OTLP_LOGS_HEADERS"
+OTEL_EXPORTER_OTLP_TRACES_HEADERS = "OTEL_EXPORTER_OTLP_TRACES_HEADERS"
+OTEL_EXPORTER_OTLP_METRICS_HEADERS = "OTEL_EXPORTER_OTLP_METRICS_HEADERS"
+OTEL_EXPORTER_OTLP_HEADERS = "OTEL_EXPORTER_OTLP_HEADERS"
+
+# Normalized metrics-destination messages. Kept verbatim from the ADOT Java implementation
+# (PR #1456) so the two distributions emit identical wording for the same condition.
+CLOUDWATCH_EMF_EXPORTER_SELECTED_LOG = (
+    "Using the CloudWatch EMF metrics exporter; destination=CloudWatch Logs; authentication=AWS SDK SigV4."
+)
+CONSOLE_EMF_EXPORTER_SELECTED_LOG = (
+    "Using the console EMF metrics exporter; destination=standard output; "
+    "authentication=none because the exporter makes no network request."
+)
+OTLP_SIGV4_EXPORTER_SELECTED_LOG = (
+    "Using the CloudWatch OTLP metrics exporter; destination=CloudWatch Metrics OTLP endpoint; "
+    "authentication=ADOT SigV4."
+)
+OTLP_CONFIGURED_AUTH_EXPORTER_SELECTED_LOG = (
+    "Using the CloudWatch OTLP metrics exporter; destination=CloudWatch Metrics OTLP endpoint; "
+    "authentication=signal-specific Authorization header; ADOT SigV4=disabled."
+)
 AWS_XRAY_ADAPTIVE_SAMPLING_CONFIG = "AWS_XRAY_ADAPTIVE_SAMPLING_CONFIG"
 
 OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS = "OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS"
 
 XRAY_SERVICE = "xray"
 LOGS_SERIVCE = "logs"
-AWS_TRACES_OTLP_ENDPOINT_PATTERN = r"https://xray\.([a-z0-9-]+)\.amazonaws\.com/v1/traces$"
-AWS_LOGS_OTLP_ENDPOINT_PATTERN = r"https://logs\.([a-z0-9-]+)\.amazonaws\.com/v1/logs$"
+METRICS_SERVICE = "monitoring"
+AWS_TRACES_OTLP_ENDPOINT_PATTERN = r"https://xray\.([a-z0-9-]+)\.amazonaws\.com(?:\.cn)?/v1/traces$"
+AWS_LOGS_OTLP_ENDPOINT_PATTERN = r"https://logs\.([a-z0-9-]+)\.amazonaws\.com(?:\.cn)?/v1/logs$"
+AWS_METRICS_OTLP_ENDPOINT_PATTERN = r"https://monitoring\.([a-z0-9-]+)\.amazonaws\.com(?:\.cn)?/v1/metrics$"
+
+# Maps a SigV4 signing service to the endpoint pattern that identifies it. Using an explicit
+# mapping rather than a conditional expression keeps each signal independent - the previous
+# two-way ternary treated every service that was not xray as logs, which does not extend to a
+# third signal.
+_AWS_OTLP_ENDPOINT_PATTERNS = {
+    XRAY_SERVICE: AWS_TRACES_OTLP_ENDPOINT_PATTERN,
+    LOGS_SERIVCE: AWS_LOGS_OTLP_ENDPOINT_PATTERN,
+    METRICS_SERVICE: AWS_METRICS_OTLP_ENDPOINT_PATTERN,
+}
 
 AWS_OTLP_LOGS_GROUP_HEADER = "x-aws-log-group"
 AWS_OTLP_LOGS_STREAM_HEADER = "x-aws-log-stream"
@@ -375,7 +408,9 @@ def _init_metrics(
         if issubclass(exporter_or_reader_class, MetricReader):
             metric_readers.append(exporter_or_reader_class(**exporter_args))
         else:
-            metric_readers.append(PeriodicExportingMetricReader(exporter_or_reader_class(**exporter_args)))
+            metric_readers.append(
+                PeriodicExportingMetricReader(_customize_metric_exporter(exporter_or_reader_class(**exporter_args)))
+            )
 
     _customize_metric_exporters(metric_readers, views, is_emf_enabled)
 
@@ -533,13 +568,15 @@ def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource, sa
         _logger.info("Detected using AWS OTLP Traces Endpoint.")
 
         if isinstance(span_exporter, OTLPSpanExporter):
-            endpoint, region = _extract_endpoint_and_region_from_otlp_endpoint(traces_endpoint)
-            return _create_aws_otlp_exporter(endpoint=endpoint, service=XRAY_SERVICE, region=region)
-
-        _logger.warning(
-            "Improper configuration: please export/set "
-            "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http/protobuf and OTEL_TRACES_EXPORTER=otlp"
-        )
+            # Checked last so the protocol/exporter diagnostics above still fire first.
+            if not _is_sigv4_disabled_by_configured_auth(OTEL_EXPORTER_OTLP_TRACES_HEADERS):
+                endpoint, region = _extract_endpoint_and_region_from_otlp_endpoint(traces_endpoint)
+                return _create_aws_otlp_exporter(endpoint=endpoint, service=XRAY_SERVICE, region=region)
+        else:
+            _logger.warning(
+                "Improper configuration: please export/set "
+                "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http/protobuf and OTEL_TRACES_EXPORTER=otlp"
+            )
 
     if not _is_application_signals_enabled():
         return span_exporter
@@ -575,11 +612,15 @@ def _customize_logs_exporter(log_exporter: LogRecordExporter) -> LogRecordExport
         if isinstance(log_exporter, OTLPLogExporter):
 
             if _fetch_logs_header().is_valid():
-                endpoint, region = _extract_endpoint_and_region_from_otlp_endpoint(logs_endpoint)
-                # Setting default compression mode to Gzip as this is the behavior in upstream's
-                # collector otlp http exporter:
-                # https://github.com/open-telemetry/opentelemetry-collector/tree/main/exporter/otlphttpexporter
-                return _create_aws_otlp_exporter(endpoint=endpoint, service=LOGS_SERIVCE, region=region)
+                # Checked last so the x-aws-log-group / x-aws-log-stream diagnostics still fire first.
+                if not _is_sigv4_disabled_by_configured_auth(OTEL_EXPORTER_OTLP_LOGS_HEADERS):
+                    endpoint, region = _extract_endpoint_and_region_from_otlp_endpoint(logs_endpoint)
+                    # Setting default compression mode to Gzip as this is the behavior in upstream's
+                    # collector otlp http exporter:
+                    # https://github.com/open-telemetry/opentelemetry-collector/tree/main/exporter/otlphttpexporter
+                    return _create_aws_otlp_exporter(endpoint=endpoint, service=LOGS_SERIVCE, region=region)
+
+                return log_exporter
 
             _logger.warning(
                 "Improper configuration: Please configure the environment variable OTEL_EXPORTER_OTLP_LOGS_HEADERS "
@@ -635,6 +676,59 @@ def _customize_span_processors(provider: TracerProvider, resource: Resource, sam
     provider.add_span_processor(AwsSpanMetricsProcessorBuilder(meter_provider, resource).set_sampler(sampler).build())
 
     return
+
+
+def _customize_metric_exporter(metric_exporter: MetricExporter) -> MetricExporter:
+    """Swap in the SigV4-signing AWS metrics exporter when the CloudWatch metrics endpoint is used.
+
+    This is the metrics counterpart to ``_customize_span_exporter`` / ``_customize_logs_exporter``.
+    It deliberately operates on a single exporter instance, before that exporter is wrapped in a
+    reader, so the upstream-resolved temporality and aggregation can be carried across.
+
+    Anything that is not an OTLP/HTTP metrics exporter pointed at a recognized AWS endpoint is
+    returned unchanged, so non-AWS endpoints and gRPC keep their existing behavior.
+    """
+    metrics_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_METRICS_ENDPOINT)
+
+    if not metrics_endpoint or not _is_aws_otlp_endpoint(metrics_endpoint, METRICS_SERVICE):
+        return metric_exporter
+
+    _logger.info("Detected using AWS OTLP Metrics Endpoint.")
+
+    if _is_sigv4_disabled_by_configured_auth(OTEL_EXPORTER_OTLP_METRICS_HEADERS):
+        # The user configured their own Authorization header for metrics. Honor it and do not layer
+        # SigV4 on top, which would replace their credentials.
+        _logger.info(OTLP_CONFIGURED_AUTH_EXPORTER_SELECTED_LOG)
+        return metric_exporter
+
+    if not isinstance(metric_exporter, OTLPHttpOTLPMetricExporter):
+        # The CloudWatch metrics OTLP endpoint only accepts OTLP over HTTP. Warn and leave the
+        # exporter untouched rather than signing something that cannot succeed.
+        _logger.warning(
+            "Improper configuration: please export/set "
+            "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL=http/protobuf and OTEL_METRICS_EXPORTER=otlp"
+        )
+        return metric_exporter
+
+    endpoint, region = _extract_endpoint_and_region_from_otlp_endpoint(metrics_endpoint)
+
+    aws_metric_exporter = _create_aws_otlp_exporter(
+        endpoint=endpoint,
+        service=METRICS_SERVICE,
+        region=region,
+        # pylint: disable=protected-access
+        preferred_temporality=metric_exporter._preferred_temporality,
+        preferred_aggregation=metric_exporter._preferred_aggregation,
+    )
+
+    # _create_aws_otlp_exporter returns None when botocore is unavailable or construction fails.
+    # Preserve the original exporter in that case; returning None would put an unusable exporter
+    # into a metric reader.
+    if aws_metric_exporter is None:
+        return metric_exporter
+
+    _logger.info(OTLP_SIGV4_EXPORTER_SELECTED_LOG)
+    return aws_metric_exporter
 
 
 def _customize_metric_exporters(
@@ -771,13 +865,65 @@ def _is_lambda_environment():
     return AWS_LAMBDA_FUNCTION_NAME_CONFIG in os.environ
 
 
+def _header_keys(headers_value: Optional[str]) -> List[str]:
+    """Return the header names from an OTLP headers environment variable value.
+
+    The value is a comma-separated list of ``key=value`` pairs. Only the key is needed here, so the
+    value is neither decoded nor inspected - it may be percent-encoded (for example
+    ``Authorization=Bearer%20token``) and may itself contain ``=``, hence the single split.
+    """
+    if not headers_value:
+        return []
+
+    keys = []
+    for pair in headers_value.split(","):
+        if "=" in pair:
+            keys.append(pair.split("=", 1)[0].strip())
+    return keys
+
+
+def _has_authorization_header(headers_value: Optional[str]) -> bool:
+    """Does this OTLP headers environment variable value declare an Authorization header?"""
+    return any(key.lower() == "authorization" for key in _header_keys(headers_value))
+
+
+def _is_sigv4_disabled_by_configured_auth(signal_headers_env_var: str) -> bool:
+    """Should automatic SigV4 be skipped because the user configured their own authentication?
+
+    Only the *signal-specific* headers variable grants that consent. The global
+    ``OTEL_EXPORTER_OTLP_HEADERS`` is deliberately not consulted, matching ADOT Java. A global
+    ``Authorization`` may be set for unrelated reasons, so treating it as consent would silently
+    disable SigV4 for a signal the user never intended to configure.
+
+    When a global ``Authorization`` is present but not honored, warn: upstream may still place that
+    header on the request, and our SigV4 header then replaces it, which would otherwise be invisible.
+    """
+    if _has_authorization_header(os.environ.get(signal_headers_env_var)):
+        return True
+
+    if _has_authorization_header(os.environ.get(OTEL_EXPORTER_OTLP_HEADERS)):
+        _logger.warning(
+            "An Authorization header is set in %s, but only %s selects bearer authentication. "
+            "Applying AWS SigV4 instead; the globally configured Authorization header will be replaced. "
+            "Move it to %s to use it for this signal.",
+            OTEL_EXPORTER_OTLP_HEADERS,
+            signal_headers_env_var,
+            signal_headers_env_var,
+        )
+
+    return False
+
+
 def _is_aws_otlp_endpoint(otlp_endpoint: Optional[str], service: str) -> bool:
     """Is the given endpoint an AWS OTLP endpoint?"""
 
     if not otlp_endpoint:
         return False
 
-    pattern = AWS_TRACES_OTLP_ENDPOINT_PATTERN if service == XRAY_SERVICE else AWS_LOGS_OTLP_ENDPOINT_PATTERN
+    pattern = _AWS_OTLP_ENDPOINT_PATTERNS.get(service)
+
+    if pattern is None:
+        return False
 
     return bool(re.match(pattern, otlp_endpoint.lower()))
 
@@ -966,6 +1112,7 @@ def _create_emf_exporter():
             # pylint: disable=import-outside-toplevel
             from amazon.opentelemetry.distro.exporter.aws.metrics.console_emf_exporter import ConsoleEmfExporter
 
+            _logger.info(CONSOLE_EMF_EXPORTER_SELECTED_LOG)
             return ConsoleEmfExporter(namespace=log_header_setting.namespace)
 
         # For non-Lambda environment or Lambda with valid headers - use CloudWatch EMF exporter
@@ -983,6 +1130,7 @@ def _create_emf_exporter():
         if not log_header_setting.is_valid():
             return None
 
+        _logger.info(CLOUDWATCH_EMF_EXPORTER_SELECTED_LOG)
         return AwsCloudWatchEmfExporter(
             session=session,
             namespace=log_header_setting.namespace,
@@ -995,8 +1143,19 @@ def _create_emf_exporter():
         return None
 
 
-def _create_aws_otlp_exporter(endpoint: str, service: str, region: str):
-    """Create and configure the AWS OTLP exporters."""
+def _create_aws_otlp_exporter(
+    endpoint: str,
+    service: str,
+    region: str,
+    preferred_temporality=None,
+    preferred_aggregation=None,
+):
+    """Create and configure the AWS OTLP exporters.
+
+    ``preferred_temporality`` and ``preferred_aggregation`` apply to the metrics signal only and are
+    forwarded so the AWS exporter keeps whatever the upstream exporter resolved. They are ignored for
+    traces and logs, whose exporters have no equivalent settings.
+    """
     try:
         session = get_aws_session()
         # Check if botocore is available before importing the AWS exporter
@@ -1011,20 +1170,33 @@ def _create_aws_otlp_exporter(endpoint: str, service: str, region: str):
         from amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter import OTLPAwsSpanExporter
 
         if service == XRAY_SERVICE:
+            span_exporter_args = {}
             if is_agent_observability_enabled():
                 # Span exporter needs an instance of logger provider in ai agent
                 # observability case because we need to split input/output prompts
                 # from span attributes and send them to the logs pipeline per
                 # the new Gen AI semantic convention from OTel
                 # ref: https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-events/
-                return OTLPAwsSpanExporter(
-                    session=session, endpoint=endpoint, aws_region=region, logger_provider=get_logger_provider()
-                )
+                span_exporter_args["logger_provider"] = get_logger_provider()
 
-            return OTLPAwsSpanExporter(session=session, endpoint=endpoint, aws_region=region)
+            return OTLPAwsSpanExporter(session=session, endpoint=endpoint, aws_region=region, **span_exporter_args)
 
         if service == LOGS_SERIVCE:
             return OTLPAwsLogRecordExporter(session=session, aws_region=region)
+
+        if service == METRICS_SERVICE:
+            # pylint: disable=import-outside-toplevel
+            from amazon.opentelemetry.distro.exporter.otlp.aws.metrics.otlp_aws_metric_exporter import (
+                OTLPAwsMetricExporter,
+            )
+
+            return OTLPAwsMetricExporter(
+                session=session,
+                endpoint=endpoint,
+                aws_region=region,
+                preferred_temporality=preferred_temporality,
+                preferred_aggregation=preferred_aggregation,
+            )
 
         return None
     # pylint: disable=broad-exception-caught

@@ -12,6 +12,14 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- fix(agent-observability): support X-Ray and CloudWatch Logs OTLP endpoints in AWS China regions
+- feat(metrics): sign collector-less OTLP metrics with SigV4 when exporting to the CloudWatch Metrics
+  OTLP endpoint, in both the commercial and AWS China partitions. Requires
+  `OTEL_METRICS_EXPORTER=otlp`, `OTEL_EXPORTER_OTLP_METRICS_PROTOCOL=http/protobuf`, and
+  `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=https://monitoring.<region>.amazonaws.com/v1/metrics`
+  (`.amazonaws.com.cn` in China). An `Authorization` header set in
+  `OTEL_EXPORTER_OTLP_<SIGNAL>_HEADERS` is preserved and SigV4 is not applied on top.
+
 ## v0.20.0 - 2026-09-14
 
 - feat(genai): add AWS-prefixed controls for GenAI instrumentation, MCP HTTP suppression, OpenAI Agents

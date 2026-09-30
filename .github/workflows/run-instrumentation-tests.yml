@@ -50,19 +50,16 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
 
-      - name: Build Wheel and Image Files
+      - name: Build distro wheel
         uses: ./.github/actions/artifacts_build
         with:
-          image_uri_with_tag: instrumentation-tests/${{ matrix.python-version }}
-          push_image: false
-          load_image: true
+          build_image: false
           python_version: ${{ matrix.python-version }}
           package_name: aws-opentelemetry-distro
           os: ubuntu-latest
-          platforms: linux/amd64
 
       - name: Set up and run GenAI contract tests
         run: |
-          bash scripts/set-up-contract-tests.sh
+          bash scripts/set-up-contract-tests.sh "${{ matrix.python-version }}" crewai langchain llamaindex openai_agents
           pip install pytest
           pytest contract-tests/tests/test/amazon/gen_ai -v

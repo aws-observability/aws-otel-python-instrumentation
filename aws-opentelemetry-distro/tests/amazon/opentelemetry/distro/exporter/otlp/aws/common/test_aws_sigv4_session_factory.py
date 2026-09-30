@@ -99,6 +99,42 @@ class TestAwsSigV4SessionFactory(TestCase):
         self.assertEqual(session._service, "logs")
 
     @patch(f"{_PROVIDER_MODULE}.IS_BOTOCORE_INSTALLED", True)
+    def test_china_trace_and_log_endpoints_resolve_signing_service(self):
+        cases = (
+            ("traces", _TRACES_ENDPOINT, "xray"),
+            ("logs", _LOGS_ENDPOINT, "logs"),
+        )
+
+        for region in ("cn-north-1", "cn-northwest-1"):
+            for signal, endpoint_env, expected_service in cases:
+                with self.subTest(signal=signal, region=region), patch(
+                    f"{_PROVIDER_MODULE}._detect_signal_from_stack", return_value=signal
+                ), patch.dict(
+                    os.environ,
+                    {
+                        "AWS_REGION": region,
+                        endpoint_env: f"https://{expected_service}.{region}.amazonaws.com.cn/v1/{signal}",
+                    },
+                ):
+                    session = aws_sigv4_session()
+
+                    self.assertIsInstance(session, AwsAuthSession)
+                    # pylint: disable=protected-access
+                    self.assertEqual(session._service, expected_service)
+                    self.assertEqual(session._aws_region, region)
+
+    @patch(f"{_PROVIDER_MODULE}.IS_BOTOCORE_INSTALLED", True)
+    @patch(f"{_PROVIDER_MODULE}._detect_signal_from_stack", return_value="traces")
+    def test_china_endpoint_with_untrusted_suffix_falls_back_to_unsigned(self, _mock_signal):
+        os.environ["AWS_REGION"] = "cn-north-1"
+        os.environ[_TRACES_ENDPOINT] = "https://xray.cn-north-1.amazonaws.com.cn.evil/v1/traces"
+
+        session = aws_sigv4_session()
+
+        self.assertNotIsInstance(session, AwsAuthSession)
+        self.assertIsInstance(session, requests.Session)
+
+    @patch(f"{_PROVIDER_MODULE}.IS_BOTOCORE_INSTALLED", True)
     @patch(f"{_PROVIDER_MODULE}._detect_signal_from_stack", return_value="traces")
     def test_cloudwatch_substring_resolves_cloudwatch(self, _mock_signal):
         os.environ["AWS_REGION"] = "us-east-1"
@@ -120,6 +156,34 @@ class TestAwsSigV4SessionFactory(TestCase):
 
         # pylint: disable=protected-access
         self.assertEqual(session._service, "monitoring")
+
+    @patch(f"{_PROVIDER_MODULE}.IS_BOTOCORE_INSTALLED", True)
+    @patch(f"{_PROVIDER_MODULE}._detect_signal_from_stack", return_value="metrics")
+    def test_china_metrics_endpoint_resolves_monitoring(self, _mock_signal):
+        """AWS China monitoring endpoints resolve the monitoring signing service and region."""
+        for region in ("cn-north-1", "cn-northwest-1"):
+            with self.subTest(region=region):
+                os.environ["AWS_REGION"] = region
+                os.environ[_METRICS_ENDPOINT] = f"https://monitoring.{region}.amazonaws.com.cn/v1/metrics"
+
+                session = aws_sigv4_session()
+
+                self.assertIsInstance(session, AwsAuthSession)
+                # pylint: disable=protected-access
+                self.assertEqual(session._service, "monitoring")
+                self.assertEqual(session._aws_region, region)
+
+    @patch(f"{_PROVIDER_MODULE}.IS_BOTOCORE_INSTALLED", True)
+    @patch(f"{_PROVIDER_MODULE}._detect_signal_from_stack", return_value="metrics")
+    def test_china_metrics_endpoint_with_untrusted_suffix_falls_back_to_unsigned(self, _mock_signal):
+        """A lookalike host past the China suffix must not be signed."""
+        os.environ["AWS_REGION"] = "cn-north-1"
+        os.environ[_METRICS_ENDPOINT] = "https://monitoring.cn-north-1.amazonaws.com.cn.evil/v1/metrics"
+
+        session = aws_sigv4_session()
+
+        self.assertNotIsInstance(session, AwsAuthSession)
+        self.assertIsInstance(session, requests.Session)
 
     @patch(f"{_PROVIDER_MODULE}.IS_BOTOCORE_INSTALLED", True)
     @patch(f"{_PROVIDER_MODULE}._detect_signal_from_stack", return_value="metrics")
