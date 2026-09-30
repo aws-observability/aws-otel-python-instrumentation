@@ -16,4 +16,5 @@ class UnknownServiceNameTest(ResourceAttributesTest):
         return ",".join(pairlist)
 
     def test_service(self) -> None:
-        self.do_test_resource_attributes("unknown_service")
+        # Since OTel Python 1.45.0 the SDK appends the interpreter's executable name (the app runs as `python`).
+        self.do_test_resource_attributes("unknown_service:python")
