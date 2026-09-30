@@ -423,12 +423,15 @@ class TestLLOHandlerFrameworks(LLOHandlerTestBase):
             "llm.prompts": "[{'role': 'system', 'content': 'System prompt'}]",
             "gen_ai.prompt": "Direct prompt",
             "gen_ai.completion": "Assistant response",
+            "gen_ai.input.messages": "Structured input",
+            "gen_ai.output.messages": "Structured output",
+            "gen_ai.system_instructions": "System instructions",
         }
 
         span = self._create_mock_span(attributes)
         messages = self.llo_handler._collect_all_llo_messages(span, attributes)
 
-        self.assertEqual(len(messages), 3)
+        self.assertEqual(len(messages), 6)
 
         # Check llm.prompts message
         llm_prompts_msg = next((m for m in messages if m["content"] == attributes["llm.prompts"]), None)
@@ -442,3 +445,21 @@ class TestLLOHandlerFrameworks(LLOHandlerTestBase):
 
         completion_msg = next((m for m in messages if m["content"] == "Assistant response"), None)
         self.assertIsNotNone(completion_msg)
+
+        # Check gen_ai.input.messages
+        input_msg = next((m for m in messages if m["content"] == "Structured input"), None)
+        self.assertIsNotNone(input_msg)
+        self.assertEqual(input_msg["role"], "user")
+        self.assertEqual(input_msg["source"], "input")
+
+        # Check gen_ai.output.messages
+        output_msg = next((m for m in messages if m["content"] == "Structured output"), None)
+        self.assertIsNotNone(output_msg)
+        self.assertEqual(output_msg["role"], "assistant")
+        self.assertEqual(output_msg["source"], "output")
+
+        # Check gen_ai.system_instructions
+        system_msg = next((m for m in messages if m["content"] == "System instructions"), None)
+        self.assertIsNotNone(system_msg)
+        self.assertEqual(system_msg["role"], "system")
+        self.assertEqual(system_msg["source"], "prompt")

@@ -1,0 +1,45 @@
+name: DI Debugger Contract Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+      - "release/v*"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  di-contract-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+        suite: ["django", "fastapi", "flask"]
+      fail-fast: false
+
+    steps:
+      - name: Checkout Repo @ SHA - ${{ github.sha }}
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+
+      - name: Build wheel
+        uses: ./.github/actions/artifacts_build
+        with:
+          build_image: false
+          python_version: ${{ matrix.python-version }}
+          package_name: aws-opentelemetry-distro
+          os: ubuntu-latest
+
+      - name: Set up and run di-${{ matrix.suite }} contract tests
+        run: |
+          bash scripts/set-up-contract-tests.sh "${{ matrix.python-version }}" di-${{ matrix.suite }}
+          pytest contract-tests/tests/test/amazon/di/${{ matrix.suite }}_test.py -v

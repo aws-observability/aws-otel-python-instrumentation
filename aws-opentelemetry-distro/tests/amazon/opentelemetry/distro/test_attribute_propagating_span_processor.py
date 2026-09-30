@@ -8,7 +8,7 @@ from amazon.opentelemetry.distro._aws_span_processing_util import get_ingress_op
 from amazon.opentelemetry.distro.attribute_propagating_span_processor import AttributePropagatingSpanProcessor
 from opentelemetry.sdk.trace import ReadableSpan, Span, Tracer, TracerProvider
 from opentelemetry.semconv.trace import MessagingOperationValues, SpanAttributes
-from opentelemetry.trace import SpanContext, SpanKind, TraceFlags, TraceState, set_span_in_context
+from opentelemetry.trace import NonRecordingSpan, SpanContext, SpanKind, TraceFlags, TraceState, set_span_in_context
 
 
 def _get_ingress_operation(span: Span):
@@ -218,3 +218,10 @@ class TestAttributePropagatingSpanProcessor(TestCase):
         self.assertIsNotNone(parent_span.attributes.get(SpanAttributes.CLOUD_RESOURCE_ID))
         self.assertEqual(child_span.attributes.get(SpanAttributes.CLOUD_RESOURCE_ID), cloud_resource_id)
         self.assertEqual(grand_child_span.attributes.get(SpanAttributes.CLOUD_RESOURCE_ID), cloud_resource_id)
+
+    def test_attributes_propagation_with_non_recording_span(self):
+        parent_span: Span = NonRecordingSpan(
+            SpanContext(1, 2, False, TraceFlags(TraceFlags.SAMPLED), TraceState.get_default())
+        )
+        child_span: Span = self.tracer.start_span(name="parent", context=set_span_in_context(parent_span))
+        self.assertIsNone(child_span.attributes.get(_SPAN_NAME_KEY))

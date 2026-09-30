@@ -1,0 +1,14 @@
+name: Build aws-opentelemetry-distro wheel
+description: |
+  This action assumes that the repo was checked out and Python is set up. Builds the aws-opentelemetry-distro wheel into ./dist.
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install Dependencies and Build Wheel
+      shell: bash
+      run: |
+        pip install --upgrade pip setuptools wheel packaging build
+        rm -rf ./dist/*
+        cd ./aws-opentelemetry-distro
+        python -m build --outdir ../dist

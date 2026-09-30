@@ -12,6 +12,150 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- fix(agent-observability): support X-Ray and CloudWatch Logs OTLP endpoints in AWS China regions
+- feat(metrics): sign collector-less OTLP metrics with SigV4 when exporting to the CloudWatch Metrics
+  OTLP endpoint, in both the commercial and AWS China partitions. Requires
+  `OTEL_METRICS_EXPORTER=otlp`, `OTEL_EXPORTER_OTLP_METRICS_PROTOCOL=http/protobuf`, and
+  `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=https://monitoring.<region>.amazonaws.com/v1/metrics`
+  (`.amazonaws.com.cn` in China). An `Authorization` header set in
+  `OTEL_EXPORTER_OTLP_<SIGNAL>_HEADERS` is preserved and SigV4 is not applied on top.
+
+## v0.20.0 - 2026-09-14
+
+- feat(genai): add AWS-prefixed controls for GenAI instrumentation, MCP HTTP suppression, OpenAI Agents
+  trace export, and span attribute redaction; retain `AWS_AGENTIC_INSTRUMENTATION` and
+  `OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION` as legacy fallbacks
+  ([#893](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/893))
+- fix: restrict native GenAI instrumentations to supported dependency major versions
+  ([#884](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/884))
+- fix(langchain): propagate first input, last output, and system instructions to internal agent spans
+  ([#889](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/889))
+- feat: redact span, span event, and span link attributes via `AWS_REDACT_SPAN_ATTRIBUTES`
+  ([#886](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/886))
+- feat(langchain): classify LangGraph StateGraph invocations as agent or workflow spans through the Pregel runtime
+  ([#888](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/888))
+- fix: stop logging a noisy `Invalid key/value pair (xrsr, None) found.` warning on span creation when no
+  X-Ray sampling rule hash is available
+  ([#874](https://github.com/aws-observability/aws-otel-python-instrumentation/issues/874))
+- fix(crewai): correctly complete and isolate spans across tool calls and concurrent crew runs
+  ([#881](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/881))
+- fix(mcp-instrumentation): record errors and session IDs on MCP session spans
+  ([#880](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/880))
+- [BREAKING CHANGE] Delete experimental code level attributes
+  ([#883](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/883))
+- Only demote duplicate nested GenAI client spans
+  ([#872](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/872))
+- (fix): Align and capture missing GenAI request attributes from framework LLM calls
+  ([#871](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/871))
+- fix: align LlamaIndex tools with the OTel GenAI schema and expand GenAI contract coverage
+  ([#866](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/866))
+- feat(openai-agents): [BREAKING CHANGE] add native ADOT OpenAI Agents instrumentation and remove the
+  `opentelemetry-instrumentation-openai-agents-v2` dependency
+  ([#865](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/865))
+- fix: support non-recording parent spans in `AttributePropagatingSpanProcessor`
+  ([#744](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/744))
+- feat: attribute presigned S3 URLs as `AWS::S3` dependencies in Application Signals, opt-in via
+  `OTEL_AWS_APPLICATION_SIGNALS_PRESIGNED_URL_ATTRIBUTION_ENABLED`
+  ([#841](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/841))
+- fix: redact AWS presigned URL credentials from span attributes
+  ([#840](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/840))
+- fix(genai): capture per-call token usage for Amazon Bedrock (and Anthropic) in crewai and langchain by reading provider-specific usage keys — crewai's Converse `inputTokens`/`outputTokens` and langchain's `ChatBedrockConverse` message `usage_metadata`
+  ([#838](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/838))
+
+## v0.19.0 - 2026-07-22
+
+- fix(mcp): fall back to HTTP headers for server-side trace context when `params._meta` is absent
+  ([#829](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/829))
+- fix(mcp-instrumentation): always inject W3C trace context into outbound HTTP request headers so MCP servers that read context only from HTTP (API Gateways, service meshes, non-Python MCP servers) can join the caller's trace, even with `OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION` enabled
+  ([#827](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/827))
+- Nightly dependency update: OpenTelemetry 1.44.0/0.65b0
+  ([#799](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/799))
+- feat(genai): capture user input and agent output on llama_index invoke_agent spans
+  ([#824](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/824))
+- fix(crewai): use native per-call token usage when crewai provides it
+  ([#822](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/822))
+- fix(crewai): normalize tool description across crewai versions
+  ([#821](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/821))
+- fix(serviceevents): key the incident-snapshot dedup hash on operation + bounded throw-site origin (`module/path.function`)
+  ([#825](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/825))
+- fix(crewai): report per-call LLM token usage instead of cumulative total
+  ([#806](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/806))
+- fix(genai): serialize tool call arguments/results and blob bytes to match OTel util-genai (primitives kept native, bytes base64-encoded)
+  ([#817](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/817))
+- feat(genai): capture user input and agent output on invoke_agent spans
+  ([#815](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/815))
+- refactor(serviceevents): make the endpoint span processor framework-agnostic
+- fix(serviceevents): gate incident trace correlation on the SAMPLED flag and harden incident dedup/rate-limiting
+- fix(genai): serialize list-valued message content into typed parts so multimodal/reasoning content is no longer stringified to a Python repr in `gen_ai.input/output.messages` across langchain, llama_index, and crewai
+  ([#805](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/805))
+- feat: add OTel lite SDK for Lambda cold start optimization
+  ([#789](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/789))
+
+## v0.18.0 - 2026-06-18
+
+- feat: support pluggable session injection for the OTLP HTTP exporter via the upstream OTel SDK hook
+  ([#794](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/794))
+- Nightly dependency update: OpenTelemetry 1.42.1/0.63b1
+  ([#762](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/762))
+- feat(agent-observability): add `AWS_AGENTIC_INSTRUMENTATION` (`auto`/`enabled`/`disabled`, case-insensitive) as an escape hatch over auto-detection when `AGENT_OBSERVABILITY_ENABLED=true`; the switch only governs AWS native instrumentors and never disables third-party ones
+  ([#769](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/769))
+- fix(otlp-aws-exporter): avoid `RecursionError` when `pip_system_certs` replaces `ssl.SSLContext` (truststore injection) by rebinding stale `botocore`/`urllib3` SSL context references and caching credentials in `AwsAuthSession`
+- feat: add opt-in Dynamic Instrumentation (runtime breakpoints/probes) gated by `OTEL_AWS_DYNAMIC_INSTRUMENTATION_ENABLED` (default off)
+  ([#761](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/761))
+- feat(serviceevents): add function metrics, endpoint tracking, error counts, deployment events, and incident snapshots emitted via OTLP
+  ([#763](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/763))
+- feat: support environment-configured endpoint visibility for HTTP operation names
+  ([#718](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/718))
+- fix(lambda-layer): Standardize CompactConsoleLogRecordExporter output with CloudWatch OTLP backend schema.
+  ([#715](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/715))
+- fix(agent-observability): fall back to OTEL_EXPORTER_OTLP_ENDPOINT for unsampled spans; also export unsampled spans to non-AWS endpoints
+  ([#738](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/738))
+- feat: auto-detect and mutually exclude AWS native vs third-party agentic instrumentors; add `AWS_AGENTIC_INSTRUMENTATION_OPT_IN` env var to override auto-detection
+  ([#729](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/729))
+- fix(lambda-layer): align context propagation with JS — delegate to global propagator so W3C traceparent is no longer ignored when X-Ray active tracing is enabled
+  ([#727](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/727))
+
+## v0.17.1 - 2026-05-22
+
+- feat(agent-observability): add `AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT` env var to allow disabling LLO content extraction from spans
+  ([#741](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/741))
+- fix(mcp-instrumentation): suppress MCP `/ping` spans when agent observability is enabled
+  ([#748](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/748))
+- fix: pin urllib3 to 2.7.0 to fix CVE-2026-44431 and CVE-2026-44432
+  ([#753](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/753))
+
+## v0.17.0 - 2026-04-08
+
+- fix(lambda-layer): Disable all agentic instrumentation in Lambda by default
+  ([#710](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/710))
+- fix(genai-instrumentors): cleanup code, align with OTel GenAI semconv, add missing attributes and fix deprecated usage
+  ([#706](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/706))
+- feat(genai-instrumentation): add oldest/latest dependency testing and scheduled instrumentation tests for GenAI libraries
+  ([#708](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/708))
+- feat(instrumentors): add invoke_workflow span support for LlamaIndex AgentWorkflow and CrewAI
+  ([#705](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/705))
+- feat: add OpenTelemetry package version compatibility check at distro startup
+  ([#694](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/694))
+- feat(llama_index-instrumentation): add llama-index to agent observability disabled instrumentations
+  ([#704](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/704))
+- fix(langchain-instrumentor): expand provider detection for all supported LLM providers
+  ([#702](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/702))
+- feat: add LLO handler support for gen_ai.input.messages, gen_ai.output.messages, and gen_ai.system_instructions
+  ([#699](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/699))
+- feat: add GenAiNestedClientSpanProcessor to deduplicate nested client spans
+  ([#698](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/698))
+- feat: suppress redundant HTTP/ASGI and initialization spans in MCP instrumentation
+  ([#695](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/695))
+- feat: [BREAKING CHANGE] introduce AWS_AGENTIC_OBSERVABILITY_OPT_IN and refactor agent observability config
+  ([#691](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/691))
+- feat: propagate HTTP context for MCP requests and prefix all span names with mcp
+  ([#683](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/683))
+- feat: add threading instrumentation dependency
+  ([#685](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/685))
+- feat: add openai-agents-v2 instrumentation dependency
+  ([#684](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/684))
+- feat: add BaggageSpanProcessor by default in ADOT
+  ([#687](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/687))
 - feat: Rewrite CrewAI instrumentation using Event based approach
   ([#681](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/681))
 
@@ -31,6 +175,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   ([#658](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/658))
 - Fix AwsCloudWatchOtlpBatchLogRecordProcessor custom _export not being invoked; rename otlp_aws_logs_exporter to otlp_aws_log_record_exporter
   ([#611](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/611))
+- Add native LlamaIndex instrumentation support
+  ([#595](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/595))
 - Add native CrewAI instrumentation support
   ([#586](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/586))
 

@@ -7,13 +7,14 @@ from contextvars import Token
 from typing import Any, Callable, Coroutine, Dict, Optional, Tuple
 from urllib.parse import urlparse
 
-from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import serialize_to_json_string
+from amazon.opentelemetry.distro._utils import get_env, is_agent_observability_enabled
+from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import to_tool_attribute_value
 from opentelemetry import context, trace
 from opentelemetry.instrumentation.utils import suppress_http_instrumentation
 from opentelemetry.propagate import get_global_textmap
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_OPERATION_NAME,
-    GEN_AI_PROMPT,
+    GEN_AI_PROMPT_NAME,
     GEN_AI_TOOL_CALL_ARGUMENTS,
     GEN_AI_TOOL_CALL_RESULT,
     GEN_AI_TOOL_NAME,
@@ -36,6 +37,10 @@ from opentelemetry.trace import SpanKind, Status, StatusCode
 
 _LOG = logging.getLogger(__name__)
 
+AWS_INSTRUMENTATION_MCP_SUPPRESS_HTTP_INSTRUMENTATION = "AWS_INSTRUMENTATION_MCP_SUPPRESS_HTTP_INSTRUMENTATION"
+# Legacy: use AWS_INSTRUMENTATION_MCP_SUPPRESS_HTTP_INSTRUMENTATION.
+OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION = "OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION"
+
 # Context key for storing client transport metadata alongside the session span.
 _TRANSPORT_KEY = context.create_key("mcp_client_transport")
 
@@ -54,6 +59,30 @@ class McpWrapper:
     def __init__(self, tracer: trace.Tracer, **kwargs: Any) -> None:
         self._tracer = tracer
         self._propagators = kwargs.get("propagators") or get_global_textmap()
+        self._should_suppress_http_spans = (
+            get_env(
+                AWS_INSTRUMENTATION_MCP_SUPPRESS_HTTP_INSTRUMENTATION,
+                OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION,
+                "true",
+            ).lower()
+            == "true"
+        )
+        self._agent_observability_enabled = is_agent_observability_enabled()
+
+    def _should_suppress_mcp_span(self, message: Any) -> bool:
+        from mcp import types  # pylint: disable=import-outside-toplevel
+
+        if isinstance(
+            message, (types.ClientRequest, types.ClientNotification, types.ServerRequest, types.ServerNotification)
+        ):
+            message = message.root
+        # noisy spans most of the time
+        if isinstance(message, (types.InitializeRequest, types.InitializedNotification)):
+            return True
+        # MCP servers hosted on AgentCore get frequent /ping health checks
+        if self._agent_observability_enabled and isinstance(message, types.PingRequest):
+            return True
+        return False
 
     @staticmethod
     def _set_mcp_attributes(span: trace.Span, message: Any, request_id: Optional[int]) -> None:
@@ -70,6 +99,9 @@ class McpWrapper:
         """
         from mcp import types  # pylint: disable=import-outside-toplevel
 
+        def create_mcp_span_name(method, target=None):
+            return f"mcp {method} {target}" if target else f"mcp {method}"
+
         is_notification = isinstance(message, (types.ClientNotification, types.ServerNotification))
 
         if hasattr(message, "root"):
@@ -85,20 +117,20 @@ class McpWrapper:
 
         if isinstance(message, types.CallToolRequest):
             tool_name = message.params.name
-            span.update_name(f"{McpMethodNameValues.TOOLS_CALL.value} {tool_name}")
+            span.update_name(create_mcp_span_name(str(McpMethodNameValues.TOOLS_CALL.value), str(tool_name)))
             span.set_attribute(GEN_AI_TOOL_NAME, tool_name)
             span.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.EXECUTE_TOOL.value)
 
             if message.params.arguments:
                 span.set_attribute(
                     GEN_AI_TOOL_CALL_ARGUMENTS,
-                    serialize_to_json_string(message.params.arguments),
+                    to_tool_attribute_value(message.params.arguments),
                 )
 
         elif isinstance(message, types.GetPromptRequest):
             prompt_name = message.params.name
-            span.update_name(f"{McpMethodNameValues.PROMPTS_GET.value} {prompt_name}")
-            span.set_attribute(GEN_AI_PROMPT, prompt_name)
+            span.update_name(create_mcp_span_name(str(McpMethodNameValues.PROMPTS_GET.value), str(prompt_name)))
+            span.set_attribute(GEN_AI_PROMPT_NAME, prompt_name)
 
         elif isinstance(
             message,
@@ -110,11 +142,11 @@ class McpWrapper:
             ),
         ):
             resource_uri = str(message.params.uri)
-            span.update_name(f"{message.method} {resource_uri}")
+            span.update_name(create_mcp_span_name(str(message.method), resource_uri))
             span.set_attribute(MCP_RESOURCE_URI, resource_uri)
 
         else:
-            span.update_name(message.method)
+            span.update_name(create_mcp_span_name(str(message.method)))
 
         transport_info = context.get_value(_TRANSPORT_KEY)
         if isinstance(transport_info, dict):
@@ -130,7 +162,7 @@ class McpWrapper:
 
         if isinstance(message, types.CallToolRequest) and result is not None:
             try:
-                span.set_attribute(GEN_AI_TOOL_CALL_RESULT, serialize_to_json_string(result))
+                span.set_attribute(GEN_AI_TOOL_CALL_RESULT, to_tool_attribute_value(result))
                 if hasattr(result, "isError") and result.isError:
                     span.set_attribute(ERROR_TYPE, "tool_error")
                     span.set_status(Status(StatusCode.ERROR))
@@ -142,17 +174,20 @@ class McpWrapper:
     @staticmethod
     def _set_error_attrs(span: trace.Span, exc: Exception) -> None:
         """Set error attributes on span from exception."""
-        span.set_status(Status(StatusCode.ERROR, str(exc)))
-        span.record_exception(exc)
-        span.set_attribute(ERROR_TYPE, type(exc).__name__)
-
         try:
-            from mcp.shared.exceptions import McpError  # pylint: disable=import-outside-toplevel
+            span.set_status(Status(StatusCode.ERROR, str(exc)))
+            span.record_exception(exc)
+            span.set_attribute(ERROR_TYPE, type(exc).__name__)
 
-            if isinstance(exc, McpError):
-                span.set_attribute(RPC_RESPONSE_STATUS_CODE, str(exc.error.code))
-        except ImportError:
-            pass
+            try:
+                from mcp.shared.exceptions import McpError  # pylint: disable=import-outside-toplevel
+
+                if isinstance(exc, McpError):
+                    span.set_attribute(RPC_RESPONSE_STATUS_CODE, str(exc.error.code))
+            except ImportError:
+                pass
+        except Exception:  # pylint: disable=broad-exception-caught
+            _LOG.debug("Failed to record MCP span error", exc_info=True)
 
 
 class ClientWrapper(McpWrapper):
@@ -175,6 +210,9 @@ class ClientWrapper(McpWrapper):
         async def async_wrapper() -> Any:
             message = args[0] if args else None
             if not message:
+                return await wrapped(*args, **kwargs)
+
+            if self._should_suppress_http_spans and self._should_suppress_mcp_span(message):
                 return await wrapped(*args, **kwargs)
 
             span = self._tracer.start_span(name=self._CLIENT_SPAN_NAME, kind=SpanKind.CLIENT)
@@ -210,8 +248,7 @@ class ClientWrapper(McpWrapper):
                 modified_message = message.model_validate(message_json)
                 new_args = (modified_message,) + args[1:]
 
-                with suppress_http_instrumentation():
-                    result = await wrapped(*new_args, **kwargs)
+                result = await wrapped(*new_args, **kwargs)
                 self._set_tool_result(span, message, result)
                 return result
             except Exception as exc:
@@ -227,12 +264,15 @@ class ClientWrapper(McpWrapper):
 
         @asynccontextmanager
         async def wrapper():
-            span, token = self._start_mcp_session({NETWORK_TRANSPORT: NetworkTransportValues.PIPE.value})
+            session_span, token = self._start_mcp_session_span({NETWORK_TRANSPORT: NetworkTransportValues.PIPE.value})
             try:
                 async with wrapped(*args, **kwargs) as streams:
                     yield streams
+            except Exception as exc:
+                self._set_error_attrs(session_span, exc)
+                raise
             finally:
-                span.end()
+                session_span.end()
                 context.detach(token)
 
         return wrapper()
@@ -243,22 +283,98 @@ class ClientWrapper(McpWrapper):
         async def wrapper():
             url = args[0] if args else kwargs.get("url", "")
             parsed = urlparse(url)
-            span, token = self._start_mcp_session(
-                {
-                    NETWORK_TRANSPORT: NetworkTransportValues.TCP.value,
-                    SERVER_ADDRESS: parsed.hostname,
-                    SERVER_PORT: parsed.port or (443 if parsed.scheme == "https" else 80),
-                }
-            )
+            transport_info = {
+                NETWORK_TRANSPORT: NetworkTransportValues.TCP.value,
+                SERVER_ADDRESS: parsed.hostname,
+                SERVER_PORT: parsed.port or (443 if parsed.scheme == "https" else 80),
+            }
+            session_span, token = self._start_mcp_session_span(transport_info)
             try:
-                with suppress_http_instrumentation():
+                if self._should_suppress_http_spans:
+                    with suppress_http_instrumentation():
+                        async with wrapped(*args, **kwargs) as streams:
+                            yield streams
+                else:
                     async with wrapped(*args, **kwargs) as streams:
                         yield streams
+            except Exception as exc:
+                self._set_error_attrs(session_span, exc)
+                raise
             finally:
-                span.end()
+                try:
+                    session_id = transport_info.get(MCP_SESSION_ID)
+                    if session_id:
+                        session_span.set_attribute(MCP_SESSION_ID, session_id)
+                except Exception:  # pylint: disable=broad-exception-caught
+                    _LOG.debug("Failed to record MCP session ID", exc_info=True)
+                session_span.end()
                 context.detach(token)
 
         return wrapper()
+
+    def wrap_prepare_headers(self, wrapped: Callable[..., Any], instance: Any, args: Any, kwargs: Any) -> Any:
+        """Wrap ``StreamableHTTPTransport._prepare_headers`` to inject W3C trace context.
+
+        ``_prepare_headers`` runs inside ``_handle_post_request``, which our
+        ``wrap_handle_post_request`` wrapper has already restored the per-tool-call
+        context from ``_meta`` for. So the current OTel context at this point is the
+        correct per-request parent — we just need to inject it into the returned
+        headers dict.
+
+        Only injects when ``_should_suppress_http_spans`` is True (the default);
+        when False, the httpx client instrumentation handles header injection itself.
+        """
+        headers = wrapped(*args, **kwargs)
+        if self._should_suppress_http_spans:
+            try:
+                self._propagators.inject(carrier=headers)
+            except Exception:  # pylint: disable=broad-exception-caught
+                _LOG.debug("MCP trace-context header injection failed", exc_info=True)
+        return headers
+
+    def wrap_handle_post_request(
+        self,
+        wrapped: Callable[..., Any],
+        instance: Any,
+        args: Any,
+        kwargs: Any,
+    ) -> Any:
+        """
+        Wrap StreamableHTTPTransport._handle_post_request to restore
+        trace context. Extracts the trace context sent to MCP server
+        via JSON RPC so existing HTTP spans are correctly parented
+        under the MCP request span.
+        """
+
+        async def async_wrapper():
+            ctx = None
+            try:
+                from mcp.client.streamable_http import RequestContext  # pylint: disable=import-outside-toplevel
+
+                request_ctx = args[0] if args else None
+                if isinstance(request_ctx, RequestContext):
+                    message = request_ctx.session_message.message
+                    message_dict = message.model_dump(by_alias=True, mode="json", exclude_none=True)
+                    meta = message_dict.get("params", {}).get("_meta", {})
+                    if meta:
+                        ctx = self._propagators.extract(carrier=meta)
+            except Exception:  # pylint: disable=broad-exception-caught
+                pass
+
+            if ctx:
+                token = context.attach(ctx)
+                try:
+                    if self._should_suppress_http_spans:
+                        with suppress_http_instrumentation():
+                            return await wrapped(*args, **kwargs)
+                    else:
+                        return await wrapped(*args, **kwargs)
+                finally:
+                    context.detach(token)
+            else:
+                return await wrapped(*args, **kwargs)
+
+        return async_wrapper()
 
     @staticmethod
     def wrap_extract_session_id(wrapped: Callable[..., Any], instance: Any, args: Any, kwargs: Any) -> Any:
@@ -269,12 +385,12 @@ class ClientWrapper(McpWrapper):
                 transport_info[MCP_SESSION_ID] = instance.session_id
         return result
 
-    def _start_mcp_session(self, transport_info: Dict[str, Any]) -> Tuple[trace.Span, Token]:
-        # a bit strange and does not follow any existing OTel semantic conventions,
-        # but we need an overarching parent span to capture the MCP session
-        # lifetime, all server and client MCP operations happen within this
-        # session context. Otherwise we get a bunch of disjointed traces
-        # without a common ancestor.
+    def _start_mcp_session_span(self, transport_info: Dict[str, Any]) -> Tuple[trace.Span, Token]:
+        # A bit strange and does not follow any existing OTel semantic
+        # conventions, but we need an overarching parent span to capture
+        # the MCP session lifetime. All server and client MCP operations
+        # happen within this session context. Otherwise we get a bunch
+        # of disjointed traces without a common ancestor.
         span = self._tracer.start_span(self._SESSION_SPAN_NAME, kind=SpanKind.INTERNAL)
         ctx = trace.set_span_in_context(span)
         ctx = context.set_value(_TRANSPORT_KEY, transport_info, ctx)
@@ -291,6 +407,25 @@ class ServerWrapper(McpWrapper):
     # initialize and notifications/initialized spans, which are handled before Server._handle_request.
     # Though we can opt out of doing so as well as believe those spans provide minimum value with added
     # complexity.
+
+    def wrap_mcp_http_sse_app_factory(self, wrapped: Callable[..., Any], instance: Any, args: Any, kwargs: Any) -> Any:
+        if not self._should_suppress_http_spans:
+            return wrapped(*args, **kwargs)
+
+        class _HttpSuppressionMiddleware:
+            def __init__(self, inner_app: Any) -> None:
+                self.app = inner_app
+
+            async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+                with suppress_http_instrumentation():
+                    await self.app(scope, receive, send)
+
+        app = wrapped(*args, **kwargs)
+        try:
+            app.add_middleware(_HttpSuppressionMiddleware)
+        except Exception:  # pylint: disable=broad-exception-caught
+            _LOG.debug("Failed to apply ASGI suppression to MCP server app", exc_info=True)
+        return app
 
     async def _wrap_server_handle_request(
         self,
@@ -356,10 +491,12 @@ class ServerWrapper(McpWrapper):
         if not incoming_msg:
             return await wrapped(*args, **kwargs)
 
+        if self._should_suppress_http_spans and self._should_suppress_mcp_span(incoming_msg):
+            return await wrapped(*args, **kwargs)
+
         request_id = getattr(incoming_msg, "id", None)
 
-        carrier = self._extract_trace_context(incoming_msg)
-        parent_ctx = self._propagators.extract(carrier=carrier)
+        parent_ctx = self._extract_trace_context(incoming_msg, args)
 
         with self._tracer.start_as_current_span(
             self._SERVER_SPAN_NAME,
@@ -390,22 +527,39 @@ class ServerWrapper(McpWrapper):
                 self._set_error_attrs(span, exc)
                 raise
 
-    def _extract_trace_context(self, message: Any) -> Dict[str, Any]:  # pylint: disable=no-self-use
+    def _extract_trace_context(self, message: Any, args: Tuple[Any, ...]) -> context.Context:
         """
-        Extract trace context carrier from message metadata.
+        Extract trace context from MCP message metadata, falling back to the incoming
+        request's HTTP headers.
 
         Args:
             message: Incoming MCP message
+            args: Server handler arguments carrying the request
 
         Returns:
-            Dictionary containing trace context or empty dict
+            Extracted context, or an empty context if neither carrier is present
         """
+        # pylint: disable=import-outside-toplevel
+        from mcp.shared.message import ServerMessageMetadata
+        from mcp.shared.session import RequestResponder
+
         try:
             if hasattr(message, "params") and hasattr(message.params, "meta") and message.params.meta:
-                return message.params.meta.model_dump()
+                ctx = self._propagators.extract(carrier=message.params.meta.model_dump())
+                if trace.get_current_span(ctx).get_span_context().is_valid:
+                    return ctx
+
+            responder = args[0] if args else None
+            if isinstance(responder, RequestResponder) and isinstance(
+                responder.message_metadata, ServerMessageMetadata
+            ):
+                request_context = responder.message_metadata.request_context
+                headers = getattr(request_context, "headers", None) if request_context else None
+                if headers:
+                    return self._propagators.extract(carrier=dict(headers.items()))
         except Exception as exc:  # pylint: disable=broad-exception-caught
             _LOG.debug("Failed to extract trace context: %s", exc)
-        return {}
+        return context.Context()
 
     def _extract_server_transport_info(
         self, args: Tuple[Any, ...]

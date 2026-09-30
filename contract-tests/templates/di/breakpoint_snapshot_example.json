@@ -1,0 +1,44 @@
+{
+  "$comment": "Example BREAKPOINT snapshot for process_data function - fields marked with * are dynamic",
+  "id": "*",
+  "timestamp": "*",
+  "duration": "*",
+  "service": "di-test-service",
+  "environment": "test",
+  "locationHash": "aabb000000000001",
+  "instrumentation": {
+    "location": {
+      "codeUnit": "di_flask_server",
+      "className": "di_flask_server",
+      "methodName": "process_data",
+      "lineNumber": 0,
+      "filePath": "*",
+      "language": "python"
+    }
+  },
+  "trace": {
+    "traceId": "*",
+    "spanId": "*"
+  },
+  "thread": {
+    "id": "*",
+    "name": "*"
+  },
+  "stack": "*",
+  "captures": {
+    "entry": {
+      "arguments": {
+        "value": {
+          "type": "int",
+          "value": "42"
+        }
+      }
+    },
+    "return": {
+      "returnValue": {
+        "type": "int",
+        "value": "84"
+      }
+    }
+  }
+}

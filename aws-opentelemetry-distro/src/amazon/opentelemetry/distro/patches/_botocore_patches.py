@@ -26,9 +26,8 @@ from opentelemetry.instrumentation.botocore import (
     BotocoreInstrumentor,
     _apply_response_attributes,
     _determine_call_context,
-    _safe_invoke,
 )
-from opentelemetry.instrumentation.botocore.extensions import _KNOWN_EXTENSIONS, _find_extension
+from opentelemetry.instrumentation.botocore.extensions import _BOTOCORE_EXTENSIONS
 from opentelemetry.instrumentation.botocore.extensions.dynamodb import _DynamoDbExtension
 from opentelemetry.instrumentation.botocore.extensions.lmbd import _LambdaExtension
 from opentelemetry.instrumentation.botocore.extensions.sqs import _SqsExtension
@@ -38,7 +37,7 @@ from opentelemetry.instrumentation.botocore.extensions.types import (
     _BotocoreInstrumentorContext,
     _BotoResultT,
 )
-from opentelemetry.instrumentation.botocore.utils import get_server_attributes
+from opentelemetry.instrumentation.botocore.utils import _safe_invoke, get_server_attributes
 from opentelemetry.instrumentation.utils import is_instrumentation_enabled, suppress_http_instrumentation
 from opentelemetry.propagate import get_global_textmap
 from opentelemetry.semconv._incubating.attributes.aws_attributes import (
@@ -135,7 +134,7 @@ def _apply_botocore_kinesis_patch() -> None:
     the `aws.kinesis.stream.name` attribute, to be used to generate RemoteTarget and achieve parity with the Java
     instrumentation.
     """
-    _KNOWN_EXTENSIONS["kinesis"] = _lazy_load(".", "_KinesisExtension")
+    _BOTOCORE_EXTENSIONS["kinesis"] = _lazy_load(".", "_KinesisExtension")
 
 
 def _apply_botocore_s3_patch() -> None:
@@ -147,7 +146,7 @@ def _apply_botocore_s3_patch() -> None:
     Callout that AWS_S3_BUCKET is in the AWS Semantic Conventions, and is simply not implemented in Python
     instrumentation.
     """
-    _KNOWN_EXTENSIONS["s3"] = _lazy_load(".", "_S3Extension")
+    _BOTOCORE_EXTENSIONS["s3"] = _lazy_load(".", "_S3Extension")
 
 
 def _apply_botocore_sqs_patch() -> None:
@@ -190,11 +189,11 @@ def _apply_botocore_bedrock_patch() -> None:
     Specifically, we are adding logic to add the AWS_BEDROCK attributes referenced in _aws_attribute_keys.
     Note: Bedrock Runtime uses the upstream extension directly.
     """
-    _KNOWN_EXTENSIONS["bedrock"] = _lazy_load(".", "_BedrockExtension")
-    _KNOWN_EXTENSIONS["bedrock-agent"] = _lazy_load(".", "_BedrockAgentExtension")
-    _KNOWN_EXTENSIONS["bedrock-agent-runtime"] = _lazy_load(".", "_BedrockAgentRuntimeExtension")
-    _KNOWN_EXTENSIONS["bedrock-agentcore"] = _lazy_load(".._bedrock_agentcore_patches", "_BedrockAgentCoreExtension")
-    _KNOWN_EXTENSIONS["bedrock-agentcore-control"] = _lazy_load(
+    _BOTOCORE_EXTENSIONS["bedrock"] = _lazy_load(".", "_BedrockExtension")
+    _BOTOCORE_EXTENSIONS["bedrock-agent"] = _lazy_load(".", "_BedrockAgentExtension")
+    _BOTOCORE_EXTENSIONS["bedrock-agent-runtime"] = _lazy_load(".", "_BedrockAgentRuntimeExtension")
+    _BOTOCORE_EXTENSIONS["bedrock-agentcore"] = _lazy_load(".._bedrock_agentcore_patches", "_BedrockAgentCoreExtension")
+    _BOTOCORE_EXTENSIONS["bedrock-agentcore-control"] = _lazy_load(
         ".._bedrock_agentcore_patches", "_BedrockAgentCoreExtension"
     )
 
@@ -230,13 +229,13 @@ def _apply_botocore_api_call_patch() -> None:
             - aws.auth.account.access_key
             - aws.auth.region
 
-        Note: Current implementation duplicates upstream code in v1.33.x-0.54bx. Future improvements should:
+        Note: Current implementation duplicates upstream code in v1.42.x-0.63bx. Future improvements should:
         1. Propose refactoring upstream _patched_api_call into smaller components
         2. Apply targeted patches to these components to reduce code duplication
 
         Reference: https://github.com/open-telemetry/opentelemetry-python-contrib/blob/
-        release/v1.33.x-0.54bx/instrumentation/opentelemetry-instrumentation-botocore/src/
-        opentelemetry/instrumentation/botocore/__init__.py#L263
+        release/v1.42.x-0.63bx/instrumentation/opentelemetry-instrumentation-botocore/src/
+        opentelemetry/instrumentation/botocore/__init__.py
         """
         if not is_instrumentation_enabled():
             return original_func(*args, **kwargs)
@@ -245,7 +244,7 @@ def _apply_botocore_api_call_patch() -> None:
         if call_context is None:
             return original_func(*args, **kwargs)
 
-        extension = _find_extension(call_context)
+        extension = self.extension_registry.get_extension(call_context)
         if not extension.should_trace_service_call():
             return original_func(*args, **kwargs)
 
@@ -268,11 +267,10 @@ def _apply_botocore_api_call_patch() -> None:
         _safe_invoke(extension.extract_attributes, attributes)
         end_span_on_exit = extension.should_end_span_on_exit()
 
-        tracer = self._get_tracer(extension)
-        meter = self._get_meter(extension)
-        metrics = self._get_metrics(extension, meter)
+        tracer = self.extension_registry.get_tracer(extension)
+        metrics = self.extension_registry.get_metrics(extension)
         instrumentor_ctx = _BotocoreInstrumentorContext(
-            logger=self._get_logger(extension),
+            logger=self.extension_registry.get_logger(extension),
             metrics=metrics,
         )
         with tracer.start_as_current_span(

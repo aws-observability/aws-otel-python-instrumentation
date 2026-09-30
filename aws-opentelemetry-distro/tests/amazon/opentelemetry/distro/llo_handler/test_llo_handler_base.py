@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Base test utilities for LLO Handler tests."""
 from unittest import TestCase
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from amazon.opentelemetry.distro.llo_handler import LLOHandler
 from opentelemetry.sdk._logs import LoggerProvider
@@ -16,13 +16,9 @@ class LLOHandlerTestBase(TestCase):
     def setUp(self):
         self.logger_provider_mock = MagicMock(spec=LoggerProvider)
         self.event_logger_mock = MagicMock()
-        self.event_logger_provider_mock = MagicMock()
-        self.event_logger_provider_mock.get_event_logger.return_value = self.event_logger_mock
+        self.logger_provider_mock.get_logger.return_value = self.event_logger_mock
 
-        with patch(
-            "amazon.opentelemetry.distro.llo_handler.EventLoggerProvider", return_value=self.event_logger_provider_mock
-        ):
-            self.llo_handler = LLOHandler(self.logger_provider_mock)
+        self.llo_handler = LLOHandler(self.logger_provider_mock)
 
     @staticmethod
     def _create_mock_span(attributes=None, kind=SpanKind.INTERNAL, preserve_none=False):

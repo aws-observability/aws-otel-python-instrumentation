@@ -679,6 +679,27 @@ class RequestHandler(BaseHTTPRequestHandler):
             bedrock_runtime_client.invoke_model(
                 body=request_body, modelId=model_id, accept=accept, contentType=content_type
             )
+        elif self.in_path("converse/converse"):
+            set_main_status(200)
+            bedrock_runtime_client.meta.events.register(
+                "before-call.bedrock-runtime.Converse",
+                lambda **kwargs: inject_200_success(
+                    output={"message": {"role": "assistant", "content": [{"text": "Hello! How can I help?"}]}},
+                    stopReason="end_turn",
+                    usage={"inputTokens": 12, "outputTokens": 8},
+                    **kwargs,
+                ),
+            )
+            bedrock_runtime_client.converse(
+                modelId="anthropic.claude-v2:1",
+                messages=[{"role": "user", "content": [{"text": "Hello"}]}],
+                inferenceConfig={
+                    "maxTokens": 512,
+                    "temperature": 0.7,
+                    "topP": 0.9,
+                    "stopSequences": ["Human:"],
+                },
+            )
         else:
             set_main_status(404)
 

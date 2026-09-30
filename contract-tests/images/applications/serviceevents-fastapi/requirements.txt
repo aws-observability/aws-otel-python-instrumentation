@@ -1,0 +1,7 @@
+typing-extensions==4.15.0
+# See the note in contract-tests/images/applications/di-fastapi/requirements.txt: fastapi
+# 0.142.0 added automatic telemetry that aborts startup unless the OTLP protocol is
+# http/protobuf. ADOT supplies the telemetry here, so cap until the app opts out explicitly.
+fastapi<0.142.0
+uvicorn
+python-dateutil

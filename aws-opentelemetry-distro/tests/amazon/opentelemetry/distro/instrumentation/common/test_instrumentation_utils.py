@@ -1,9 +1,15 @@
 import json
+from base64 import b64encode
 from unittest import TestCase
+from unittest.mock import Mock
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
+    content_to_parts,
+    first_not_none,
+    get_value,
     serialize_to_json_string,
     skip_instrumentation_if_suppressed,
+    to_tool_attribute_value,
     try_detach,
     try_unwrap,
     try_wrap,
@@ -14,6 +20,30 @@ from opentelemetry.trace import set_span_in_context
 
 
 class TestInstrumentationUtils(TestCase):
+    def test_first_not_none_and_get_value(self):
+        object_source = Mock()
+        object_source.temperature = 0.0
+
+        self.assertIs(first_not_none(None, False, True), False)
+        self.assertEqual(get_value(object_source, "temperature"), 0.0)
+        self.assertIs(get_value({"stream": False}, "stream"), False)
+
+    def test_content_to_parts_openai_text_blocks(self):
+        self.assertEqual(
+            content_to_parts(
+                [
+                    {"type": "input_text", "text": "input"},
+                    {"type": "output_text", "text": "output"},
+                    {"type": "summary_text", "text": "summary"},
+                ]
+            ),
+            [
+                {"type": "text", "content": "input"},
+                {"type": "text", "content": "output"},
+                {"type": "text", "content": "summary"},
+            ],
+        )
+
     def test_serialize_basic_types(self):
         self.assertEqual(serialize_to_json_string({"key": "value"}), '{"key": "value"}')
         self.assertEqual(serialize_to_json_string([1, 2, 3]), "[1, 2, 3]")
@@ -51,6 +81,42 @@ class TestInstrumentationUtils(TestCase):
         obj = object()
         result = serialize_to_json_string(obj)
         self.assertEqual(result, str(obj))
+
+    def test_serialize_bytes_base64_encoded(self):
+        raw = b"\x89PNG\r\n"
+        expected = b64encode(raw).decode()
+        self.assertEqual(serialize_to_json_string(raw), json.dumps(expected))
+
+    def test_serialize_bytes_nested_in_structure(self):
+        raw = b"\x89PNG"
+        result = serialize_to_json_string({"parts": [{"type": "blob", "content": raw}]})
+        self.assertIn(b64encode(raw).decode(), result)
+        self.assertIn('"content"', result)
+
+    def test_to_tool_attribute_value_dict_with_bytes_base64_encoded(self):
+        raw = b"\x89PNG\r\n"
+        result = to_tool_attribute_value({"parts": [{"type": "blob", "content": raw}]})
+        self.assertEqual(json.loads(result), {"parts": [{"type": "blob", "content": b64encode(raw).decode()}]})
+
+    def test_to_tool_attribute_value_primitives_kept_native(self):
+        self.assertEqual(to_tool_attribute_value("Hello, World!"), "Hello, World!")
+        self.assertEqual(to_tool_attribute_value(42), 42)
+        self.assertEqual(to_tool_attribute_value(3.14), 3.14)
+        self.assertEqual(to_tool_attribute_value(True), True)
+        self.assertEqual(to_tool_attribute_value(b"raw"), b"raw")
+
+    def test_to_tool_attribute_value_none(self):
+        self.assertIsNone(to_tool_attribute_value(None))
+
+    def test_to_tool_attribute_value_dict_and_list_json_encoded(self):
+        self.assertEqual(to_tool_attribute_value({"city": "Paris"}), '{"city":"Paris"}')
+        self.assertEqual(to_tool_attribute_value([1, 2, 3]), "[1,2,3]")
+
+    def test_to_tool_attribute_value_unserializable_falls_back_to_str(self):
+        obj = object()
+        self.assertEqual(to_tool_attribute_value(obj), str(obj))
+        value = {"unsupported": obj}
+        self.assertEqual(to_tool_attribute_value(value), str(value))
 
     def test_try_unwrap_not_wrapped(self):
         try_unwrap(json, "dumps")

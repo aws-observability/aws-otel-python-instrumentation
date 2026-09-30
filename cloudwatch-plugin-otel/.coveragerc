@@ -1,0 +1,19 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+[run]
+parallel = true
+
+[paths]
+; Normalize installed package paths back to the source tree so coverage data
+; from the oldest and latest tox envs can be combined into a single report
+source =
+    src/plugins
+    .tox/*/lib/python*/site-packages/plugins
+    */site-packages/plugins
+
+[report]
+include_namespace_packages = true
+precision = 2
+omit =
+    */tests/*
+    */pip-build-env-*/*

@@ -58,6 +58,7 @@ _GEN_AI_REQUEST_MAX_TOKENS: str = "gen_ai.request.max_tokens"
 _GEN_AI_RESPONSE_FINISH_REASONS: str = "gen_ai.response.finish_reasons"
 _GEN_AI_USAGE_INPUT_TOKENS: str = "gen_ai.usage.input_tokens"
 _GEN_AI_USAGE_OUTPUT_TOKENS: str = "gen_ai.usage.output_tokens"
+_GEN_AI_REQUEST_STOP_SEQUENCES: str = "gen_ai.request.stop_sequences"
 _GEN_AI_SYSTEM: str = "gen_ai.system"
 _GEN_AI_RUNTIME_ID: str = "gen_ai.runtime.id"
 _GEN_AI_BROWSER_ID: str = "gen_ai.browser.id"
@@ -661,6 +662,35 @@ class BotocoreTest(ContractTestBase):
                 _GEN_AI_USAGE_OUTPUT_TOKENS: math.ceil(len("test-output-text") / 6),
             },
             span_name="chat mistral.mistral-7b-instruct-v0:2",
+        )
+
+    def test_bedrock_runtime_converse(self):
+        self.do_test_requests(
+            "bedrock/converse/converse",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="Bedrock Runtime",
+            remote_service="AWS::BedrockRuntime",
+            remote_operation="Converse",
+            remote_resource_type="AWS::Bedrock::Model",
+            remote_resource_identifier="anthropic.claude-v2:1",
+            cloudformation_primary_identifier="anthropic.claude-v2:1",
+            request_specific_attributes={
+                _GEN_AI_REQUEST_MODEL: "anthropic.claude-v2:1",
+                _GEN_AI_SYSTEM: "aws.bedrock",
+                _GEN_AI_REQUEST_MAX_TOKENS: 512,
+                _GEN_AI_REQUEST_TEMPERATURE: 0.7,
+                _GEN_AI_REQUEST_TOP_P: 0.9,
+                _GEN_AI_REQUEST_STOP_SEQUENCES: ["Human:"],
+            },
+            response_specific_attributes={
+                _GEN_AI_RESPONSE_FINISH_REASONS: ["end_turn"],
+                _GEN_AI_USAGE_INPUT_TOKENS: 12,
+                _GEN_AI_USAGE_OUTPUT_TOKENS: 8,
+            },
+            span_name="chat anthropic.claude-v2:1",
         )
 
     def test_bedrock_get_guardrail(self):

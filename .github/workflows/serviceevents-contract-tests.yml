@@ -1,0 +1,48 @@
+name: ServiceEvents Contract Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_scope:
+        description: 'Which contract tests to run'
+        required: false
+        type: choice
+        default: serviceevents
+        options:
+          - serviceevents
+          - all
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  contract-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo @ SHA - ${{ github.sha }}
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
+
+      - name: Build wheel
+        uses: ./.github/actions/artifacts_build
+        with:
+          build_image: false
+          python_version: "3.10"
+          package_name: aws-opentelemetry-distro
+          os: ubuntu-latest
+
+      - name: Set up images and host
+        run: |
+          if [ "${{ inputs.test_scope }}" = "all" ]; then
+            bash scripts/set-up-contract-tests.sh ""
+          else
+            bash scripts/set-up-contract-tests.sh "" serviceevents
+          fi
+
+      - name: Run contract tests with pytest
+        run: |
+          if [ "${{ inputs.test_scope }}" = "all" ]; then
+            pytest contract-tests/tests -v
+          else
+            pytest contract-tests/tests/test/amazon/serviceevents/ -v
+          fi

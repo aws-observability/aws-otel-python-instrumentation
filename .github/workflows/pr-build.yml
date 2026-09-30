@@ -5,8 +5,12 @@ on:
       - opened
       - reopened
       - synchronize
+      # labeled/unlabeled kept so adding the "Skip Changelog" label re-runs the
+      # changelog check. Heavy jobs are gated off for these actions (see per-job
+      # `if:` below) so a label change does not re-fire the full build matrix.
       - labeled
       - unlabeled
+      - ready_for_review
     branches:
       - main
       - "release/v*"
@@ -15,6 +19,10 @@ permissions:
   id-token: write
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  
 env:
   USER: ${{ github.event.pull_request.user.login }}
   LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
@@ -122,17 +130,81 @@ jobs:
           
           echo "No github.event usage found in run steps"
 
-  build:
+  build-wheel:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false # ensures the entire test matrix is run, even if one permutation fails
-      matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+    # Skip on draft PRs and on label-only events; neither affects the build.
+    if: ${{ github.event.action != 'labeled' && github.event.action != 'unlabeled' && github.event.pull_request.draft == false }}
+    steps:
+      - name: Checkout Repo @ SHA - ${{ github.sha }}
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c #v6.0.0
+        with:
+          python-version: '3.11'
+      - name: Build distro wheel
+        uses: ./.github/actions/artifacts_build/build_wheel
+      - name: Upload distro wheel
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
+        with:
+          name: distro-wheel
+          path: dist/aws_opentelemetry_distro-*-py3-none-any.whl
+          retention-days: 1
+
+  build-cloudwatch-plugin-otel:
+    runs-on: ubuntu-latest
+    # Skip on draft PRs and on label-only events; neither affects the build.
+    if: ${{ github.event.action != 'labeled' && github.event.action != 'unlabeled' && github.event.pull_request.draft == false }}
     steps:
       - name: Checkout Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
 
-      - name: Build Wheel and Image Files
+      - name: Build cloudwatch-plugin-otel distributions
+        uses: ./.github/actions/build_cloudwatch_plugin_otel
+
+      - name: Upload cloudwatch-plugin-otel artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
+        with:
+          name: cloudwatch-plugin-otel-artifacts
+          path: plugin-dist/cloudwatch_plugin_otel-*
+          retention-days: 1
+
+  build-lambda:
+    runs-on: ubuntu-latest
+    # Skip on draft PRs and on label-only events; neither affects the build.
+    if: ${{ github.event.action != 'labeled' && github.event.action != 'unlabeled' && github.event.pull_request.draft == false }}
+    steps:
+      - name: Checkout Repo @ SHA - ${{ github.sha }}
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c #v6.0.0
+        with:
+          python-version: |
+            3.10
+            3.11
+            3.12
+            3.13
+            3.14
+      - name: Build sample lambda function
+        working-directory: lambda-layer/sample-apps
+        run: ./package-lambda-function.sh
+      - name: Build layers
+        working-directory: lambda-layer/src
+        run: |
+          ./build-lambda-layer.sh
+          pip install tox
+          tox
+
+  build-and-scan-image:
+    runs-on: ubuntu-latest
+    # Skip on draft PRs and on label-only events; neither affects the build.
+    if: ${{ github.event.action != 'labeled' && github.event.action != 'unlabeled' && github.event.pull_request.draft == false }}
+    strategy:
+      fail-fast: false # ensures the entire test matrix is run, even if one permutation fails
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - name: Checkout Repo @ SHA - ${{ github.sha }}
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
+
+      - name: Build and scan operator image
         uses: ./.github/actions/artifacts_build
         with:
           image_uri_with_tag: pr-build/${{ matrix.python-version }}
@@ -144,32 +216,81 @@ jobs:
           trivyignore-file: .github/trivy/pr-build.trivyignore.yaml
           platforms: linux/amd64
 
-      - name: Set up and run contract tests with pytest
-        run: |
-          bash scripts/set-up-contract-tests.sh
-          pip install pytest
-          pytest contract-tests/tests
-
-  build-lambda:
+  unit-tests:
     runs-on: ubuntu-latest
+    needs: build-wheel
+    # Skip on draft PRs and on label-only events; neither affects the tests.
+    if: ${{ github.event.action != 'labeled' && github.event.action != 'unlabeled' && github.event.pull_request.draft == false }}
+    strategy:
+      fail-fast: false # ensures the entire test matrix is run, even if one permutation fails
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
       - name: Checkout Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
-      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c #v6.0.0
+
+      - name: Download distro wheel
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
         with:
-          python-version: '3.x'
-      - name: Build sample lambda function
-        working-directory: lambda-layer/sample-apps
-        run: ./package-lambda-function.sh
-      - name: Build layers
-        working-directory: lambda-layer/src
+          name: distro-wheel
+          path: dist
+
+      - name: Resolve wheel path
+        id: wheel
+        run: echo "path=$(ls dist/aws_opentelemetry_distro-*-py3-none-any.whl)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up and run unit tests
+        uses: ./.github/actions/unit_tests
+        with:
+          python_version: ${{ matrix.python-version }}
+          package_name: aws-opentelemetry-distro
+          os: ubuntu-latest
+          wheel_path: ${{ steps.wheel.outputs.path }}
+
+  cloudwatch-plugin-otel-unit-tests:
+    name: cloudwatch-plugin-otel-${{ matrix.otel }} ${{ matrix.python-version }} Ubuntu
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Skip on draft PRs and on label-only events; neither affects the tests.
+    if: ${{ github.event.action != 'labeled' && github.event.action != 'unlabeled' && github.event.pull_request.draft == false }}
+    strategy:
+      fail-fast: false # ensures the entire test matrix is run, even if one permutation fails
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        otel: ["oldest", "latest"]
+    steps:
+      - name: Checkout Repo @ SHA - ${{ github.sha }}
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c #v6.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install tox
+        run: pip install tox==4.30.3
+
+      - name: Run tests
         run: |
-          ./build-lambda-layer.sh
-          pip install tox
-          tox
+          PY_NODOT="py$(echo '${{ matrix.python-version }}' | tr -d '.')"
+          tox -c cloudwatch-plugin-otel/tox.ini -e "${PY_NODOT}-test-cloudwatch-plugin-otel-${{ matrix.otel }}" -- -ra
+
+  contract-tests:
+    needs: build-wheel
+    # Skip on draft PRs and on label-only events; neither affects the tests.
+    if: ${{ github.event.action != 'labeled' && github.event.action != 'unlabeled' && github.event.pull_request.draft == false }}
+    strategy:
+      fail-fast: false # ensures the entire test matrix is run, even if one permutation fails
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    uses: ./.github/workflows/contract-tests.yml
+    with:
+      python-version: ${{ matrix.python-version }}
 
   lint:
     runs-on: ubuntu-latest
+    # Skip on draft PRs and on label-only events; neither affects lint/spellcheck.
+    if: ${{ github.event.action != 'labeled' && github.event.action != 'unlabeled' && github.event.pull_request.draft == false }}
     strategy:
       fail-fast: false # ensures the entire test matrix is run, even if one permutation fails
       matrix:
@@ -188,13 +309,14 @@ jobs:
           python_version: 3.11
           package_name: aws-opentelemetry-distro
           os: ubuntu-latest
-          run_unit_tests: false
 
       - name: Run ${{ matrix.tox-environment }} with tox
         run: tox -e ${{ matrix.tox-environment }}
 
   spotless:
     runs-on: ubuntu-latest
+    # Skip on draft PRs and on label-only events; neither affects spotless.
+    if: ${{ github.event.action != 'labeled' && github.event.action != 'unlabeled' && github.event.pull_request.draft == false }}
     steps:
       - name: Checkout Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
@@ -216,7 +338,7 @@ jobs:
 
   all-pr-checks-pass:
     runs-on: ubuntu-latest
-    needs: [static-code-checks, lint, spotless, build, build-lambda]
+    needs: [static-code-checks, lint, spotless, unit-tests, cloudwatch-plugin-otel-unit-tests, build-wheel, build-cloudwatch-plugin-otel, build-and-scan-image, contract-tests, build-lambda]
     if: always()
     steps:
       - name: Checkout to get workflow file
@@ -224,9 +346,13 @@ jobs:
       
       - name: Check all jobs succeeded and none missing
         run: |
-          # Check if all needed jobs succeeded
+          # Check if all needed jobs succeeded.
+          # "skipped" is treated as passing: on labeled/unlabeled PR events the
+          # heavy jobs are intentionally gated off (see their `if:`), so they
+          # report "skipped" while static-code-checks still runs. Real failures
+          # ("failure"/"cancelled") are still caught and fail the gate.
           results='${{ toJSON(needs) }}'
-          if echo "$results" | jq -r '.[] | .result' | grep -v success; then
+          if echo "$results" | jq -r '.[] | .result' | grep -vE '^(success|skipped)$'; then
             echo "Some jobs failed"
             exit 1
           fi

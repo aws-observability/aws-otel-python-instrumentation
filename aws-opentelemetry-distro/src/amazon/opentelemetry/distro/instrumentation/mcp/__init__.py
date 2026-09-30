@@ -17,6 +17,7 @@ _SERVER_MODULE = "mcp.server.lowlevel.server"
 _STDIO_MODULE = "mcp.client.stdio"
 _HTTP_MODULE = "mcp.client.streamable_http"
 _SSE_MODULE = "mcp.client.sse"
+_FASTMCP_MODULE = "mcp.server.fastmcp.server"
 
 
 class McpInstrumentor(BaseInstrumentor):
@@ -36,7 +37,7 @@ class McpInstrumentor(BaseInstrumentor):
         self._server_wrapper: ServerWrapper | None = None
 
     def instrumentation_dependencies(self) -> Collection[str]:  # pylint: disable=no-self-use
-        return ("mcp >= 1.8.1",)
+        return ("mcp >= 1.10.0, < 2",)
 
     def _instrument(self, **kwargs: Any) -> None:
         tracer_provider = kwargs.get("tracer_provider") or trace.get_tracer_provider()
@@ -70,11 +71,35 @@ class McpInstrumentor(BaseInstrumentor):
             "StreamableHTTPTransport._maybe_extract_session_id_from_response",
             ClientWrapper.wrap_extract_session_id,
         )
+        try_wrap(
+            _HTTP_MODULE,
+            "StreamableHTTPTransport._handle_post_request",
+            self._client_wrapper.wrap_handle_post_request,
+        )
+        try_wrap(
+            _HTTP_MODULE,
+            "StreamableHTTPTransport._prepare_headers",
+            self._client_wrapper.wrap_prepare_headers,
+        )
+
+        _LOG.debug("Instrument MCP server ASGI apps to suppress redundant HTTP spans.")
+
+        try_wrap(
+            _FASTMCP_MODULE,
+            "FastMCP.streamable_http_app",
+            self._server_wrapper.wrap_mcp_http_sse_app_factory,
+        )
+        try_wrap(
+            _FASTMCP_MODULE,
+            "FastMCP.sse_app",
+            self._server_wrapper.wrap_mcp_http_sse_app_factory,
+        )
 
     def _uninstrument(self, **kwargs: Any) -> None:  # pylint: disable=no-self-use
         try:
             # pylint: disable=import-outside-toplevel
             from mcp.client import sse, stdio, streamable_http
+            from mcp.server.fastmcp import server as fastmcp_server
             from mcp.server.lowlevel import server
             from mcp.shared import session
 
@@ -87,6 +112,19 @@ class McpInstrumentor(BaseInstrumentor):
             try_unwrap(streamable_http, "streamable_http_client")
             try_unwrap(sse, "sse_client")
             if hasattr(streamable_http, "StreamableHTTPTransport"):
-                try_unwrap(streamable_http.StreamableHTTPTransport, "_maybe_extract_session_id_from_response")
-        except ImportError:
-            _LOG.debug("MCP SDK not available, nothing to uninstrument")
+                try_unwrap(
+                    streamable_http.StreamableHTTPTransport,
+                    "_maybe_extract_session_id_from_response",
+                )
+                try_unwrap(
+                    streamable_http.StreamableHTTPTransport,
+                    "_handle_post_request",
+                )
+                try_unwrap(
+                    streamable_http.StreamableHTTPTransport,
+                    "_prepare_headers",
+                )
+            try_unwrap(fastmcp_server.FastMCP, "streamable_http_app")
+            try_unwrap(fastmcp_server.FastMCP, "sse_app")
+        except (ImportError, AttributeError) as exc:
+            _LOG.debug("MCP SDK not fully available, nothing to uninstrument: %s", exc)

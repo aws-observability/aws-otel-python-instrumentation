@@ -30,6 +30,16 @@ DATA_DIR = os.path.join(TEST_DIR, "data")
 
 
 class TestAwsXRaySamplingClient(TestCase):
+    def setUp(self):
+        self._original_provider = trace_api._TRACER_PROVIDER
+        self._original_provider_set_once = trace_api._TRACER_PROVIDER_SET_ONCE
+        self._original_proxy = trace_api._PROXY_TRACER_PROVIDER
+
+    def tearDown(self):
+        trace_api._TRACER_PROVIDER_SET_ONCE = self._original_provider_set_once
+        trace_api._TRACER_PROVIDER = self._original_provider
+        trace_api._PROXY_TRACER_PROVIDER = self._original_proxy
+
     @patch("requests.Session.post")
     def test_get_no_sampling_rules(self, mock_post=None):
         mock_post.return_value.configure_mock(**{"json.return_value": {"SamplingRuleRecords": []}})

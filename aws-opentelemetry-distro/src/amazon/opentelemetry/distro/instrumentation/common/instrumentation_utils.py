@@ -4,9 +4,10 @@
 import json
 import logging
 import threading
+from base64 import b64encode
 from contextvars import Token
 from functools import wraps
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Mapping, Optional, Union
 
 from wrapt import wrap_function_wrapper
 
@@ -17,23 +18,50 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import GenAi
 
 _logger = logging.getLogger(__name__)
 
+# TODO: Remove these constants once the OTel semantic conventions release includes invoke_workflow.
+# https://github.com/open-telemetry/semantic-conventions/pull/3249
+GEN_AI_WORKFLOW_NAME = "gen_ai.workflow.name"
+OPERATION_INVOKE_WORKFLOW = "invoke_workflow"
+
 PROVIDER_MAP = {
     "bedrock": GenAiProviderNameValues.AWS_BEDROCK.value,
     "aws": GenAiProviderNameValues.AWS_BEDROCK.value,
+    "langchain_aws": GenAiProviderNameValues.AWS_BEDROCK.value,
     "openai": GenAiProviderNameValues.OPENAI.value,
     "anthropic": GenAiProviderNameValues.ANTHROPIC.value,
     "claude": GenAiProviderNameValues.ANTHROPIC.value,
     "azure": GenAiProviderNameValues.AZURE_AI_OPENAI.value,
     "azure_openai": GenAiProviderNameValues.AZURE_AI_OPENAI.value,
+    "azure_ai": GenAiProviderNameValues.AZURE_AI_INFERENCE.value,
+    "azure_ai_inference": GenAiProviderNameValues.AZURE_AI_INFERENCE.value,
+    "watsonx": GenAiProviderNameValues.IBM_WATSONX_AI.value,
+    "ibm_watsonx": GenAiProviderNameValues.IBM_WATSONX_AI.value,
     "google": GenAiProviderNameValues.GCP_GEN_AI.value,
+    "langchain_google_genai": GenAiProviderNameValues.GCP_GEN_AI.value,
     "vertex": GenAiProviderNameValues.GCP_VERTEX_AI.value,
+    "vertexai": GenAiProviderNameValues.GCP_VERTEX_AI.value,
     "gemini": GenAiProviderNameValues.GCP_GEMINI.value,
     "cohere": GenAiProviderNameValues.COHERE.value,
+    "langchain_cohere": GenAiProviderNameValues.COHERE.value,
     "mistral": GenAiProviderNameValues.MISTRAL_AI.value,
+    "mistralai": GenAiProviderNameValues.MISTRAL_AI.value,
     "groq": GenAiProviderNameValues.GROQ.value,
+    "langchain_groq": GenAiProviderNameValues.GROQ.value,
     "deepseek": GenAiProviderNameValues.DEEPSEEK.value,
+    "langchain_deepseek": GenAiProviderNameValues.DEEPSEEK.value,
     "perplexity": GenAiProviderNameValues.PERPLEXITY.value,
+    "moonshot": "moonshot_ai",
+    "moonshot_ai": "moonshot_ai",
+    "xai": GenAiProviderNameValues.X_AI.value,
+    "langchain_xai": GenAiProviderNameValues.X_AI.value,
 }
+
+
+class _JsonEncoder(json.JSONEncoder):
+    def default(self, o: Any) -> Any:
+        if isinstance(o, bytes):
+            return b64encode(o).decode()
+        return super().default(o)
 
 
 class DictWithLock:
@@ -53,30 +81,133 @@ class DictWithLock:
         with self._lock:
             return self._data.pop(key, None)
 
+    def pop_items_if_matches(self, predicate: Callable[[Any, Any], bool]) -> list[tuple[Any, Any]]:
+        """Remove matching items while holding the lock.
+
+        The predicate must not call methods on this DictWithLock instance.
+        """
+        with self._lock:
+            matching_items = []
+            for key, value in list(self._data.items()):
+                if predicate(key, value):
+                    matching_items.append((key, value))
+                    del self._data[key]
+            return matching_items
+
     def clear(self) -> None:
         with self._lock:
             self._data.clear()
+
+    def pop_all(self) -> list[Any]:
+        with self._lock:
+            values = list(self._data.values())
+            self._data.clear()
+            return values
 
     def __contains__(self, key: Any) -> bool:
         with self._lock:
             return key in self._data
 
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._data)
+
+
+def first_not_none(*values: Any) -> Any:
+    # Return the first non-None value while preserving falsy values.
+    return next((value for value in values if value is not None), None)
+
+
+def get_value(source: Any, name: str) -> Any:
+    # Read a named value from either a mapping or an object.
+    return source.get(name) if isinstance(source, Mapping) else getattr(source, name, None)
+
 
 def serialize_to_json_string(value: Any, max_depth: int = 10) -> str:
+    json_safe_types = (str, int, float, bool, bytes, dict, list, tuple, type(None))
 
-    def _truncate(obj: Any, depth: int) -> Any:
+    def _sanitize(obj: Any, depth: int) -> Any:
         if depth <= 0:
             return "..."
         if isinstance(obj, dict):
-            return {k: _truncate(v, depth - 1) for k, v in obj.items()}
+            return {k: _sanitize(v, depth - 1) for k, v in obj.items() if isinstance(v, json_safe_types)}
         if isinstance(obj, (list, tuple)):
-            return [_truncate(item, depth - 1) for item in obj]
+            return [_sanitize(item, depth - 1) for item in obj if isinstance(item, json_safe_types)]
         return obj
 
     try:
-        return json.dumps(_truncate(value, max_depth))
+        return json.dumps(_sanitize(value, max_depth), default=lambda o: b64encode(o).decode())
     except (TypeError, ValueError):
         return str(value)
+
+
+def to_tool_attribute_value(value: Any) -> Union[str, int, float, bool, bytes, None]:
+    if value is None:
+        return None
+    if isinstance(value, (bool, str, bytes, int, float)):
+        return value
+    try:
+        return json.dumps(value, separators=(",", ":"), cls=_JsonEncoder)
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def content_to_parts(content: Any) -> list:  # pylint: disable=too-many-branches
+    """Convert a GenAI message's content into GenAI message parts, mapping each block to
+    its typed part per the input and output message schemas:
+    https://github.com/open-telemetry/semantic-conventions-genai/blob/main/model/gen-ai/gen-ai-input-messages.json
+    https://github.com/open-telemetry/semantic-conventions-genai/blob/main/model/gen-ai/gen-ai-output-messages.json
+    """
+    if isinstance(content, str):
+        return [{"type": "text", "content": content}] if content else []
+    if isinstance(content, dict):
+        content = [content]
+    elif not isinstance(content, list):
+        return [{"type": "text", "content": str(content)}] if content else []
+
+    parts: list = []
+    for block in content:
+        if isinstance(block, str):
+            if block:
+                parts.append({"type": "text", "content": block})
+            continue
+        if not isinstance(block, dict):
+            parts.append({"type": "text", "content": str(block)})
+            continue
+
+        block_type = block.get("type", "")
+        if block_type in ("text", "input_text", "output_text", "summary_text"):
+            text = block.get("text", "")
+            if text:
+                parts.append({"type": "text", "content": str(text)})
+        elif block_type in ("thinking", "reasoning"):
+            reasoning = block.get("thinking") or block.get("reasoning") or block.get("content") or ""
+            if reasoning:
+                parts.append({"type": "reasoning", "content": str(reasoning)})
+        elif block_type == "image_url":
+            url = (block.get("image_url") or {}).get("url", "")
+            if not url:
+                continue
+            if url.startswith("data:"):
+                header, _, data = url[len("data:") :].partition(",")
+                mime = header.split(";", 1)[0] or "image/*"
+                parts.append({"type": "blob", "modality": "image", "mime_type": mime, "content": data})
+            else:
+                parts.append({"type": "uri", "modality": "image", "uri": url})
+        elif block_type == "image":
+            parts.append(
+                {
+                    "type": "blob",
+                    "modality": "image",
+                    "mime_type": block.get("media_type") or block.get("mime_type") or "image/*",
+                    "content": block.get("data", ""),
+                }
+            )
+        else:
+            part = dict(block)
+            part["type"] = block_type or "text"
+            parts.append(part)
+    return parts
 
 
 def try_wrap(

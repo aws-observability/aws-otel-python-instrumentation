@@ -25,9 +25,11 @@ from importlib import import_module
 from shutil import which
 from unittest import mock
 
-from opentelemetry.environment_variables import OTEL_PROPAGATORS
 from opentelemetry.instrumentation.aws_lambda import _HANDLER, _X_AMZN_TRACE_ID, ORIG_HANDLER, AwsLambdaInstrumentor
+from opentelemetry.propagate import get_global_textmap, set_global_textmap
+from opentelemetry.propagators.aws import AwsXRayPropagator
 from opentelemetry.propagators.aws.aws_xray_propagator import TRACE_ID_FIRST_PART_LENGTH, TRACE_ID_VERSION
+from opentelemetry.propagators.composite import CompositePropagator
 from opentelemetry.semconv.resource import ResourceAttributes
 from opentelemetry.semconv.trace import SpanAttributes
 from opentelemetry.test.test_base import TestBase
@@ -196,6 +198,9 @@ class TestAwsLambdaInstrumentor(TestBase):
         )
 
     def test_active_tracing(self):
+        original_propagator = get_global_textmap()
+        set_global_textmap(AwsXRayPropagator())
+
         test_env_patch = mock.patch.dict(
             "os.environ",
             {
@@ -206,71 +211,162 @@ class TestAwsLambdaInstrumentor(TestBase):
         )
         test_env_patch.start()
 
-        mock_execute_lambda()
+        try:
+            mock_execute_lambda()
 
-        spans = self.memory_exporter.get_finished_spans()
+            spans = self.memory_exporter.get_finished_spans()
 
-        assert spans
+            assert spans
 
-        self.assertEqual(len(spans), 1)
-        span = spans[0]
-        self.assertEqual(span.name, os.environ[ORIG_HANDLER])
-        self.assertEqual(span.get_span_context().trace_id, MOCK_XRAY_TRACE_ID)
-        self.assertEqual(span.kind, SpanKind.SERVER)
-        self.assertSpanHasAttributes(
-            span,
-            {
-                ResourceAttributes.CLOUD_RESOURCE_ID: MOCK_LAMBDA_CONTEXT.invoked_function_arn,
-                SpanAttributes.FAAS_INVOCATION_ID: MOCK_LAMBDA_CONTEXT.aws_request_id,
-            },
-        )
+            self.assertEqual(len(spans), 1)
+            span = spans[0]
+            self.assertEqual(span.name, os.environ[ORIG_HANDLER])
+            self.assertEqual(span.get_span_context().trace_id, MOCK_XRAY_TRACE_ID)
+            self.assertEqual(span.kind, SpanKind.SERVER)
+            self.assertSpanHasAttributes(
+                span,
+                {
+                    ResourceAttributes.CLOUD_RESOURCE_ID: MOCK_LAMBDA_CONTEXT.invoked_function_arn,
+                    SpanAttributes.FAAS_INVOCATION_ID: MOCK_LAMBDA_CONTEXT.aws_request_id,
+                },
+            )
 
-        parent_context = span.parent
-        self.assertEqual(parent_context.trace_id, span.get_span_context().trace_id)
-        self.assertEqual(parent_context.span_id, MOCK_XRAY_PARENT_SPAN_ID)
-        self.assertTrue(parent_context.is_remote)
-
-        test_env_patch.stop()
+            parent_context = span.parent
+            self.assertEqual(parent_context.trace_id, span.get_span_context().trace_id)
+            self.assertEqual(parent_context.span_id, MOCK_XRAY_PARENT_SPAN_ID)
+            self.assertTrue(parent_context.is_remote)
+        finally:
+            test_env_patch.stop()
+            set_global_textmap(original_propagator)
 
     def test_parent_context_from_lambda_event(self):
+        original_propagator = get_global_textmap()
+        set_global_textmap(TraceContextTextMapPropagator())
+
         test_env_patch = mock.patch.dict(
             "os.environ",
             {
                 **os.environ,
                 # NOT Active Tracing
                 _X_AMZN_TRACE_ID: MOCK_XRAY_TRACE_CONTEXT_PASSTHROUGH,
-                # NOT using the X-Ray Propagator
-                OTEL_PROPAGATORS: "tracecontext",
             },
         )
         test_env_patch.start()
 
-        trace_state_header = f"{MOCK_W3C_TRACE_STATE_KEY}={MOCK_W3C_TRACE_STATE_VALUE},foo=1,bar=2"
-        mock_execute_lambda(
-            {
-                "headers": {
-                    TraceContextTextMapPropagator._TRACEPARENT_HEADER_NAME: MOCK_W3C_TRACE_CONTEXT_SAMPLED,
-                    TraceContextTextMapPropagator._TRACESTATE_HEADER_NAME: trace_state_header,
+        try:
+            trace_state_header = f"{MOCK_W3C_TRACE_STATE_KEY}={MOCK_W3C_TRACE_STATE_VALUE},foo=1,bar=2"
+            mock_execute_lambda(
+                {
+                    "headers": {
+                        TraceContextTextMapPropagator._TRACEPARENT_HEADER_NAME: MOCK_W3C_TRACE_CONTEXT_SAMPLED,
+                        TraceContextTextMapPropagator._TRACESTATE_HEADER_NAME: trace_state_header,
+                    }
                 }
-            }
+            )
+
+            spans = self.memory_exporter.get_finished_spans()
+
+            assert spans
+
+            self.assertEqual(len(spans), 1)
+            span = spans[0]
+            self.assertEqual(span.get_span_context().trace_id, MOCK_W3C_TRACE_ID)
+
+            parent_context = span.parent
+            self.assertEqual(parent_context.trace_id, span.get_span_context().trace_id)
+            self.assertEqual(parent_context.span_id, MOCK_W3C_PARENT_SPAN_ID)
+            self.assertEqual(len(parent_context.trace_state), 3)
+            self.assertEqual(
+                parent_context.trace_state.get(MOCK_W3C_TRACE_STATE_KEY),
+                MOCK_W3C_TRACE_STATE_VALUE,
+            )
+            self.assertTrue(parent_context.is_remote)
+        finally:
+            test_env_patch.stop()
+            set_global_textmap(original_propagator)
+
+    def test_xray_ignored_when_propagator_does_not_include_xray(self):
+        """When X-Ray active tracing is on but the user only configures
+        tracecontext propagator (no xray), the X-Ray env var is injected
+        into headers but the propagator cannot parse it. The W3C context
+        from event headers should be used instead."""
+        original_propagator = get_global_textmap()
+        set_global_textmap(TraceContextTextMapPropagator())
+
+        test_env_patch = mock.patch.dict(
+            "os.environ",
+            {
+                **os.environ,
+                _X_AMZN_TRACE_ID: MOCK_XRAY_TRACE_CONTEXT_SAMPLED,
+            },
         )
+        test_env_patch.start()
 
-        spans = self.memory_exporter.get_finished_spans()
+        try:
+            mock_execute_lambda(
+                {
+                    "headers": {
+                        TraceContextTextMapPropagator._TRACEPARENT_HEADER_NAME: MOCK_W3C_TRACE_CONTEXT_SAMPLED,
+                    }
+                }
+            )
 
-        assert spans
+            spans = self.memory_exporter.get_finished_spans()
 
-        self.assertEqual(len(spans), 1)
-        span = spans[0]
-        self.assertEqual(span.get_span_context().trace_id, MOCK_W3C_TRACE_ID)
+            assert spans
+            self.assertEqual(len(spans), 1)
+            span = spans[0]
 
-        parent_context = span.parent
-        self.assertEqual(parent_context.trace_id, span.get_span_context().trace_id)
-        self.assertEqual(parent_context.span_id, MOCK_W3C_PARENT_SPAN_ID)
-        self.assertEqual(len(parent_context.trace_state), 3)
-        self.assertEqual(
-            parent_context.trace_state.get(MOCK_W3C_TRACE_STATE_KEY),
-            MOCK_W3C_TRACE_STATE_VALUE,
+            self.assertEqual(span.get_span_context().trace_id, MOCK_W3C_TRACE_ID)
+
+            parent_context = span.parent
+            self.assertEqual(parent_context.trace_id, MOCK_W3C_TRACE_ID)
+            self.assertEqual(parent_context.span_id, MOCK_W3C_PARENT_SPAN_ID)
+            self.assertTrue(parent_context.is_remote)
+        finally:
+            test_env_patch.stop()
+            set_global_textmap(original_propagator)
+
+    def test_w3c_takes_precedence_over_xray_when_both_present(self):
+        """When both X-Ray active tracing and W3C traceparent headers are
+        present, the W3C context should be used as the parent because
+        tracecontext comes after xray in the composite propagator — the
+        last propagator to extract a valid context wins."""
+        original_propagator = get_global_textmap()
+        set_global_textmap(CompositePropagator([AwsXRayPropagator(), TraceContextTextMapPropagator()]))
+
+        test_env_patch = mock.patch.dict(
+            "os.environ",
+            {
+                **os.environ,
+                _X_AMZN_TRACE_ID: MOCK_XRAY_TRACE_CONTEXT_SAMPLED,
+            },
         )
-        self.assertTrue(parent_context.is_remote)
+        test_env_patch.start()
 
-        test_env_patch.stop()
+        try:
+            trace_state_header = f"{MOCK_W3C_TRACE_STATE_KEY}={MOCK_W3C_TRACE_STATE_VALUE},foo=1,bar=2"
+            mock_execute_lambda(
+                {
+                    "headers": {
+                        TraceContextTextMapPropagator._TRACEPARENT_HEADER_NAME: MOCK_W3C_TRACE_CONTEXT_SAMPLED,
+                        TraceContextTextMapPropagator._TRACESTATE_HEADER_NAME: trace_state_header,
+                    }
+                }
+            )
+
+            spans = self.memory_exporter.get_finished_spans()
+
+            assert spans
+            self.assertEqual(len(spans), 1)
+            span = spans[0]
+
+            self.assertEqual(span.get_span_context().trace_id, MOCK_W3C_TRACE_ID)
+
+            parent_context = span.parent
+            self.assertEqual(parent_context.trace_id, MOCK_W3C_TRACE_ID)
+            self.assertEqual(parent_context.span_id, MOCK_W3C_PARENT_SPAN_ID)
+            self.assertTrue(parent_context.is_remote)
+        finally:
+            test_env_patch.stop()
+            set_global_textmap(original_propagator)
