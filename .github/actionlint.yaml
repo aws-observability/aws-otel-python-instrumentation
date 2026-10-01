@@ -1,8 +1,0 @@
-## Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-## SPDX-License-Identifier: Apache-2.0
-
-# Configuration for actionlint, run by the "Validate GitHub Actions workflows" step in pr-build.yml.
-# actionlint only knows GitHub-hosted runner labels, so every custom label used in `runs-on:` must be declared here.
-self-hosted-runner:
-  labels:
-    - apm-canary-4-core
