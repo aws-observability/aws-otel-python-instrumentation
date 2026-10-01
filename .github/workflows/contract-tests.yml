@@ -20,13 +20,18 @@ on:
         type: string
         default: ''
         description: "Git ref to check out for the test harness (Dockerfiles, tests.yaml, scripts). Defaults to the triggering SHA."
+      runs-on:
+        required: false
+        type: string
+        default: ubuntu-latest
+        description: "Runner label for the jobs in this workflow."
 
 permissions:
   contents: read
 
 jobs:
   select-tests:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs-on }}
     outputs:
       tests: ${{ steps.filter.outputs.tests }}
     steps:
@@ -51,7 +56,7 @@ jobs:
 
   contract-test:
     needs: select-tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs-on }}
     strategy:
       fail-fast: false # ensures the entire test matrix is run, even if one permutation fails
       matrix:

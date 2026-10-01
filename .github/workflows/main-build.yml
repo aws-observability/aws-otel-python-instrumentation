@@ -29,7 +29,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: apm-canary-4-core
     outputs:
       aws_default_region: ${{ steps.python_output.outputs.awsDefaultRegion}}
       python_image_tag: ${{ steps.python_output.outputs.python_image_tag}}
@@ -124,7 +124,7 @@ jobs:
           retention-days: 1
 
   build-cloudwatch-plugin-otel:
-    runs-on: ubuntu-latest
+    runs-on: apm-canary-4-core
     outputs:
       version: ${{ steps.plugin_build.outputs.version }}
     steps:
@@ -144,7 +144,7 @@ jobs:
           path: plugin-dist/cloudwatch_plugin_otel-*
 
   unit-tests:
-    runs-on: ubuntu-latest
+    runs-on: apm-canary-4-core
     needs: build
     strategy:
       fail-fast: false # ensures the entire test matrix is run, even if one permutation fails
@@ -184,6 +184,7 @@ jobs:
     with:
       python-version: ${{ matrix.python-version }}
       ref: ${{ inputs.ref || github.sha }}
+      runs-on: apm-canary-4-core
 
   application-signals-e2e-test:
     name: "Application Signals E2E Test"
@@ -211,7 +212,7 @@ jobs:
   publish-main-build-status:
     name: "Publish Main Build Status"
     needs: [ build, build-cloudwatch-plugin-otel, unit-tests, contract-tests, application-signals-e2e-test ]
-    runs-on: ubuntu-latest
+    runs-on: apm-canary-4-core
     if: always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/v'))
     steps:
       - name: Configure AWS Credentials for emitting metrics
