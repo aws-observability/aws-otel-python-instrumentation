@@ -429,8 +429,11 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             )
         )
         is_agent_span = GenAiOperationNameValues.INVOKE_AGENT.value in getattr(span, "name", "")
+        has_captured_agent_output = False
+        # Only agent spans copy the last LLM reply here. Workflows use the graph's returned output.
         if entry.agent_content is not None and is_agent_span:
             self._set_agent_span_content(span, entry.agent_content)
+            has_captured_agent_output = bool(entry.agent_content.output_messages)
 
         if payload and is_agent_or_workflow_span:
             messages = convert_to_messages([payload] if isinstance(payload, str) else payload)
@@ -441,7 +444,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
                 self._set_span_attribute(span, GEN_AI_OUTPUT_MESSAGES, serialize_to_json_string([message]))
         elif (
             is_agent_or_workflow_span
-            and not (is_agent_span and entry.agent_content is not None and entry.agent_content.output_messages)
+            and not has_captured_agent_output
             and (state_output := self._format_langgraph_state_messages(outputs, OUTPUT_KEY))
         ):
             self._set_span_attribute(span, GEN_AI_OUTPUT_MESSAGES, serialize_to_json_string(state_output))
