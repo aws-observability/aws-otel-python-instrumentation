@@ -10,6 +10,12 @@ inputs:
   branch:
     required: true
     description: Branch whose latest workflow run should be used.
+  head-sha:
+    required: false
+    default: ''
+    description: >-
+      If set, only a run built from this exact commit is accepted. This pins the release to the
+      main build of the commit being released, rather than "latest successful on the branch".
   workflow-name:
     required: false
     default: Python Instrumentation Main Build
@@ -29,13 +35,22 @@ runs:
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
         TARGET_BRANCH: ${{ inputs.branch }}
+        TARGET_HEAD_SHA: ${{ inputs.head-sha }}
         WORKFLOW_NAME: ${{ inputs.workflow-name }}
       run: |
         WORKFLOW_ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows" |
           jq -r --arg name "$WORKFLOW_NAME" '.workflows[] | select(.name == $name) | .id')
-        LATEST_RUN=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$WORKFLOW_ID/runs" |
-          jq -c --arg branch "$TARGET_BRANCH" \
-            '[.workflow_runs[] | select(.head_branch == $branch)] | sort_by(.created_at) | .[-1]')
+        # Pick the latest run on the branch; if head-sha is given, only accept a run built from that
+        # exact commit -- this ties the release to the main build of the commit being released.
+        LATEST_RUN=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$WORKFLOW_ID/runs?branch=$TARGET_BRANCH&per_page=100" |
+          jq -c --arg branch "$TARGET_BRANCH" --arg sha "$TARGET_HEAD_SHA" \
+            '[.workflow_runs[] | select(.head_branch == $branch and ($sha == "" or .head_sha == $sha))] | sort_by(.created_at) | .[-1]')
+
+        if [ -z "$LATEST_RUN" ] || [ "$LATEST_RUN" = "null" ]; then
+          echo "No main build run found on branch $TARGET_BRANCH${TARGET_HEAD_SHA:+ for commit $TARGET_HEAD_SHA}. Cannot proceed with release."
+          exit 1
+        fi
+
         STATUS=$(echo "$LATEST_RUN" | jq -r '.status')
         CONCLUSION=$(echo "$LATEST_RUN" | jq -r '.conclusion')
         RUN_ID=$(echo "$LATEST_RUN" | jq -r '.id')
@@ -44,9 +59,9 @@ runs:
           echo "Main build is still running (status: $STATUS). Cannot proceed with release."
           exit 1
         elif [ "$CONCLUSION" != "success" ]; then
-          echo "Latest main build on branch $TARGET_BRANCH conclusion: $CONCLUSION"
+          echo "Main build on branch $TARGET_BRANCH${TARGET_HEAD_SHA:+ (commit $TARGET_HEAD_SHA)} conclusion: $CONCLUSION"
           exit 1
         fi
 
-        echo "Main build succeeded (run ID: $RUN_ID)."
+        echo "Main build succeeded (run ID: $RUN_ID, commit $(echo "$LATEST_RUN" | jq -r '.head_sha'))."
         echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
