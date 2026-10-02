@@ -1060,29 +1060,86 @@ class TestLangChainInstrumentor(TestCase):
 
     def test_stategraph_without_messages_records_state_input_and_output(self):
         try:
-            from langchain_aws import ChatBedrockConverse
-            from langchain_core.documents import Document
-            from langgraph.checkpoint.memory import InMemorySaver
             from langgraph.graph import END, START, StateGraph
-            from langgraph.types import Command, interrupt
         except ImportError:
-            self.skipTest("langgraph or langchain-aws is not available")
+            self.skipTest("langgraph is not available")
 
         class QuestionAnswerState(TypedDict, total=False):
             question: str
             answer: str
 
-        for operation, use_llm in product(
-            (GenAiOperationNameValues.INVOKE_AGENT.value, GenAiOperationNameValues.INVOKE_WORKFLOW.value),
-            (False, True),
+        for operation in (
+            GenAiOperationNameValues.INVOKE_AGENT.value,
+            GenAiOperationNameValues.INVOKE_WORKFLOW.value,
         ):
-            with self.subTest(scenario="question_answer", operation=operation, use_llm=use_llm):
+            with self.subTest(operation=operation):
+                self.span_exporter.clear()
+
+                graph_builder = StateGraph(QuestionAnswerState)
+                graph_builder.add_node("answer", lambda _: {"answer": "Paris."})
+                graph_builder.add_edge(START, "answer")
+                graph_builder.add_edge("answer", END)
+                graph = graph_builder.compile(name="QuestionAnswerGraph")
+
+                result = graph.invoke(
+                    {"question": "What is the capital of France?"},
+                    config={
+                        "metadata": {"otel_workflow_span": operation == GenAiOperationNameValues.INVOKE_WORKFLOW.value}
+                    },
+                )
+                self.assertEqual(result, {"question": "What is the capital of France?", "answer": "Paris."})
+
+                spans = self.span_exporter.get_finished_spans()
+                graph_span = next(span for span in spans if span.name == f"{operation} QuestionAnswerGraph")
+                input_messages = json.loads(graph_span.attributes[GEN_AI_INPUT_MESSAGES])
+                validate_otel_genai_schema(input_messages, "gen-ai-input-messages")
+                self.assertEqual(
+                    input_messages,
+                    [
+                        {
+                            "role": "user",
+                            "parts": [{"type": "text", "content": '{"question": "What is the capital of France?"}'}],
+                        }
+                    ],
+                )
+                output_messages = json.loads(graph_span.attributes[GEN_AI_OUTPUT_MESSAGES])
+                validate_otel_genai_schema(output_messages, "gen-ai-output-messages")
+                self.assertEqual(
+                    output_messages,
+                    [
+                        {
+                            "role": "assistant",
+                            "parts": [
+                                {
+                                    "type": "text",
+                                    "content": '{"question": "What is the capital of France?", "answer": "Paris."}',
+                                }
+                            ],
+                            "finish_reason": "stop",
+                        }
+                    ],
+                )
+
+    def test_stategraph_without_messages_preserves_captured_llm_output(self):
+        try:
+            from langgraph.graph import END, START, StateGraph
+        except ImportError:
+            self.skipTest("langgraph is not available")
+
+        class QuestionAnswerState(TypedDict, total=False):
+            question: str
+            answer: str
+
+        for operation in (
+            GenAiOperationNameValues.INVOKE_AGENT.value,
+            GenAiOperationNameValues.INVOKE_WORKFLOW.value,
+        ):
+            with self.subTest(operation=operation):
                 self.span_exporter.clear()
                 llm = self.FakeChatModel(messages=iter([AIMessage(content="Done.")]))
 
                 def answer(state):
-                    if use_llm:
-                        llm.invoke([HumanMessage(content=state["question"])])
+                    llm.invoke([HumanMessage(content=state["question"])])
                     return {"answer": "Paris."}
 
                 graph_builder = StateGraph(QuestionAnswerState)
@@ -1116,7 +1173,7 @@ class TestLangChainInstrumentor(TestCase):
                 validate_otel_genai_schema(output_messages, "gen-ai-output-messages")
                 expected_output = (
                     "Final Answer: Done."
-                    if use_llm and operation == GenAiOperationNameValues.INVOKE_AGENT.value
+                    if operation == GenAiOperationNameValues.INVOKE_AGENT.value
                     else '{"question": "What is the capital of France?", "answer": "Paris."}'
                 )
                 self.assertEqual(
@@ -1129,12 +1186,19 @@ class TestLangChainInstrumentor(TestCase):
                         }
                     ],
                 )
-                if use_llm:
-                    chat_span = next(span for span in spans if span.name.startswith("chat "))
-                    self.assertEqual(
-                        json.loads(chat_span.attributes[GEN_AI_OUTPUT_MESSAGES])[0]["parts"][0]["content"],
-                        "Final Answer: Done.",
-                    )
+                chat_span = next(span for span in spans if span.name.startswith("chat "))
+                self.assertEqual(
+                    json.loads(chat_span.attributes[GEN_AI_OUTPUT_MESSAGES])[0]["parts"][0]["content"],
+                    "Final Answer: Done.",
+                )
+
+    def test_stategraph_without_messages_records_structured_state_input_and_output(self):
+        try:
+            from langchain_aws import ChatBedrockConverse
+            from langchain_core.documents import Document
+            from langgraph.graph import END, START, StateGraph
+        except ImportError:
+            self.skipTest("langgraph or langchain-aws is not available")
 
         class Tier(Enum):
             GOLD = "gold"
@@ -1161,18 +1225,7 @@ class TestLangChainInstrumentor(TestCase):
             intermediate_steps: list
             draft: Optional[str]
             context: str
-            decision: str
             report: str
-
-        class ApprovalState(BaseModel):
-            question: str
-            decision: Optional[str] = None
-
-        approval_builder = StateGraph(ApprovalState)
-        approval_builder.add_node("approve", lambda _: {"decision": interrupt("Approve the report?")})
-        approval_builder.add_edge(START, "approve")
-        approval_builder.add_edge("approve", END)
-        approval_graph = approval_builder.compile(name="ApprovalAgent", checkpointer=InMemorySaver())
 
         def invoke_graph(client, operation, use_llm):
             llm = ChatBedrockConverse(model="anthropic.claude-fable-5", client=client)
@@ -1184,29 +1237,16 @@ class TestLangChainInstrumentor(TestCase):
                 prompt = f"Context: {state['context']}\nQuestion: {state['question']}"
                 return {"draft": llm.invoke([HumanMessage(content=prompt)]).content if use_llm else "Hello, World!"}
 
-            def approve(state):
-                config = {
-                    "configurable": {"thread_id": f"research-approval-{operation}-{use_llm}"},
-                    "metadata": {"otel_agent_span": True, "agent_name": "ApprovalAgent"},
-                }
-                pending = approval_graph.invoke(ApprovalState(question=state["question"]), config=config)
-                self.assertEqual(pending["__interrupt__"][0].value, "Approve the report?")
-                approved = approval_graph.invoke(Command(resume="yes"), config=config)
-                return {"decision": approved["decision"]}
-
             def publish(state):
-                self.assertEqual(state["decision"], "yes")
                 return {"report": state["draft"]}
 
             graph_builder = StateGraph(ResearchState)
             graph_builder.add_node("retrieve", retrieve)
             graph_builder.add_node("generate", generate)
-            graph_builder.add_node("approve", approve)
             graph_builder.add_node("publish", publish)
             graph_builder.add_edge(START, "retrieve")
             graph_builder.add_edge("retrieve", "generate")
-            graph_builder.add_edge("generate", "approve")
-            graph_builder.add_edge("approve", "publish")
+            graph_builder.add_edge("generate", "publish")
             graph_builder.add_edge("publish", END)
             graph = graph_builder.compile(name="ResearchGraph")
 
@@ -1233,7 +1273,7 @@ class TestLangChainInstrumentor(TestCase):
             (GenAiOperationNameValues.INVOKE_AGENT.value, GenAiOperationNameValues.INVOKE_WORKFLOW.value),
             (False, True),
         ):
-            with self.subTest(scenario="structured_approval", operation=operation, use_llm=use_llm):
+            with self.subTest(operation=operation, use_llm=use_llm):
                 self.span_exporter.clear()
                 call_mock_llm("bedrock", invoke_llm_callback=lambda client: invoke_graph(client, operation, use_llm))
 
@@ -1264,7 +1304,7 @@ class TestLangChainInstrumentor(TestCase):
                     self.assertIsNone(chat_span)
                 input_messages = json.loads(graph_span.attributes[GEN_AI_INPUT_MESSAGES])
                 validate_otel_genai_schema(input_messages, "gen-ai-input-messages")
-                # Child model and approval calls must preserve the graph's original state input.
+                # Child model calls must preserve the graph's original state input.
                 self.assertEqual(
                     input_messages,
                     [
@@ -1288,9 +1328,7 @@ class TestLangChainInstrumentor(TestCase):
                     ],
                 )
                 expected_output_state = json.loads(input_messages[0]["parts"][0]["content"])
-                expected_output_state.update(
-                    draft="Hello, World!", context="Revenue grew.", decision="yes", report="Hello, World!"
-                )
+                expected_output_state.update(draft="Hello, World!", context="Revenue grew.", report="Hello, World!")
                 output_messages = json.loads(graph_span.attributes[GEN_AI_OUTPUT_MESSAGES])
                 validate_otel_genai_schema(output_messages, "gen-ai-output-messages")
                 expected_output_messages = [
@@ -1303,7 +1341,97 @@ class TestLangChainInstrumentor(TestCase):
                 if use_llm and operation == GenAiOperationNameValues.INVOKE_AGENT.value:
                     expected_output_messages = json.loads(chat_span.attributes[GEN_AI_OUTPUT_MESSAGES])
                 self.assertEqual(output_messages, expected_output_messages)
+                if chat_span is not None:
+                    self.assertEqual(chat_span.context.trace_id, graph_span.context.trace_id)
+                    self.assertEqual(chat_span.parent.span_id, graph_span.context.span_id)
 
+    def test_stategraph_without_messages_records_pydantic_state_input_and_output_on_interrupt_and_resume(self):
+        try:
+            from langgraph.checkpoint.memory import InMemorySaver
+            from langgraph.graph import END, START, StateGraph
+            from langgraph.types import Command, interrupt
+        except ImportError:
+            self.skipTest("langgraph is not available")
+
+        class ApprovalState(BaseModel):
+            question: str
+            decision: Optional[str] = None
+
+        class ApprovalParentState(TypedDict, total=False):
+            question: str
+            decision: str
+
+        approval_builder = StateGraph(ApprovalState)
+        approval_builder.add_node("approve", lambda _: {"decision": interrupt("Approve the report?")})
+        approval_builder.add_edge(START, "approve")
+        approval_builder.add_edge("approve", END)
+        approval_graph = approval_builder.compile(name="ApprovalAgent", checkpointer=InMemorySaver())
+
+        for operation, use_llm in product(
+            (GenAiOperationNameValues.INVOKE_AGENT.value, GenAiOperationNameValues.INVOKE_WORKFLOW.value),
+            (False, True),
+        ):
+            with self.subTest(operation=operation, use_llm=use_llm):
+                self.span_exporter.clear()
+                llm = self.FakeChatModel(messages=iter([AIMessage(content="Done.")]))
+
+                def approve(state):
+                    if use_llm:
+                        llm.invoke([HumanMessage(content=state["question"])])
+                    config = {
+                        "configurable": {"thread_id": f"approval-{operation}-{use_llm}"},
+                        "metadata": {"otel_agent_span": True, "agent_name": "ApprovalAgent"},
+                    }
+                    pending = approval_graph.invoke(ApprovalState(question=state["question"]), config=config)
+                    self.assertEqual(pending["__interrupt__"][0].value, "Approve the report?")
+                    approved = approval_graph.invoke(Command(resume="yes"), config=config)
+                    return {"decision": approved["decision"]}
+
+                parent_builder = StateGraph(ApprovalParentState)
+                parent_builder.add_node("approve", approve)
+                parent_builder.add_edge(START, "approve")
+                parent_builder.add_edge("approve", END)
+                parent_graph = parent_builder.compile(name="ApprovalParentGraph")
+
+                result = parent_graph.invoke(
+                    {"question": "Summarize Q3."},
+                    config={
+                        "metadata": {"otel_workflow_span": operation == GenAiOperationNameValues.INVOKE_WORKFLOW.value}
+                    },
+                )
+                self.assertEqual(result, {"question": "Summarize Q3.", "decision": "yes"})
+
+                spans = self.span_exporter.get_finished_spans()
+                graph_span = next(span for span in spans if span.name == f"{operation} ApprovalParentGraph")
+                input_messages = json.loads(graph_span.attributes[GEN_AI_INPUT_MESSAGES])
+                validate_otel_genai_schema(input_messages, "gen-ai-input-messages")
+                self.assertEqual(
+                    input_messages,
+                    [{"role": "user", "parts": [{"type": "text", "content": '{"question": "Summarize Q3."}'}]}],
+                )
+                output_messages = json.loads(graph_span.attributes[GEN_AI_OUTPUT_MESSAGES])
+                validate_otel_genai_schema(output_messages, "gen-ai-output-messages")
+                expected_output = (
+                    "Final Answer: Done."
+                    if use_llm and operation == GenAiOperationNameValues.INVOKE_AGENT.value
+                    else '{"question": "Summarize Q3.", "decision": "yes"}'
+                )
+                self.assertEqual(
+                    output_messages,
+                    [
+                        {
+                            "role": "assistant",
+                            "parts": [{"type": "text", "content": expected_output}],
+                            "finish_reason": "stop",
+                        }
+                    ],
+                )
+
+                chat_span = next((span for span in spans if span.name.startswith("chat ")), None)
+                if use_llm:
+                    self.assertIsNotNone(chat_span)
+                else:
+                    self.assertIsNone(chat_span)
                 first_run, resumed_run = [span for span in spans if span.name == "invoke_agent ApprovalAgent"]
                 approval_input = json.loads(first_run.attributes[GEN_AI_INPUT_MESSAGES])
                 validate_otel_genai_schema(approval_input, "gen-ai-input-messages")
