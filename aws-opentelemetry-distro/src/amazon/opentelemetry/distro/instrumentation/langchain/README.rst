@@ -115,6 +115,110 @@ To record the graph as a workflow, set ``otel_workflow_span=True`` in
 ``metadata`` and omit ``otel_agent_span``, ``agent_name``, and ``agent_type``.
 The workflow setting overrides the default agent classification.
 
+LangGraph input and output messages
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+LangGraph message capture is best effort. **You MUST create a field named**
+``messages`` **containing the conversation history as a list, or fields named**
+``input`` **and** ``output`` **containing the user prompt and LLM response, to
+explicitly identify the messages to capture.**
+
+When the message fields above are unavailable for an input or output, the
+instrumentation falls back to your graph's state, serialized as JSON.
+
+Not every LangGraph graph represents an agent. Graph state can include
+internal data rather than conversation content, so this fallback may not
+accurately represent an agent's input or output messages.
+
+Use a ``messages`` list for conversations
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Use LangChain message objects to identify conversation roles and content.
+Invoke the graph with its input messages and have the responding node return
+an ``AIMessage``:
+
+::
+
+    from langchain_core.messages import AIMessage, HumanMessage
+    from langgraph.graph import END, START, MessagesState, StateGraph
+
+
+    def respond(state: MessagesState):
+        request = state["messages"][-1].content
+        return {"messages": [AIMessage(content=f"Received: {request}")]}
+
+
+    builder = StateGraph(MessagesState)
+    builder.add_node("respond", respond)
+    builder.add_edge(START, "respond")
+    builder.add_edge("respond", END)
+
+    graph = builder.compile(name="ConversationGraph")
+    result = graph.invoke({"messages": [HumanMessage(content="Hello")]})
+    print(result["messages"][-1].content)
+
+The resulting graph span contains the following fields. The message
+attributes are stored as JSON strings and are shown decoded here for
+readability:
+
+::
+
+    {
+      "name": "invoke_agent ConversationGraph",
+      "kind": "SpanKind.INTERNAL",
+      "attributes": {
+        "gen_ai.operation.name": "invoke_agent",
+        "gen_ai.agent.name": "ConversationGraph",
+        "gen_ai.input.messages": [
+          {
+            "role": "user",
+            "parts": [{"type": "text", "content": "Hello"}]
+          }
+        ],
+        "gen_ai.output.messages": [
+          {
+            "role": "assistant",
+            "parts": [{"type": "text", "content": "Received: Hello"}],
+            "finish_reason": "stop"
+          }
+        ]
+      }
+    }
+
+Use ``input`` and ``output`` for simple text
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+For a graph with a single user prompt and LLM response, use explicit ``input``
+and ``output`` fields:
+
+::
+
+    from langgraph.graph import END, START, StateGraph
+    from typing_extensions import TypedDict
+
+
+    class TextState(TypedDict, total=False):
+        input: str
+        output: str
+
+
+    def respond(state: TextState):
+        return {"output": f"Received: {state['input']}"}
+
+
+    builder = StateGraph(TextState)
+    builder.add_node("respond", respond)
+    builder.add_edge(START, "respond")
+    builder.add_edge("respond", END)
+
+    graph = builder.compile(name="TextGraph")
+    result = graph.invoke({"input": "Hello"})
+    print(result["output"])
+
+This records the same user and assistant text messages as the conversation
+example. Additional state fields are not used for the state fallback when
+these explicit fields are populated.
+
 Disable the instrumentation
 ---------------------------
 

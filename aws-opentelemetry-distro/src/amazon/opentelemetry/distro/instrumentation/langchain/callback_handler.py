@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from contextvars import Token
 from dataclasses import dataclass
@@ -11,7 +12,7 @@ from typing import TYPE_CHECKING, Any, Literal, Optional
 from uuid import UUID
 
 from langchain_core.callbacks import BaseCallbackHandler
-from langchain_core.messages import convert_to_messages
+from langchain_core.messages import BaseMessage, convert_to_messages
 from langchain_core.outputs import ChatGenerationChunk, GenerationChunk
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
@@ -19,8 +20,11 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
     DictWithLock,
     content_to_parts,
     first_not_none,
+    get_value,
+    object_to_dict,
     serialize_to_json_string,
     skip_instrumentation_if_suppressed,
+    to_json_value,
     to_tool_attribute_value,
     try_detach,
 )
@@ -68,13 +72,16 @@ from opentelemetry.trace.status import Status, StatusCode
 from opentelemetry.util.types import AttributeValue
 
 if TYPE_CHECKING:
-    from langchain_core.messages import BaseMessage
     from langchain_core.outputs import LLMResult
 
 _logger = logging.getLogger(__name__)
 
 LANGGRAPH_STEP_SPAN_ATTR = "langgraph.step"
 LANGGRAPH_NODE_SPAN_ATTR = "langgraph.node"
+
+MESSAGES_KEY = "messages"
+INPUT_KEY = "input"
+OUTPUT_KEY = "output"
 
 
 @dataclass
@@ -388,7 +395,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
                 entry = self._safe_get_owned_span(run_id)
                 if entry:
                     entry.agent_content = _AgentContent()
-            payload = inputs.get("messages") or inputs.get("input") if isinstance(inputs, dict) else None
+            payload = inputs.get(MESSAGES_KEY) or inputs.get(INPUT_KEY) if isinstance(inputs, dict) else None
             if payload:
                 system_instructions, conversation = self._format_lc_messages(
                     [convert_to_messages([payload] if isinstance(payload, str) else payload)]
@@ -400,6 +407,9 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
                     input_messages=conversation or None,
                     system_instructions=system_instructions or None,
                 )
+            elif state_input := self._format_langgraph_state_messages(inputs, INPUT_KEY):
+                self._set_span_attribute(span, GEN_AI_INPUT_MESSAGES, serialize_to_json_string(state_input))
+                self._update_agent_span_content(run_id, input_messages=state_input)
         self._set_span_attribute(span, GEN_AI_AGENT_NAME, agent_name)
 
     @skip_instrumentation_if_suppressed
@@ -410,7 +420,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             return
 
         span = entry.span
-        payload = outputs.get("messages") or outputs.get("output") if isinstance(outputs, dict) else None
+        payload = outputs.get(MESSAGES_KEY) or outputs.get(OUTPUT_KEY) if isinstance(outputs, dict) else None
         is_agent_or_workflow_span = any(
             operation in getattr(span, "name", "")
             for operation in (
@@ -429,6 +439,8 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
                 finish_reason = self._extract_finish_reason(messages[-1]) if messages else "stop"
                 message = {**conversation[-1], "role": "assistant", "finish_reason": finish_reason}
                 self._set_span_attribute(span, GEN_AI_OUTPUT_MESSAGES, serialize_to_json_string([message]))
+        elif is_agent_or_workflow_span and (state_output := self._format_langgraph_state_messages(outputs, OUTPUT_KEY)):
+            self._set_span_attribute(span, GEN_AI_OUTPUT_MESSAGES, serialize_to_json_string(state_output))
         self._end_span(run_id)
 
     def on_chain_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> None:
@@ -561,6 +573,64 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
                 else:
                     conversation.append({"role": role, "parts": parts})
         return system_instructions, conversation
+
+    @classmethod
+    def _format_langgraph_state_messages(cls, state: Any, message_key: Literal["input", "output"]) -> list[dict]:
+        # Record graph state as JSON text when messages and the corresponding input/output field are unset.
+        # Convert nested models and dataclasses to dictionaries to preserve their structure.
+        #
+        # example LangGraph input
+        #
+        #   {"question": "What is the capital of France?", "user": User(id="u1", tier="gold")}
+        #
+        # example OTel output
+        #
+        #   [{"role": "user", "parts": [{"type": "text", "content":
+        #       "{\"question\": \"What is the capital of France?\", \"user\": {\"id\": \"u1\", \"tier\": \"gold\"}}"}]}]
+        #
+        # example LangGraph output
+        #
+        #   {"question": "What is the capital of France?", "answer": "Paris"}
+        #
+        # example OTel output
+        #
+        #   [{"role": "assistant", "parts": [{"type": "text", "content":
+        #       "{\"question\": \"What is the capital of France?\", \"answer\": \"Paris\"}"}], "finish_reason": "stop"}]
+        if get_value(state, MESSAGES_KEY) is not None or get_value(state, message_key) is not None:
+            return []
+        # LangGraph control inputs, such as Command(resume=...), are not graph state.
+        if type(state).__module__.startswith("langgraph."):
+            return []
+        try:
+            fields = object_to_dict(state)
+            if fields is None:
+                return []
+            state = {
+                key: value
+                for key, value in fields.items()
+                if key not in (MESSAGES_KEY, "intermediate_steps") and value is not None
+            }
+            if not state:
+                return []
+
+            def serialize_value(value: Any) -> Any:
+                if isinstance(value, BaseMessage):
+                    system_instructions, conversation = cls._format_lc_messages([[value]])
+                    return conversation[0] if conversation else {"role": "system", "parts": system_instructions}
+                return to_json_value(value)
+
+            content = json.dumps(state, default=serialize_value, ensure_ascii=False, skipkeys=True)
+            message = {
+                "role": "user" if message_key == INPUT_KEY else "assistant",
+                "parts": content_to_parts(content),
+            }
+            if message_key == OUTPUT_KEY:
+                message["finish_reason"] = "stop"
+            return [message]
+        except Exception:  # pylint: disable=broad-except
+            # State content is best effort and must not break the span for unusual state values.
+            _logger.debug("Failed to record LangGraph state.", exc_info=True)
+            return []
 
     @staticmethod
     def _format_lc_llm_output(generations: list) -> list[dict]:
