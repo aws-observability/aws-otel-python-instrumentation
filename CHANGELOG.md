@@ -12,6 +12,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- feat(langchain): record LangGraph state without `messages`/`input`/`output` as fallback input and output
+  messages, serialized as structured JSON; preserve captured LLM output
 - fix(agent-observability): support X-Ray and CloudWatch Logs OTLP endpoints in AWS China regions
 - feat(metrics): sign collector-less OTLP metrics with SigV4 when exporting to the CloudWatch Metrics
   OTLP endpoint, in both the commercial and AWS China partitions. Requires

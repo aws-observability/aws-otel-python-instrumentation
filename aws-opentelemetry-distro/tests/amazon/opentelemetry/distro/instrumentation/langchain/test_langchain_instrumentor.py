@@ -5,6 +5,11 @@ import asyncio
 import json
 import sys
 import unittest
+from dataclasses import dataclass
+from datetime import datetime
+from enum import Enum
+from itertools import product
+from typing import Optional
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -33,6 +38,8 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
 from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 from langchain_core.tools import StructuredTool, tool
+from pydantic import BaseModel
+from typing_extensions import TypedDict
 
 from amazon.opentelemetry.distro.instrumentation.langchain import LangChainInstrumentor
 from amazon.opentelemetry.distro.instrumentation.langchain.wrapper import PregelWrapper
@@ -1050,6 +1057,486 @@ class TestLangChainInstrumentor(TestCase):
             {span.context.trace_id for span in (supervisor_span, *worker_spans.values(), *tool_spans)},
             {supervisor_span.context.trace_id},
         )
+
+    def test_stategraph_without_messages_records_state_input_and_output(self):
+        try:
+            from langgraph.graph import END, START, StateGraph
+        except ImportError:
+            self.skipTest("langgraph is not available")
+
+        class QuestionAnswerState(TypedDict, total=False):
+            question: str
+            answer: str
+
+        for operation in (
+            GenAiOperationNameValues.INVOKE_AGENT.value,
+            GenAiOperationNameValues.INVOKE_WORKFLOW.value,
+        ):
+            with self.subTest(operation=operation):
+                self.span_exporter.clear()
+
+                graph_builder = StateGraph(QuestionAnswerState)
+                graph_builder.add_node("answer", lambda _: {"answer": "Paris."})
+                graph_builder.add_edge(START, "answer")
+                graph_builder.add_edge("answer", END)
+                graph = graph_builder.compile(name="QuestionAnswerGraph")
+
+                result = graph.invoke(
+                    {"question": "What is the capital of France?"},
+                    config={
+                        "metadata": {"otel_workflow_span": operation == GenAiOperationNameValues.INVOKE_WORKFLOW.value}
+                    },
+                )
+                self.assertEqual(result, {"question": "What is the capital of France?", "answer": "Paris."})
+
+                spans = self.span_exporter.get_finished_spans()
+                graph_span = next(span for span in spans if span.name == f"{operation} QuestionAnswerGraph")
+                input_messages = json.loads(graph_span.attributes[GEN_AI_INPUT_MESSAGES])
+                validate_otel_genai_schema(input_messages, "gen-ai-input-messages")
+                self.assertEqual(
+                    input_messages,
+                    [
+                        {
+                            "role": "user",
+                            "parts": [{"type": "text", "content": '{"question": "What is the capital of France?"}'}],
+                        }
+                    ],
+                )
+                output_messages = json.loads(graph_span.attributes[GEN_AI_OUTPUT_MESSAGES])
+                validate_otel_genai_schema(output_messages, "gen-ai-output-messages")
+                self.assertEqual(
+                    output_messages,
+                    [
+                        {
+                            "role": "assistant",
+                            "parts": [
+                                {
+                                    "type": "text",
+                                    "content": '{"question": "What is the capital of France?", "answer": "Paris."}',
+                                }
+                            ],
+                            "finish_reason": "stop",
+                        }
+                    ],
+                )
+
+    def test_stategraph_without_messages_preserves_captured_llm_output(self):
+        try:
+            from langgraph.graph import END, START, StateGraph
+        except ImportError:
+            self.skipTest("langgraph is not available")
+
+        class QuestionAnswerState(TypedDict, total=False):
+            question: str
+            answer: str
+
+        for operation in (
+            GenAiOperationNameValues.INVOKE_AGENT.value,
+            GenAiOperationNameValues.INVOKE_WORKFLOW.value,
+        ):
+            with self.subTest(operation=operation):
+                self.span_exporter.clear()
+                llm = self.FakeChatModel(messages=iter([AIMessage(content="Done.")]))
+
+                def answer(state):
+                    llm.invoke([HumanMessage(content=state["question"])])
+                    return {"answer": "Paris."}
+
+                graph_builder = StateGraph(QuestionAnswerState)
+                graph_builder.add_node("answer", answer)
+                graph_builder.add_edge(START, "answer")
+                graph_builder.add_edge("answer", END)
+                graph = graph_builder.compile(name="QuestionAnswerGraph")
+
+                result = graph.invoke(
+                    {"question": "What is the capital of France?"},
+                    config={
+                        "metadata": {"otel_workflow_span": operation == GenAiOperationNameValues.INVOKE_WORKFLOW.value}
+                    },
+                )
+                self.assertEqual(result, {"question": "What is the capital of France?", "answer": "Paris."})
+
+                spans = self.span_exporter.get_finished_spans()
+                graph_span = next(span for span in spans if span.name == f"{operation} QuestionAnswerGraph")
+                input_messages = json.loads(graph_span.attributes[GEN_AI_INPUT_MESSAGES])
+                validate_otel_genai_schema(input_messages, "gen-ai-input-messages")
+                self.assertEqual(
+                    input_messages,
+                    [
+                        {
+                            "role": "user",
+                            "parts": [{"type": "text", "content": '{"question": "What is the capital of France?"}'}],
+                        }
+                    ],
+                )
+                output_messages = json.loads(graph_span.attributes[GEN_AI_OUTPUT_MESSAGES])
+                validate_otel_genai_schema(output_messages, "gen-ai-output-messages")
+                expected_output = (
+                    "Final Answer: Done."
+                    if operation == GenAiOperationNameValues.INVOKE_AGENT.value
+                    else '{"question": "What is the capital of France?", "answer": "Paris."}'
+                )
+                self.assertEqual(
+                    output_messages,
+                    [
+                        {
+                            "role": "assistant",
+                            "parts": [{"type": "text", "content": expected_output}],
+                            "finish_reason": "stop",
+                        }
+                    ],
+                )
+                chat_span = next(span for span in spans if span.name.startswith("chat "))
+                self.assertEqual(
+                    json.loads(chat_span.attributes[GEN_AI_OUTPUT_MESSAGES])[0]["parts"][0]["content"],
+                    "Final Answer: Done.",
+                )
+
+    def test_stategraph_without_messages_records_structured_state_input_and_output(self):
+        try:
+            from langchain_aws import ChatBedrockConverse
+            from langchain_core.documents import Document
+            from langgraph.graph import END, START, StateGraph
+        except ImportError:
+            self.skipTest("langgraph or langchain-aws is not available")
+
+        class Tier(Enum):
+            GOLD = "gold"
+
+        class User(BaseModel):
+            id: str
+            tier: Tier
+            nickname: Optional[str] = None
+
+        @dataclass
+        class ReportingWindow:
+            start: datetime
+            days: int
+
+        class ResearchState(TypedDict, total=False):
+            question: str
+            user: User
+            window: ReportingWindow
+            documents: list
+            history: list
+            tags: tuple
+            attachment: bytes
+            notes: dict
+            intermediate_steps: list
+            draft: Optional[str]
+            context: str
+            report: str
+
+        def invoke_graph(client, operation, use_llm):
+            llm = ChatBedrockConverse(model="anthropic.claude-fable-5", client=client)
+
+            def retrieve(state):
+                return {"context": "\n".join(document.page_content for document in state["documents"])}
+
+            def generate(state):
+                prompt = f"Context: {state['context']}\nQuestion: {state['question']}"
+                return {"draft": llm.invoke([HumanMessage(content=prompt)]).content if use_llm else "Hello, World!"}
+
+            def publish(state):
+                return {"report": state["draft"]}
+
+            graph_builder = StateGraph(ResearchState)
+            graph_builder.add_node("retrieve", retrieve)
+            graph_builder.add_node("generate", generate)
+            graph_builder.add_node("publish", publish)
+            graph_builder.add_edge(START, "retrieve")
+            graph_builder.add_edge("retrieve", "generate")
+            graph_builder.add_edge("generate", "publish")
+            graph_builder.add_edge("publish", END)
+            graph = graph_builder.compile(name="ResearchGraph")
+
+            result = graph.invoke(
+                {
+                    "question": "Summarize Q3.",
+                    "user": User(id="u1", tier=Tier.GOLD),
+                    "window": ReportingWindow(start=datetime(2026, 7, 1), days=92),
+                    "documents": [Document(page_content="Revenue grew.", metadata={"source": "s3://reports/q3"})],
+                    "history": [HumanMessage(content="Hi"), AIMessage(content="Hello!")],
+                    "tags": ("finance", "q3"),
+                    "attachment": b"pdf",
+                    "notes": {"reviewer": None},
+                    "intermediate_steps": [("lookup", "observation")],
+                    "draft": None,
+                },
+                config={
+                    "metadata": {"otel_workflow_span": operation == GenAiOperationNameValues.INVOKE_WORKFLOW.value}
+                },
+            )
+            self.assertEqual(result["report"], "Hello, World!")
+
+        for operation, use_llm in product(
+            (GenAiOperationNameValues.INVOKE_AGENT.value, GenAiOperationNameValues.INVOKE_WORKFLOW.value),
+            (False, True),
+        ):
+            with self.subTest(operation=operation, use_llm=use_llm):
+                self.span_exporter.clear()
+                call_mock_llm("bedrock", invoke_llm_callback=lambda client: invoke_graph(client, operation, use_llm))
+
+                spans = self.span_exporter.get_finished_spans()
+                graph_span = next(span for span in spans if span.name == f"{operation} ResearchGraph")
+                chat_span = next(
+                    (
+                        span
+                        for span in spans
+                        if span.attributes.get(GEN_AI_OPERATION_NAME) == GenAiOperationNameValues.CHAT.value
+                    ),
+                    None,
+                )
+                if use_llm:
+                    self.assertIsNotNone(chat_span)
+                    self.assertEqual(
+                        json.loads(chat_span.attributes[GEN_AI_INPUT_MESSAGES]),
+                        [
+                            {
+                                "role": "user",
+                                "parts": [
+                                    {"type": "text", "content": "Context: Revenue grew.\nQuestion: Summarize Q3."}
+                                ],
+                            }
+                        ],
+                    )
+                else:
+                    self.assertIsNone(chat_span)
+                input_messages = json.loads(graph_span.attributes[GEN_AI_INPUT_MESSAGES])
+                validate_otel_genai_schema(input_messages, "gen-ai-input-messages")
+                # Child model calls must preserve the graph's original state input.
+                self.assertEqual(
+                    input_messages,
+                    [
+                        {
+                            "role": "user",
+                            "parts": [
+                                {
+                                    "type": "text",
+                                    "content": (
+                                        '{"question": "Summarize Q3.", "user": {"id": "u1", "tier": "gold"}, '
+                                        '"window": {"start": "2026-07-01T00:00:00", "days": 92}, '
+                                        '"documents": [{"metadata": {"source": "s3://reports/q3"}, '
+                                        '"page_content": "Revenue grew.", "type": "Document"}], '
+                                        '"history": [{"role": "user", "parts": [{"type": "text", "content": "Hi"}]}, '
+                                        '{"role": "assistant", "parts": [{"type": "text", "content": "Hello!"}]}], '
+                                        '"tags": ["finance", "q3"], "attachment": "cGRm", "notes": {"reviewer": null}}'
+                                    ),
+                                }
+                            ],
+                        }
+                    ],
+                )
+                expected_output_state = json.loads(input_messages[0]["parts"][0]["content"])
+                expected_output_state.update(draft="Hello, World!", context="Revenue grew.", report="Hello, World!")
+                output_messages = json.loads(graph_span.attributes[GEN_AI_OUTPUT_MESSAGES])
+                validate_otel_genai_schema(output_messages, "gen-ai-output-messages")
+                expected_output_messages = [
+                    {
+                        "role": "assistant",
+                        "parts": [{"type": "text", "content": json.dumps(expected_output_state)}],
+                        "finish_reason": "stop",
+                    }
+                ]
+                if use_llm and operation == GenAiOperationNameValues.INVOKE_AGENT.value:
+                    expected_output_messages = json.loads(chat_span.attributes[GEN_AI_OUTPUT_MESSAGES])
+                self.assertEqual(output_messages, expected_output_messages)
+                if chat_span is not None:
+                    self.assertEqual(chat_span.context.trace_id, graph_span.context.trace_id)
+                    self.assertEqual(chat_span.parent.span_id, graph_span.context.span_id)
+
+    def test_stategraph_without_messages_records_pydantic_state_input_and_output_on_interrupt_and_resume(self):
+        try:
+            from langgraph.checkpoint.memory import InMemorySaver
+            from langgraph.graph import END, START, StateGraph
+            from langgraph.types import Command, interrupt
+        except ImportError:
+            self.skipTest("langgraph is not available")
+
+        class ApprovalState(BaseModel):
+            question: str
+            decision: Optional[str] = None
+
+        class ApprovalParentState(TypedDict, total=False):
+            question: str
+            decision: str
+
+        approval_builder = StateGraph(ApprovalState)
+        approval_builder.add_node("approve", lambda _: {"decision": interrupt("Approve the report?")})
+        approval_builder.add_edge(START, "approve")
+        approval_builder.add_edge("approve", END)
+        approval_graph = approval_builder.compile(name="ApprovalAgent", checkpointer=InMemorySaver())
+
+        for operation, use_llm in product(
+            (GenAiOperationNameValues.INVOKE_AGENT.value, GenAiOperationNameValues.INVOKE_WORKFLOW.value),
+            (False, True),
+        ):
+            with self.subTest(operation=operation, use_llm=use_llm):
+                self.span_exporter.clear()
+                llm = self.FakeChatModel(messages=iter([AIMessage(content="Done.")]))
+
+                def approve(state):
+                    if use_llm:
+                        llm.invoke([HumanMessage(content=state["question"])])
+                    config = {
+                        "configurable": {"thread_id": f"approval-{operation}-{use_llm}"},
+                        "metadata": {"otel_agent_span": True, "agent_name": "ApprovalAgent"},
+                    }
+                    pending = approval_graph.invoke(ApprovalState(question=state["question"]), config=config)
+                    self.assertEqual(pending["__interrupt__"][0].value, "Approve the report?")
+                    approved = approval_graph.invoke(Command(resume="yes"), config=config)
+                    return {"decision": approved["decision"]}
+
+                parent_builder = StateGraph(ApprovalParentState)
+                parent_builder.add_node("approve", approve)
+                parent_builder.add_edge(START, "approve")
+                parent_builder.add_edge("approve", END)
+                parent_graph = parent_builder.compile(name="ApprovalParentGraph")
+
+                result = parent_graph.invoke(
+                    {"question": "Summarize Q3."},
+                    config={
+                        "metadata": {"otel_workflow_span": operation == GenAiOperationNameValues.INVOKE_WORKFLOW.value}
+                    },
+                )
+                self.assertEqual(result, {"question": "Summarize Q3.", "decision": "yes"})
+
+                spans = self.span_exporter.get_finished_spans()
+                graph_span = next(span for span in spans if span.name == f"{operation} ApprovalParentGraph")
+                input_messages = json.loads(graph_span.attributes[GEN_AI_INPUT_MESSAGES])
+                validate_otel_genai_schema(input_messages, "gen-ai-input-messages")
+                self.assertEqual(
+                    input_messages,
+                    [{"role": "user", "parts": [{"type": "text", "content": '{"question": "Summarize Q3."}'}]}],
+                )
+                output_messages = json.loads(graph_span.attributes[GEN_AI_OUTPUT_MESSAGES])
+                validate_otel_genai_schema(output_messages, "gen-ai-output-messages")
+                expected_output = (
+                    "Final Answer: Done."
+                    if use_llm and operation == GenAiOperationNameValues.INVOKE_AGENT.value
+                    else '{"question": "Summarize Q3.", "decision": "yes"}'
+                )
+                self.assertEqual(
+                    output_messages,
+                    [
+                        {
+                            "role": "assistant",
+                            "parts": [{"type": "text", "content": expected_output}],
+                            "finish_reason": "stop",
+                        }
+                    ],
+                )
+
+                chat_span = next((span for span in spans if span.name.startswith("chat ")), None)
+                if use_llm:
+                    self.assertIsNotNone(chat_span)
+                else:
+                    self.assertIsNone(chat_span)
+                first_run, resumed_run = [span for span in spans if span.name == "invoke_agent ApprovalAgent"]
+                approval_input = json.loads(first_run.attributes[GEN_AI_INPUT_MESSAGES])
+                validate_otel_genai_schema(approval_input, "gen-ai-input-messages")
+                self.assertEqual(
+                    approval_input,
+                    [{"role": "user", "parts": [{"type": "text", "content": '{"question": "Summarize Q3."}'}]}],
+                )
+                self.assertNotIn(GEN_AI_INPUT_MESSAGES, resumed_run.attributes)
+                for approval_span, content in (
+                    (first_run, '{"question": "Summarize Q3."}'),
+                    (resumed_run, '{"question": "Summarize Q3.", "decision": "yes"}'),
+                ):
+                    approval_output = json.loads(approval_span.attributes[GEN_AI_OUTPUT_MESSAGES])
+                    validate_otel_genai_schema(approval_output, "gen-ai-output-messages")
+                    self.assertEqual(
+                        approval_output,
+                        [
+                            {
+                                "role": "assistant",
+                                "parts": [{"type": "text", "content": content}],
+                                "finish_reason": "stop",
+                            }
+                        ],
+                    )
+                for child_span in (chat_span, first_run, resumed_run):
+                    if child_span is not None:
+                        self.assertEqual(child_span.context.trace_id, graph_span.context.trace_id)
+                        self.assertEqual(child_span.parent.span_id, graph_span.context.span_id)
+
+    def test_stategraph_with_empty_messages_does_not_record_state_input_or_output(self):
+        try:
+            from langgraph.graph import END, START, MessagesState, StateGraph
+        except ImportError:
+            self.skipTest("langgraph is not available")
+
+        class PendingInputState(MessagesState):
+            pending_input: str
+
+        graph_builder = StateGraph(PendingInputState)
+        graph_builder.add_node("respond", lambda _: {"messages": []})
+        graph_builder.add_edge(START, "respond")
+        graph_builder.add_edge("respond", END)
+        graph = graph_builder.compile(name="PendingInputGraph")
+
+        graph.invoke({"messages": [], "pending_input": "Add 11 and 101."})
+
+        agent_span = next(
+            span for span in self.span_exporter.get_finished_spans() if span.name == "invoke_agent PendingInputGraph"
+        )
+        # A message list, even an empty one, is the graph's conversation, so the other state fields are not used.
+        self.assertNotIn(GEN_AI_INPUT_MESSAGES, agent_span.attributes)
+        self.assertNotIn(GEN_AI_OUTPUT_MESSAGES, agent_span.attributes)
+
+    def test_stategraph_with_input_and_output_schemas_records_only_output_state(self):
+        try:
+            from langgraph.graph import END, START, StateGraph
+        except ImportError:
+            self.skipTest("langgraph is not available")
+
+        class QuestionState(TypedDict):
+            question: str
+
+        class AnswerState(TypedDict):
+            answer: str
+
+        class QuestionAnswerState(QuestionState, AnswerState):
+            pass
+
+        graph_builder = StateGraph(QuestionAnswerState, input_schema=QuestionState, output_schema=AnswerState)
+        graph_builder.add_node("answer", lambda _: {"answer": "Paris."})
+        graph_builder.add_edge(START, "answer")
+        graph_builder.add_edge("answer", END)
+        graph = graph_builder.compile(name="OutputSchemaGraph")
+
+        for operation in (
+            GenAiOperationNameValues.INVOKE_AGENT.value,
+            GenAiOperationNameValues.INVOKE_WORKFLOW.value,
+        ):
+            with self.subTest(operation=operation):
+                self.span_exporter.clear()
+                result = graph.invoke(
+                    {"question": "What is the capital of France?"},
+                    config={
+                        "metadata": {"otel_workflow_span": operation == GenAiOperationNameValues.INVOKE_WORKFLOW.value}
+                    },
+                )
+                self.assertEqual(result, {"answer": "Paris."})
+
+                graph_span = next(
+                    span
+                    for span in self.span_exporter.get_finished_spans()
+                    if span.name == f"{operation} OutputSchemaGraph"
+                )
+                output_messages = json.loads(graph_span.attributes[GEN_AI_OUTPUT_MESSAGES])
+                validate_otel_genai_schema(output_messages, "gen-ai-output-messages")
+                self.assertEqual(
+                    output_messages,
+                    [
+                        {
+                            "role": "assistant",
+                            "parts": [{"type": "text", "content": '{"answer": "Paris."}'}],
+                            "finish_reason": "stop",
+                        }
+                    ],
+                )
 
     def test_nested_raw_stategraph_uses_pregel_fallback_under_explicit_agent(self):
         try:

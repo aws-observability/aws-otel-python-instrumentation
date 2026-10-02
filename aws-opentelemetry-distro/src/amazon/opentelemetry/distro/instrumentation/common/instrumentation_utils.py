@@ -1,11 +1,14 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import dataclasses
 import json
 import logging
 import threading
 from base64 import b64encode
 from contextvars import Token
+from datetime import date, datetime, time
+from enum import Enum
 from functools import wraps
 from typing import Any, Callable, Dict, Mapping, Optional, Union
 
@@ -121,6 +124,43 @@ def first_not_none(*values: Any) -> Any:
 def get_value(source: Any, name: str) -> Any:
     # Read a named value from either a mapping or an object.
     return source.get(name) if isinstance(source, Mapping) else getattr(source, name, None)
+
+
+def object_to_dict(value: Any) -> Optional[Dict[str, Any]]:
+    """Convert a mapping, Pydantic model, or dataclass to a dictionary.
+
+    Mapping keys become strings. Excluded Pydantic fields and None-valued model or dataclass fields
+    are omitted. Unsupported objects return None.
+    """
+    if isinstance(value, Mapping):
+        return {str(key): item for key, item in value.items()}
+    # Check model_fields to identify Pydantic models without importing Pydantic.
+    model_fields = getattr(type(value), "model_fields", None)
+    if isinstance(model_fields, dict):
+        fields = {
+            name: getattr(value, name) for name, info in model_fields.items() if not getattr(info, "exclude", None)
+        }
+    elif dataclasses.is_dataclass(value) and not isinstance(value, type):
+        fields = {field.name: getattr(value, field.name) for field in dataclasses.fields(value)}
+    else:
+        return None
+    return {name: item for name, item in fields.items() if item is not None}
+
+
+def to_json_value(value: Any) -> Any:
+    """json.dumps default hook that converts values json cannot encode natively into JSON-compatible data."""
+    fields = object_to_dict(value)
+    if fields is not None:
+        return fields
+    if isinstance(value, (set, frozenset)):
+        return list(value)
+    if isinstance(value, bytes):
+        return b64encode(value).decode()
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, (datetime, date, time)):
+        return value.isoformat()
+    return str(value)
 
 
 def serialize_to_json_string(value: Any, max_depth: int = 10) -> str:

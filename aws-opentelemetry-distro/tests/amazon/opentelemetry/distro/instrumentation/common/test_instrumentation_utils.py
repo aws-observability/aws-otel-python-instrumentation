@@ -1,14 +1,22 @@
 import json
 from base64 import b64encode
+from dataclasses import dataclass
+from datetime import datetime
+from enum import Enum
+from typing import Optional
 from unittest import TestCase
 from unittest.mock import Mock
+
+from pydantic import BaseModel, Field
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
     content_to_parts,
     first_not_none,
     get_value,
+    object_to_dict,
     serialize_to_json_string,
     skip_instrumentation_if_suppressed,
+    to_json_value,
     to_tool_attribute_value,
     try_detach,
     try_unwrap,
@@ -117,6 +125,67 @@ class TestInstrumentationUtils(TestCase):
         self.assertEqual(to_tool_attribute_value(obj), str(obj))
         value = {"unsupported": obj}
         self.assertEqual(to_tool_attribute_value(value), str(value))
+
+    def test_object_to_dict_reads_mappings_models_and_dataclasses(self):
+        class _Tier(Enum):
+            GOLD = "gold"
+
+        class _User(BaseModel):
+            id: str
+            tier: _Tier
+            email: Optional[str] = None
+            secret: str = Field(default="hidden", exclude=True)
+
+        @dataclass
+        class _Profile:
+            name: str
+            joined: datetime
+            nickname: Optional[str] = None
+
+        joined = datetime(2026, 1, 2)
+        self.assertEqual(object_to_dict({1: "one", "two": None}), {"1": "one", "two": None})
+        self.assertEqual(object_to_dict(_User(id="u1", tier=_Tier.GOLD)), {"id": "u1", "tier": _Tier.GOLD})
+        self.assertEqual(object_to_dict(_Profile(name="Ada", joined=joined)), {"name": "Ada", "joined": joined})
+        self.assertIsNone(object_to_dict(_Profile))
+        self.assertIsNone(object_to_dict("text"))
+
+    def test_to_json_value_converts_values_json_cannot_encode(self):
+        class _Tier(Enum):
+            GOLD = "gold"
+
+        class _User(BaseModel):
+            id: str
+            tier: _Tier
+            email: Optional[str] = None
+            secret: str = Field(default="hidden", exclude=True)
+
+        @dataclass
+        class _Profile:
+            name: str
+            joined: datetime
+            nickname: Optional[str] = None
+
+        class _Custom:
+            def __str__(self):
+                return "custom"
+
+        value = {
+            "user": _User(id="u1", tier=_Tier.GOLD),
+            "profile": _Profile(name="Ada", joined=datetime(2026, 1, 2, 3, 4, 5)),
+            "tags": {"vip"},
+            "file": b"pdf",
+            "custom": _Custom(),
+        }
+        self.assertEqual(
+            json.loads(json.dumps(value, default=to_json_value)),
+            {
+                "user": {"id": "u1", "tier": "gold"},
+                "profile": {"name": "Ada", "joined": "2026-01-02T03:04:05"},
+                "tags": ["vip"],
+                "file": b64encode(b"pdf").decode(),
+                "custom": "custom",
+            },
+        )
 
     def test_try_unwrap_not_wrapped(self):
         try_unwrap(json, "dumps")
