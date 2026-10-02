@@ -8,6 +8,7 @@ import unittest
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
+from itertools import product
 from typing import Optional
 from unittest import TestCase
 from unittest.mock import patch
@@ -1071,16 +1072,17 @@ class TestLangChainInstrumentor(TestCase):
             question: str
             answer: str
 
-        for operation in (
-            GenAiOperationNameValues.INVOKE_AGENT.value,
-            GenAiOperationNameValues.INVOKE_WORKFLOW.value,
+        for operation, use_llm in product(
+            (GenAiOperationNameValues.INVOKE_AGENT.value, GenAiOperationNameValues.INVOKE_WORKFLOW.value),
+            (False, True),
         ):
-            with self.subTest(scenario="question_answer", operation=operation):
+            with self.subTest(scenario="question_answer", operation=operation, use_llm=use_llm):
                 self.span_exporter.clear()
                 llm = self.FakeChatModel(messages=iter([AIMessage(content="Done.")]))
 
                 def answer(state):
-                    llm.invoke([HumanMessage(content=state["question"])])
+                    if use_llm:
+                        llm.invoke([HumanMessage(content=state["question"])])
                     return {"answer": "Paris."}
 
                 graph_builder = StateGraph(QuestionAnswerState)
@@ -1112,26 +1114,27 @@ class TestLangChainInstrumentor(TestCase):
                 )
                 output_messages = json.loads(graph_span.attributes[GEN_AI_OUTPUT_MESSAGES])
                 validate_otel_genai_schema(output_messages, "gen-ai-output-messages")
+                expected_output = (
+                    "Final Answer: Done."
+                    if use_llm and operation == GenAiOperationNameValues.INVOKE_AGENT.value
+                    else '{"question": "What is the capital of France?", "answer": "Paris."}'
+                )
                 self.assertEqual(
                     output_messages,
                     [
                         {
                             "role": "assistant",
-                            "parts": [
-                                {
-                                    "type": "text",
-                                    "content": '{"question": "What is the capital of France?", "answer": "Paris."}',
-                                }
-                            ],
+                            "parts": [{"type": "text", "content": expected_output}],
                             "finish_reason": "stop",
                         }
                     ],
                 )
-                chat_span = next(span for span in spans if span.name.startswith("chat "))
-                self.assertEqual(
-                    json.loads(chat_span.attributes[GEN_AI_OUTPUT_MESSAGES])[0]["parts"][0]["content"],
-                    "Final Answer: Done.",
-                )
+                if use_llm:
+                    chat_span = next(span for span in spans if span.name.startswith("chat "))
+                    self.assertEqual(
+                        json.loads(chat_span.attributes[GEN_AI_OUTPUT_MESSAGES])[0]["parts"][0]["content"],
+                        "Final Answer: Done.",
+                    )
 
         class Tier(Enum):
             GOLD = "gold"
@@ -1171,7 +1174,7 @@ class TestLangChainInstrumentor(TestCase):
         approval_builder.add_edge("approve", END)
         approval_graph = approval_builder.compile(name="ApprovalAgent", checkpointer=InMemorySaver())
 
-        def invoke_graph(client, operation):
+        def invoke_graph(client, operation, use_llm):
             llm = ChatBedrockConverse(model="anthropic.claude-fable-5", client=client)
 
             def retrieve(state):
@@ -1179,11 +1182,11 @@ class TestLangChainInstrumentor(TestCase):
 
             def generate(state):
                 prompt = f"Context: {state['context']}\nQuestion: {state['question']}"
-                return {"draft": llm.invoke([HumanMessage(content=prompt)]).content}
+                return {"draft": llm.invoke([HumanMessage(content=prompt)]).content if use_llm else "Hello, World!"}
 
             def approve(state):
                 config = {
-                    "configurable": {"thread_id": f"research-approval-{operation}"},
+                    "configurable": {"thread_id": f"research-approval-{operation}-{use_llm}"},
                     "metadata": {"otel_agent_span": True, "agent_name": "ApprovalAgent"},
                 }
                 pending = approval_graph.invoke(ApprovalState(question=state["question"]), config=config)
@@ -1226,30 +1229,39 @@ class TestLangChainInstrumentor(TestCase):
             )
             self.assertEqual(result["report"], "Hello, World!")
 
-        for operation in (
-            GenAiOperationNameValues.INVOKE_AGENT.value,
-            GenAiOperationNameValues.INVOKE_WORKFLOW.value,
+        for operation, use_llm in product(
+            (GenAiOperationNameValues.INVOKE_AGENT.value, GenAiOperationNameValues.INVOKE_WORKFLOW.value),
+            (False, True),
         ):
-            with self.subTest(scenario="structured_approval", operation=operation):
+            with self.subTest(scenario="structured_approval", operation=operation, use_llm=use_llm):
                 self.span_exporter.clear()
-                call_mock_llm("bedrock", invoke_llm_callback=lambda client: invoke_graph(client, operation))
+                call_mock_llm("bedrock", invoke_llm_callback=lambda client: invoke_graph(client, operation, use_llm))
 
                 spans = self.span_exporter.get_finished_spans()
                 graph_span = next(span for span in spans if span.name == f"{operation} ResearchGraph")
                 chat_span = next(
-                    span
-                    for span in spans
-                    if span.attributes.get(GEN_AI_OPERATION_NAME) == GenAiOperationNameValues.CHAT.value
+                    (
+                        span
+                        for span in spans
+                        if span.attributes.get(GEN_AI_OPERATION_NAME) == GenAiOperationNameValues.CHAT.value
+                    ),
+                    None,
                 )
-                self.assertEqual(
-                    json.loads(chat_span.attributes[GEN_AI_INPUT_MESSAGES]),
-                    [
-                        {
-                            "role": "user",
-                            "parts": [{"type": "text", "content": "Context: Revenue grew.\nQuestion: Summarize Q3."}],
-                        }
-                    ],
-                )
+                if use_llm:
+                    self.assertIsNotNone(chat_span)
+                    self.assertEqual(
+                        json.loads(chat_span.attributes[GEN_AI_INPUT_MESSAGES]),
+                        [
+                            {
+                                "role": "user",
+                                "parts": [
+                                    {"type": "text", "content": "Context: Revenue grew.\nQuestion: Summarize Q3."}
+                                ],
+                            }
+                        ],
+                    )
+                else:
+                    self.assertIsNone(chat_span)
                 input_messages = json.loads(graph_span.attributes[GEN_AI_INPUT_MESSAGES])
                 validate_otel_genai_schema(input_messages, "gen-ai-input-messages")
                 # Child model and approval calls must preserve the graph's original state input.
@@ -1281,16 +1293,16 @@ class TestLangChainInstrumentor(TestCase):
                 )
                 output_messages = json.loads(graph_span.attributes[GEN_AI_OUTPUT_MESSAGES])
                 validate_otel_genai_schema(output_messages, "gen-ai-output-messages")
-                self.assertEqual(
-                    output_messages,
-                    [
-                        {
-                            "role": "assistant",
-                            "parts": [{"type": "text", "content": json.dumps(expected_output_state)}],
-                            "finish_reason": "stop",
-                        }
-                    ],
-                )
+                expected_output_messages = [
+                    {
+                        "role": "assistant",
+                        "parts": [{"type": "text", "content": json.dumps(expected_output_state)}],
+                        "finish_reason": "stop",
+                    }
+                ]
+                if use_llm and operation == GenAiOperationNameValues.INVOKE_AGENT.value:
+                    expected_output_messages = json.loads(chat_span.attributes[GEN_AI_OUTPUT_MESSAGES])
+                self.assertEqual(output_messages, expected_output_messages)
 
                 first_run, resumed_run = [span for span in spans if span.name == "invoke_agent ApprovalAgent"]
                 approval_input = json.loads(first_run.attributes[GEN_AI_INPUT_MESSAGES])
@@ -1317,8 +1329,9 @@ class TestLangChainInstrumentor(TestCase):
                         ],
                     )
                 for child_span in (chat_span, first_run, resumed_run):
-                    self.assertEqual(child_span.context.trace_id, graph_span.context.trace_id)
-                    self.assertEqual(child_span.parent.span_id, graph_span.context.span_id)
+                    if child_span is not None:
+                        self.assertEqual(child_span.context.trace_id, graph_span.context.trace_id)
+                        self.assertEqual(child_span.parent.span_id, graph_span.context.span_id)
 
     def test_stategraph_with_empty_messages_does_not_record_state_input_or_output(self):
         try:

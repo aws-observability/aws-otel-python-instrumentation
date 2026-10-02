@@ -439,7 +439,11 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
                 finish_reason = self._extract_finish_reason(messages[-1]) if messages else "stop"
                 message = {**conversation[-1], "role": "assistant", "finish_reason": finish_reason}
                 self._set_span_attribute(span, GEN_AI_OUTPUT_MESSAGES, serialize_to_json_string([message]))
-        elif is_agent_or_workflow_span and (state_output := self._format_langgraph_state_messages(outputs, OUTPUT_KEY)):
+        elif (
+            is_agent_or_workflow_span
+            and not (is_agent_span and entry.agent_content is not None and entry.agent_content.output_messages)
+            and (state_output := self._format_langgraph_state_messages(outputs, OUTPUT_KEY))
+        ):
             self._set_span_attribute(span, GEN_AI_OUTPUT_MESSAGES, serialize_to_json_string(state_output))
         self._end_span(run_id)
 
