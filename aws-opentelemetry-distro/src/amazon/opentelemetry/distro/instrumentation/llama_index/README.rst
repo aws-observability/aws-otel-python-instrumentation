@@ -14,6 +14,33 @@ Features
 * Records model, token usage, message, tool, and operation attributes when they
   are available from LlamaIndex.
 
+Sensitive data
+--------------
+
+.. admonition:: WARNING!
+    :class: warning
+
+    This instrumentation may capture sensitive data like prompts, model
+    responses, system instructions, agent descriptions, and tool arguments and
+    results.
+
+The following attributes may contain sensitive data:
+
+* ``gen_ai.input.messages``
+* ``gen_ai.output.messages``
+* ``gen_ai.system_instructions``
+* ``gen_ai.agent.description``
+* ``gen_ai.tool.call.arguments``
+* ``gen_ai.tool.call.result``
+* ``gen_ai.tool.definitions``
+* ``gen_ai.tool.description``
+
+Set the following environment variable to redact these attributes:
+
+::
+
+    export AWS_REDACT_SPAN_ATTRIBUTES='gen_ai.input.messages,gen_ai.output.messages,gen_ai.system_instructions,gen_ai.agent.description,gen_ai.tool.call.arguments,gen_ai.tool.call.result,gen_ai.tool.definitions,gen_ai.tool.description'
+
 Installation
 ------------
 

@@ -15,6 +15,26 @@ Features
 * Propagates OpenTelemetry context across stdio, SSE, and streamable HTTP
   transports.
 
+Sensitive data
+--------------
+
+.. admonition:: WARNING!
+    :class: warning
+
+    This instrumentation may capture sensitive data like tool arguments and
+    results.
+
+The following attributes may contain sensitive data:
+
+* ``gen_ai.tool.call.arguments``
+* ``gen_ai.tool.call.result``
+
+Set the following environment variable to redact these attributes:
+
+::
+
+    export AWS_REDACT_SPAN_ATTRIBUTES='gen_ai.tool.call.arguments,gen_ai.tool.call.result'
+
 Installation
 ------------
 

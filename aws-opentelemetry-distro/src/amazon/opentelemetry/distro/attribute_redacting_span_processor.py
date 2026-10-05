@@ -29,9 +29,9 @@ class AttributeRedactingSpanProcessor(SpanProcessor):
 
     Examples:
         Redact several exact attributes, every attribute beginning with
-        ``http.request.``, and matching GenAI content attributes:
+        ``http.request.``, and GenAI input messages and tool arguments:
 
-        ``AWS_REDACT_SPAN_ATTRIBUTES=user.email,request.body,db.statement,http.request.*,gen_ai.*.content``
+        ``AWS_REDACT_SPAN_ATTRIBUTES=user.email,http.request.*,gen_ai.input.messages,gen_ai.tool.call.arguments``
 
         Redact every span, span event, and span link attribute:
 
