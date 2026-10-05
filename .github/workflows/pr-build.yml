@@ -21,7 +21,12 @@ permissions:
 
 concurrency:
   # Label changes recheck metadata without canceling the full build.
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ (github.event.action == 'labeled' || github.event.action == 'unlabeled') && 'labels' || 'build' }}
+  group: >-
+    ${{ github.workflow }}-${{ github.ref }}-${{
+      (github.event.action == 'labeled' || github.event.action == 'unlabeled')
+      && 'labels'
+      || 'build'
+    }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
   
 env:
@@ -338,7 +343,13 @@ jobs:
         run: cd performance-tests; ./gradlew spotlessCheck
 
   all-pr-checks-pass:
-    name: ${{ (github.event.action == 'labeled' || github.event.action == 'unlabeled') && 'label-checks-pass' || 'all-pr-checks-pass' }}
+    # Keep label-only results separate from the full-build result.
+    name: >-
+      ${{
+        (github.event.action == 'labeled' || github.event.action == 'unlabeled')
+        && 'label-checks-pass'
+        || 'all-pr-checks-pass'
+      }}
     runs-on: ubuntu-latest
     needs: [static-code-checks, lint, spotless, unit-tests, cloudwatch-plugin-otel-unit-tests, build-wheel, build-cloudwatch-plugin-otel, build-and-scan-image, contract-tests, build-lambda]
     if: always()
