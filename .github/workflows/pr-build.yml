@@ -5,6 +5,11 @@ on:
       - opened
       - reopened
       - synchronize
+      # labeled/unlabeled kept so adding the "Skip Changelog" label re-runs the
+      # changelog check. Heavy jobs are gated off for these actions (see per-job
+      # `if:` below) so a label change does not re-fire the full build matrix.
+      - labeled
+      - unlabeled
       - ready_for_review
     branches:
       - main
@@ -15,9 +20,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # Label changes recheck metadata without canceling the full build.
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ (github.event.action == 'labeled' || github.event.action == 'unlabeled') && 'labels' || 'build' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
   
+env:
+  USER: ${{ github.event.pull_request.user.login }}
+  LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+
 jobs:
   static-code-checks:
     runs-on: ubuntu-latest
@@ -48,6 +58,36 @@ jobs:
             -ignore SC2162
             -ignore SC2206
           
+      - name: Check CHANGELOG
+        if: always()
+        run: |
+          # Check if PR is from workflows bot or dependabot
+          if [[ "${{ env.USER }}" == "aws-application-signals-bot" ]]; then
+            echo "Skipping check: PR from aws-application-signals-bot"
+            exit 0
+          fi
+          
+          if [[ "${{ env.USER }}" == "dependabot[bot]" ]]; then
+            echo "Skipping check: PR from dependabot"
+            exit 0
+          fi
+          
+          # Check for skip changelog label
+          if echo '${{ env.LABELS }}' | jq -r '.[]' | grep -q "skip changelog"; then
+            echo "Skipping check: skip changelog label found"
+            exit 0
+          fi
+          
+          # Fetch base branch and check for CHANGELOG modifications
+          git fetch origin ${{ github.base_ref }}
+          if git diff --name-only origin/${{ github.base_ref }}..HEAD | grep -q "CHANGELOG.md"; then
+            echo "CHANGELOG.md entry found - check passed"
+            exit 0
+          fi
+          
+          echo "It looks like you didn't add an entry to CHANGELOG.md. If this change affects the SDK behavior, please update CHANGELOG.md and link this PR in your entry. If this PR does not need a CHANGELOG entry, you can add the 'Skip Changelog' label to this PR."
+          exit 1
+
       - name: Check for versioned GitHub actions
         if: always()
         run: |
@@ -93,7 +133,8 @@ jobs:
 
   build-wheel:
     runs-on: ubuntu-latest
-    if: ${{ github.event.pull_request.draft == false }}
+    # Skip on draft PRs and on label-only events; neither affects the build.
+    if: ${{ github.event.action != 'labeled' && github.event.action != 'unlabeled' && github.event.pull_request.draft == false }}
     steps:
       - name: Checkout Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
@@ -111,7 +152,8 @@ jobs:
 
   build-cloudwatch-plugin-otel:
     runs-on: ubuntu-latest
-    if: ${{ github.event.pull_request.draft == false }}
+    # Skip on draft PRs and on label-only events; neither affects the build.
+    if: ${{ github.event.action != 'labeled' && github.event.action != 'unlabeled' && github.event.pull_request.draft == false }}
     steps:
       - name: Checkout Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
@@ -128,7 +170,8 @@ jobs:
 
   build-lambda:
     runs-on: ubuntu-latest
-    if: ${{ github.event.pull_request.draft == false }}
+    # Skip on draft PRs and on label-only events; neither affects the build.
+    if: ${{ github.event.action != 'labeled' && github.event.action != 'unlabeled' && github.event.pull_request.draft == false }}
     steps:
       - name: Checkout Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
@@ -152,7 +195,8 @@ jobs:
 
   build-and-scan-image:
     runs-on: ubuntu-latest
-    if: ${{ github.event.pull_request.draft == false }}
+    # Skip on draft PRs and on label-only events; neither affects the build.
+    if: ${{ github.event.action != 'labeled' && github.event.action != 'unlabeled' && github.event.pull_request.draft == false }}
     strategy:
       fail-fast: false # ensures the entire test matrix is run, even if one permutation fails
       matrix:
@@ -176,7 +220,8 @@ jobs:
   unit-tests:
     runs-on: ubuntu-latest
     needs: build-wheel
-    if: ${{ github.event.pull_request.draft == false }}
+    # Skip on draft PRs and on label-only events; neither affects the tests.
+    if: ${{ github.event.action != 'labeled' && github.event.action != 'unlabeled' && github.event.pull_request.draft == false }}
     strategy:
       fail-fast: false # ensures the entire test matrix is run, even if one permutation fails
       matrix:
@@ -207,7 +252,8 @@ jobs:
     name: cloudwatch-plugin-otel-${{ matrix.otel }} ${{ matrix.python-version }} Ubuntu
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    if: ${{ github.event.pull_request.draft == false }}
+    # Skip on draft PRs and on label-only events; neither affects the tests.
+    if: ${{ github.event.action != 'labeled' && github.event.action != 'unlabeled' && github.event.pull_request.draft == false }}
     strategy:
       fail-fast: false # ensures the entire test matrix is run, even if one permutation fails
       matrix:
@@ -232,7 +278,8 @@ jobs:
 
   contract-tests:
     needs: build-wheel
-    if: ${{ github.event.pull_request.draft == false }}
+    # Skip on draft PRs and on label-only events; neither affects the tests.
+    if: ${{ github.event.action != 'labeled' && github.event.action != 'unlabeled' && github.event.pull_request.draft == false }}
     strategy:
       fail-fast: false # ensures the entire test matrix is run, even if one permutation fails
       matrix:
@@ -243,7 +290,8 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
-    if: ${{ github.event.pull_request.draft == false }}
+    # Skip on draft PRs and on label-only events; neither affects lint/spellcheck.
+    if: ${{ github.event.action != 'labeled' && github.event.action != 'unlabeled' && github.event.pull_request.draft == false }}
     strategy:
       fail-fast: false # ensures the entire test matrix is run, even if one permutation fails
       matrix:
@@ -268,7 +316,8 @@ jobs:
 
   spotless:
     runs-on: ubuntu-latest
-    if: ${{ github.event.pull_request.draft == false }}
+    # Skip on draft PRs and on label-only events; neither affects spotless.
+    if: ${{ github.event.action != 'labeled' && github.event.action != 'unlabeled' && github.event.pull_request.draft == false }}
     steps:
       - name: Checkout Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
@@ -289,18 +338,23 @@ jobs:
         run: cd performance-tests; ./gradlew spotlessCheck
 
   all-pr-checks-pass:
+    name: ${{ (github.event.action == 'labeled' || github.event.action == 'unlabeled') && 'label-checks-pass' || 'all-pr-checks-pass' }}
     runs-on: ubuntu-latest
     needs: [static-code-checks, lint, spotless, unit-tests, cloudwatch-plugin-otel-unit-tests, build-wheel, build-cloudwatch-plugin-otel, build-and-scan-image, contract-tests, build-lambda]
-    if: ${{ always() && github.event.pull_request.draft == false }}
+    if: always()
     steps:
       - name: Checkout to get workflow file
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
       
       - name: Check all jobs succeeded and none missing
         run: |
-          # Every required job must succeed for a non-draft PR.
+          # Check if all needed jobs succeeded.
+          # "skipped" is treated as passing: on labeled/unlabeled PR events the
+          # heavy jobs are intentionally gated off (see their `if:`), so they
+          # report "skipped" while static-code-checks still runs. Real failures
+          # ("failure"/"cancelled") are still caught and fail the gate.
           results='${{ toJSON(needs) }}'
-          if echo "$results" | jq -r '.[] | .result' | grep -v '^success$'; then
+          if echo "$results" | jq -r '.[] | .result' | grep -vE '^(success|skipped)$'; then
             echo "Some jobs failed"
             exit 1
           fi
