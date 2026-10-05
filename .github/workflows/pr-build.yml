@@ -21,11 +21,10 @@ permissions:
 
 concurrency:
   # Label changes recheck metadata without canceling the full build.
+  # Both "labeled" and "unlabeled" end with "labeled".
   group: >-
     ${{ github.workflow }}-${{ github.ref }}-${{
-      (github.event.action == 'labeled' || github.event.action == 'unlabeled')
-      && 'labels'
-      || 'build'
+      endsWith(github.event.action, 'labeled') && 'labels' || 'build'
     }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
   
@@ -346,8 +345,7 @@ jobs:
     # Keep label-only results separate from the full-build result.
     name: >-
       ${{
-        (github.event.action == 'labeled' || github.event.action == 'unlabeled')
-        && 'label-checks-pass'
+        endsWith(github.event.action, 'labeled') && 'label-checks-pass'
         || 'all-pr-checks-pass'
       }}
     runs-on: ubuntu-latest
