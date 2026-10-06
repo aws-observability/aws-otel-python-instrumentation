@@ -190,6 +190,32 @@ class TestAwsOpenTelemetryDistro(TestCase):
                     os.environ.pop(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, None)
                     os.environ.pop(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, None)
 
+    def test_configure_with_agent_observability_enabled_in_other_partitions(self):
+        """Test that agent observability uses each partition's DNS suffix for its default endpoints."""
+        for region, dns_suffix in (
+            ("us-gov-west-1", "amazonaws.com"),
+            ("eusc-de-east-1", "amazonaws.eu"),
+            ("us-iso-east-1", "c2s.ic.gov"),
+            ("us-isob-east-1", "sc2s.sgov.gov"),
+            ("eu-isoe-west-1", "cloud.adc-e.uk"),
+            ("us-isof-south-1", "csp.hci.ic.gov"),
+        ):
+            with self.subTest(region=region):
+                try:
+                    self._configure_with_agent_observability(region)
+
+                    self.assertEqual(
+                        os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT),
+                        f"https://xray.{region}.{dns_suffix}/v1/traces",
+                    )
+                    self.assertEqual(
+                        os.environ.get(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT),
+                        f"https://logs.{region}.{dns_suffix}/v1/logs",
+                    )
+                finally:
+                    os.environ.pop(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, None)
+                    os.environ.pop(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, None)
+
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.get_aws_region")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.is_agent_observability_enabled")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.apply_instrumentation_patches")
