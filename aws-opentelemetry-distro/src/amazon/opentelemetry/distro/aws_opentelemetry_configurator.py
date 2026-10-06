@@ -17,7 +17,7 @@ from typing_extensions import override
 
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_LOCAL_SERVICE, AWS_SERVICE_TYPE
 from amazon.opentelemetry.distro._aws_resource_attribute_configurator import get_service_attribute
-from amazon.opentelemetry.distro._utils import get_aws_session, is_agent_observability_enabled
+from amazon.opentelemetry.distro._utils import AWS_DNS_SUFFIX_PATTERN, get_aws_session, is_agent_observability_enabled
 from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSampler
 from amazon.opentelemetry.distro.attribute_propagating_span_processor_builder import (
     AttributePropagatingSpanProcessorBuilder,
@@ -141,9 +141,9 @@ OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS = "OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS"
 XRAY_SERVICE = "xray"
 LOGS_SERIVCE = "logs"
 METRICS_SERVICE = "monitoring"
-AWS_TRACES_OTLP_ENDPOINT_PATTERN = r"https://xray\.([a-z0-9-]+)\.amazonaws\.com(?:\.cn)?/v1/traces$"
-AWS_LOGS_OTLP_ENDPOINT_PATTERN = r"https://logs\.([a-z0-9-]+)\.amazonaws\.com(?:\.cn)?/v1/logs$"
-AWS_METRICS_OTLP_ENDPOINT_PATTERN = r"https://monitoring\.([a-z0-9-]+)\.amazonaws\.com(?:\.cn)?/v1/metrics$"
+AWS_TRACES_OTLP_ENDPOINT_PATTERN = rf"https://xray\.([a-z0-9-]+)\.{AWS_DNS_SUFFIX_PATTERN}/v1/traces$"
+AWS_LOGS_OTLP_ENDPOINT_PATTERN = rf"https://logs\.([a-z0-9-]+)\.{AWS_DNS_SUFFIX_PATTERN}/v1/logs$"
+AWS_METRICS_OTLP_ENDPOINT_PATTERN = rf"https://monitoring\.([a-z0-9-]+)\.{AWS_DNS_SUFFIX_PATTERN}/v1/metrics$"
 
 # Maps a SigV4 signing service to the endpoint pattern that identifies it. Using an explicit
 # mapping rather than a conditional expression keeps each signal independent - the previous

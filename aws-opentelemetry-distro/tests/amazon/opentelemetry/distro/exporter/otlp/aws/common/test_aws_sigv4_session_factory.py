@@ -124,6 +124,50 @@ class TestAwsSigV4SessionFactory(TestCase):
                     self.assertEqual(session._aws_region, region)
 
     @patch(f"{_PROVIDER_MODULE}.IS_BOTOCORE_INSTALLED", True)
+    def test_other_partition_endpoints_resolve_signing_service(self):
+        cases = (
+            ("traces", _TRACES_ENDPOINT, "xray"),
+            ("logs", _LOGS_ENDPOINT, "logs"),
+            ("metrics", _METRICS_ENDPOINT, "monitoring"),
+        )
+
+        for region, dns_suffix in (
+            ("us-gov-west-1", "amazonaws.com"),
+            ("eusc-de-east-1", "amazonaws.eu"),
+            ("us-iso-east-1", "c2s.ic.gov"),
+            ("us-isob-east-1", "sc2s.sgov.gov"),
+            ("eu-isoe-west-1", "cloud.adc-e.uk"),
+            ("us-isof-south-1", "csp.hci.ic.gov"),
+        ):
+            for signal, endpoint_env, expected_service in cases:
+                with self.subTest(signal=signal, region=region), patch(
+                    f"{_PROVIDER_MODULE}._detect_signal_from_stack", return_value=signal
+                ), patch.dict(
+                    os.environ,
+                    {
+                        "AWS_REGION": region,
+                        endpoint_env: f"https://{expected_service}.{region}.{dns_suffix}/v1/{signal}",
+                    },
+                ):
+                    session = aws_sigv4_session()
+
+                    self.assertIsInstance(session, AwsAuthSession)
+                    # pylint: disable=protected-access
+                    self.assertEqual(session._service, expected_service)
+                    self.assertEqual(session._aws_region, region)
+
+    @patch(f"{_PROVIDER_MODULE}.IS_BOTOCORE_INSTALLED", True)
+    @patch(f"{_PROVIDER_MODULE}._detect_signal_from_stack", return_value="traces")
+    def test_iso_endpoint_with_untrusted_suffix_falls_back_to_unsigned(self, _mock_signal):
+        os.environ["AWS_REGION"] = "us-iso-east-1"
+        os.environ[_TRACES_ENDPOINT] = "https://xray.us-iso-east-1.c2s.ic.gov.evil/v1/traces"
+
+        session = aws_sigv4_session()
+
+        self.assertNotIsInstance(session, AwsAuthSession)
+        self.assertIsInstance(session, requests.Session)
+
+    @patch(f"{_PROVIDER_MODULE}.IS_BOTOCORE_INSTALLED", True)
     @patch(f"{_PROVIDER_MODULE}._detect_signal_from_stack", return_value="traces")
     def test_china_endpoint_with_untrusted_suffix_falls_back_to_unsigned(self, _mock_signal):
         os.environ["AWS_REGION"] = "cn-north-1"
