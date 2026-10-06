@@ -6,7 +6,7 @@ from logging import getLogger
 from typing import Any, Optional
 
 from amazon.opentelemetry.distro._utils import get_aws_session
-from amazon.opentelemetry.distro.exporter.otlp.aws.logs._log_header_config import _fetch_logs_header
+from amazon.opentelemetry.distro.exporter.otlp.aws.logs._log_header_config import fetch_otlp_logs_header
 from opentelemetry.sdk.metrics.export import MetricExporter, MetricExportResult, MetricsData
 
 _logger = getLogger(__name__)
@@ -15,7 +15,7 @@ _logger = getLogger(__name__)
 def _maybe_create_emf_exporter() -> Optional[MetricExporter]:
     """Select the EMF destination without requiring botocore for Lambda stdout."""
     try:
-        headers = _fetch_logs_header()
+        headers = fetch_otlp_logs_header()
         if "AWS_LAMBDA_FUNCTION_NAME" in os.environ and not headers.is_valid():
             # pylint: disable=import-outside-toplevel
             from amazon.opentelemetry.distro.exporter.aws.metrics.console_emf_exporter import ConsoleEmfExporter

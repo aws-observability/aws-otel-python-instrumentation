@@ -33,7 +33,7 @@ from amazon.opentelemetry.distro.exporter.aws.metrics.aws_emf_exporter import Aw
 from amazon.opentelemetry.distro.exporter.console.logs.compact_console_log_exporter import (
     CompactConsoleLogRecordExporter,
 )
-from amazon.opentelemetry.distro.exporter.otlp.aws.logs._log_header_config import _fetch_logs_header
+from amazon.opentelemetry.distro.exporter.otlp.aws.logs._log_header_config import fetch_otlp_logs_header
 from amazon.opentelemetry.distro.gen_ai_nested_client_span_processor import GenAINestedClientSpanProcessor
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler._aws_xray_adaptive_sampling_config import (
@@ -588,7 +588,7 @@ def _customize_logs_exporter(log_exporter: LogRecordExporter) -> LogRecordExport
 
         if isinstance(log_exporter, OTLPLogExporter):
 
-            if _fetch_logs_header().is_valid():
+            if fetch_otlp_logs_header().is_valid():
                 # Checked last so the x-aws-log-group / x-aws-log-stream diagnostics still fire first.
                 if not _is_sigv4_disabled_by_configured_auth(OTEL_EXPORTER_OTLP_LOGS_HEADERS):
                     endpoint, region = _extract_endpoint_and_region_from_otlp_endpoint(logs_endpoint)

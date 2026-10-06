@@ -37,7 +37,6 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     _customize_span_processors,
     _export_unsampled_span_for_agent_observability,
     _export_unsampled_span_for_lambda,
-    _fetch_logs_header,
     _has_authorization_header,
     _init_logging,
     _init_serviceevents,
@@ -49,6 +48,7 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     _is_serviceevents_enabled,
     _is_wsgi_master_process,
     _parse_config_string,
+    fetch_otlp_logs_header,
 )
 from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetryDistro
 from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetricsProcessor
@@ -786,7 +786,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             bad_configs.append(config)
 
         for config in good_configs:
-            _fetch_logs_header.cache_clear()
+            fetch_otlp_logs_header.cache_clear()
             self.customize_exporter_test(
                 config,
                 _customize_span_exporter,
@@ -798,7 +798,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             )
 
         for config in bad_configs:
-            _fetch_logs_header.cache_clear()
+            fetch_otlp_logs_header.cache_clear()
             self.customize_exporter_test(
                 config,
                 _customize_span_exporter,
@@ -827,7 +827,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
                 self.assertEqual(exporter._session._service, "xray")
                 self.assertEqual(exporter._session._aws_region, region)
 
-            _fetch_logs_header.cache_clear()
+            fetch_otlp_logs_header.cache_clear()
             try:
                 with self.subTest(signal="logs", region=region), patch.dict(
                     os.environ,
@@ -843,7 +843,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
                     self.assertEqual(exporter._session._service, "logs")
                     self.assertEqual(exporter._session._aws_region, region)
             finally:
-                _fetch_logs_header.cache_clear()
+                fetch_otlp_logs_header.cache_clear()
 
     def test_customize_logs_exporter_sigv4(self):
         logs_good_endpoints = [
@@ -931,7 +931,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             bad_configs.append(config)
 
         for config in good_configs:
-            _fetch_logs_header.cache_clear()
+            fetch_otlp_logs_header.cache_clear()
             self.customize_exporter_test(
                 config,
                 _customize_logs_exporter,
@@ -942,7 +942,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             )
 
         for config in bad_configs:
-            _fetch_logs_header.cache_clear()
+            fetch_otlp_logs_header.cache_clear()
             self.customize_exporter_test(
                 config, _customize_logs_exporter, OTLPLogExporter(), OTLPLogExporter, Session, Compression.NoCompression
             )
@@ -1535,12 +1535,12 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             for key in config.keys():
                 os.environ.pop(key, None)
 
-    def test_fetch_logs_header(self):
-        _fetch_logs_header.cache_clear()
+    def test_fetch_otlp_logs_header(self):
+        fetch_otlp_logs_header.cache_clear()
 
         # Test when headers are not set
         os.environ.pop(OTEL_EXPORTER_OTLP_LOGS_HEADERS, None)
-        result = _fetch_logs_header()
+        result = fetch_otlp_logs_header()
         self.assertIsInstance(result, OtlpLogHeaderSetting)
         self.assertIsNone(result.log_group)
         self.assertIsNone(result.log_stream)
@@ -1548,59 +1548,59 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertFalse(result.is_valid())
 
         # Test singleton behavior - should return the same cached instance
-        result2 = _fetch_logs_header()
+        result2 = fetch_otlp_logs_header()
         self.assertIs(result, result2)  # Same object reference
 
-        _fetch_logs_header.cache_clear()
+        fetch_otlp_logs_header.cache_clear()
         os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = "x-aws-log-group=test-group,x-aws-log-stream=test-stream"
-        result = _fetch_logs_header()
+        result = fetch_otlp_logs_header()
         self.assertEqual(result.log_group, "test-group")
         self.assertEqual(result.log_stream, "test-stream")
         self.assertIsNone(result.namespace)
         self.assertTrue(result.is_valid())
 
         # Test singleton behavior again
-        result2 = _fetch_logs_header()
+        result2 = fetch_otlp_logs_header()
         self.assertIs(result, result2)
 
-        _fetch_logs_header.cache_clear()
+        fetch_otlp_logs_header.cache_clear()
         os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = (
             "x-aws-log-group=test-group,x-aws-log-stream=test-stream,x-aws-metric-namespace=test-namespace"
         )
-        result = _fetch_logs_header()
+        result = fetch_otlp_logs_header()
         self.assertEqual(result.namespace, "test-namespace")
         self.assertTrue(result.is_valid())
 
-        _fetch_logs_header.cache_clear()
+        fetch_otlp_logs_header.cache_clear()
         os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = "x-aws-log-stream=test-stream"
-        result = _fetch_logs_header()
+        result = fetch_otlp_logs_header()
         self.assertEqual(result.log_stream, "test-stream")
         self.assertFalse(result.is_valid())
 
-        _fetch_logs_header.cache_clear()
+        fetch_otlp_logs_header.cache_clear()
         os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = "x-aws-log-group=test-group"
-        result = _fetch_logs_header()
+        result = fetch_otlp_logs_header()
         self.assertEqual(result.log_group, "test-group")
         self.assertIsNone(result.log_stream)
         self.assertFalse(result.is_valid())
 
-        _fetch_logs_header.cache_clear()
+        fetch_otlp_logs_header.cache_clear()
         os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = "x-aws-log-group=,x-aws-log-stream=test-stream"
-        result = _fetch_logs_header()
+        result = fetch_otlp_logs_header()
         self.assertIsNone(result.log_group)
         self.assertEqual(result.log_stream, "test-stream")
         self.assertFalse(result.is_valid())
 
-        _fetch_logs_header.cache_clear()
+        fetch_otlp_logs_header.cache_clear()
         os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = "x-aws-log-group=test-group,x-aws-log-stream="
-        result = _fetch_logs_header()
+        result = fetch_otlp_logs_header()
         self.assertEqual(result.log_group, "test-group")
         self.assertIsNone(result.log_stream)
         self.assertFalse(result.is_valid())
 
         # Clean up
         os.environ.pop(OTEL_EXPORTER_OTLP_LOGS_HEADERS, None)
-        _fetch_logs_header.cache_clear()
+        fetch_otlp_logs_header.cache_clear()
 
     @patch(
         "amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_agent_observability_enabled",

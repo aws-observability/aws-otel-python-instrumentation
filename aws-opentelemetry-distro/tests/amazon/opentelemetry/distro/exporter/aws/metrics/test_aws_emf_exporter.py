@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 from amazon.opentelemetry.distro.aws_opentelemetry_configurator import _init_metrics
 from amazon.opentelemetry.distro.exporter.aws.metrics.aws_emf_exporter import AwsEmfExporter, _maybe_create_emf_exporter
 from amazon.opentelemetry.distro.exporter.aws.metrics.console_emf_exporter import ConsoleEmfExporter
-from amazon.opentelemetry.distro.exporter.otlp.aws.logs._log_header_config import _fetch_logs_header
+from amazon.opentelemetry.distro.exporter.otlp.aws.logs._log_header_config import fetch_otlp_logs_header
 from amazon.opentelemetry.distro.scope_based_exporter import ScopeBasedPeriodicExportingMetricReader
 from amazon.opentelemetry.distro.scope_based_filtering_view import ScopeBasedRetainingView
 from opentelemetry.environment_variables import OTEL_METRICS_EXPORTER
@@ -30,14 +30,14 @@ class TestAwsEmfExporter(TestCase):
         environment = patch.dict(os.environ, {}, clear=True)
         environment.start()
         self.addCleanup(environment.stop)
-        _fetch_logs_header.cache_clear()
-        self.addCleanup(_fetch_logs_header.cache_clear)
+        fetch_otlp_logs_header.cache_clear()
+        self.addCleanup(fetch_otlp_logs_header.cache_clear)
 
     def test_lambda_stdout_does_not_require_botocore(self):
         os.environ["AWS_LAMBDA_FUNCTION_NAME"] = "test-function"
         for headers, namespace in (("", "default"), ("x-aws-metric-namespace=test", "test")):
             with self.subTest(headers=headers):
-                _fetch_logs_header.cache_clear()
+                fetch_otlp_logs_header.cache_clear()
                 os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = headers
                 with patch(f"{EMF_MODULE}.get_aws_session") as get_session:
                     exporter = _maybe_create_emf_exporter()
@@ -65,7 +65,7 @@ class TestAwsEmfExporter(TestCase):
     def test_incomplete_destination_disables_cloudwatch(self):
         for headers in ("", "x-aws-log-group=test-group", "x-aws-log-stream=test-stream"):
             with self.subTest(headers=headers):
-                _fetch_logs_header.cache_clear()
+                fetch_otlp_logs_header.cache_clear()
                 os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = headers
                 with patch(f"{EMF_MODULE}.get_aws_session"), patch(CLOUDWATCH_EXPORTER) as cloudwatch:
                     self.assertIsNone(_maybe_create_emf_exporter())
@@ -82,7 +82,7 @@ class TestAwsEmfExporter(TestCase):
     def test_destination_initialization_failure_is_nonfatal(self):
         for error in (RuntimeError("invalid headers"), ImportError("cannot import CloudWatch exporter")):
             with self.subTest(error=error):
-                with patch(f"{EMF_MODULE}._fetch_logs_header", side_effect=error), self.assertLogs(
+                with patch(f"{EMF_MODULE}.fetch_otlp_logs_header", side_effect=error), self.assertLogs(
                     EMF_MODULE, level="ERROR"
                 ) as logs:
                     exporter = AwsEmfExporter()

@@ -22,7 +22,7 @@ class OtlpLogHeaderSetting(NamedTuple):
 
 
 @lru_cache(maxsize=1)
-def _fetch_logs_header() -> OtlpLogHeaderSetting:
+def fetch_otlp_logs_header() -> OtlpLogHeaderSetting:
     """Parse and cache the CloudWatch destination and EMF namespace headers."""
     logs_headers = os.environ.get(OTEL_EXPORTER_OTLP_LOGS_HEADERS)
     if not logs_headers:
