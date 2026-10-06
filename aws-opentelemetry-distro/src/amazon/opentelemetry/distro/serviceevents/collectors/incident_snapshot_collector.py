@@ -37,6 +37,7 @@ from amazon.opentelemetry.distro.serviceevents.models import (
 )
 from amazon.opentelemetry.distro.serviceevents.python_monitor import _ServiceEventsMonitorState
 from amazon.opentelemetry.distro.serviceevents.utils import get_instance_id
+from opentelemetry.sdk.environment_variables import OTEL_SERVICE_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +107,7 @@ class IncidentSnapshotCollector(BaseCollector):
         # Environment and service metadata. None/empty when unset — omitted from the
         # snapshot rather than emitted as a sentinel.
         self.environment = environment
-        self.service_name = service_name or os.getenv("OTEL_SERVICE_NAME", "UnknownService")
+        self.service_name = service_name or os.getenv(OTEL_SERVICE_NAME, "UnknownService")
         self.sdk_version = sdk_version
         self.git_commit_sha = os.getenv("OTEL_AWS_SERVICE_EVENTS_GIT_COMMIT_SHA")
         self.deployment_id = os.getenv("OTEL_AWS_SERVICE_EVENTS_DEPLOYMENT_ID")
