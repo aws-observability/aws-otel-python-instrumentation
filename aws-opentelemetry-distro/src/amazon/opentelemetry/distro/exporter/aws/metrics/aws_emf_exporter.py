@@ -12,7 +12,7 @@ from opentelemetry.sdk.metrics.export import MetricExporter, MetricExportResult,
 _logger = getLogger(__name__)
 
 
-def _create_emf_exporter() -> Optional[MetricExporter]:
+def _maybe_create_emf_exporter() -> Optional[MetricExporter]:
     """Select the EMF destination without requiring botocore for Lambda stdout."""
     try:
         headers = _fetch_logs_header()
@@ -57,7 +57,7 @@ class AwsEmfExporter(MetricExporter):
     """Environment-configured EMF exporter for the OpenTelemetry entry point."""
 
     def __init__(self) -> None:
-        self._exporter = _create_emf_exporter()
+        self._exporter = _maybe_create_emf_exporter()
         # pylint: disable=protected-access
         super().__init__(
             preferred_temporality=self._exporter._preferred_temporality if self.enabled else None,

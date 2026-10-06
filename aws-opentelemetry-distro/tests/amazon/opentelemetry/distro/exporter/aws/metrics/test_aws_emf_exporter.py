@@ -7,7 +7,7 @@ from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
 from amazon.opentelemetry.distro.aws_opentelemetry_configurator import _init_metrics
-from amazon.opentelemetry.distro.exporter.aws.metrics.aws_emf_exporter import AwsEmfExporter, _create_emf_exporter
+from amazon.opentelemetry.distro.exporter.aws.metrics.aws_emf_exporter import AwsEmfExporter, _maybe_create_emf_exporter
 from amazon.opentelemetry.distro.exporter.aws.metrics.console_emf_exporter import ConsoleEmfExporter
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs._log_header_config import _fetch_logs_header
 from amazon.opentelemetry.distro.scope_based_exporter import ScopeBasedPeriodicExportingMetricReader
@@ -40,7 +40,7 @@ class TestAwsEmfExporter(TestCase):
                 _fetch_logs_header.cache_clear()
                 os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = headers
                 with patch(f"{EMF_MODULE}.get_aws_session") as get_session:
-                    exporter = _create_emf_exporter()
+                    exporter = _maybe_create_emf_exporter()
                 self.assertIsInstance(exporter, ConsoleEmfExporter)
                 self.assertEqual(exporter.namespace, namespace)
                 get_session.assert_not_called()
@@ -54,7 +54,7 @@ class TestAwsEmfExporter(TestCase):
                 if is_lambda:
                     os.environ["AWS_LAMBDA_FUNCTION_NAME"] = "test-function"
                 with patch(f"{EMF_MODULE}.get_aws_session") as get_session, patch(CLOUDWATCH_EXPORTER) as cloudwatch:
-                    self.assertIs(_create_emf_exporter(), cloudwatch.return_value)
+                    self.assertIs(_maybe_create_emf_exporter(), cloudwatch.return_value)
                     cloudwatch.assert_called_once_with(
                         session=get_session.return_value,
                         namespace="test",
@@ -68,7 +68,7 @@ class TestAwsEmfExporter(TestCase):
                 _fetch_logs_header.cache_clear()
                 os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = headers
                 with patch(f"{EMF_MODULE}.get_aws_session"), patch(CLOUDWATCH_EXPORTER) as cloudwatch:
-                    self.assertIsNone(_create_emf_exporter())
+                    self.assertIsNone(_maybe_create_emf_exporter())
                     cloudwatch.assert_not_called()
 
     def test_missing_botocore_disables_cloudwatch(self):
@@ -76,7 +76,7 @@ class TestAwsEmfExporter(TestCase):
         with patch(f"{EMF_MODULE}.get_aws_session", return_value=None), self.assertLogs(
             EMF_MODULE, level="WARNING"
         ) as logs:
-            self.assertIsNone(_create_emf_exporter())
+            self.assertIsNone(_maybe_create_emf_exporter())
         self.assertIn("botocore is not installed. EMF exporter requires botocore", logs.output[0])
 
     def test_destination_initialization_failure_is_nonfatal(self):
@@ -97,14 +97,14 @@ class TestAwsEmfExporter(TestCase):
         with self.assertLogs(EMF_MODULE, level="ERROR"), patch(f"{EMF_MODULE}.get_aws_session"), patch(
             "builtins.__import__", side_effect=ImportError("cannot import CloudWatch exporter")
         ):
-            self.assertIsNone(_create_emf_exporter())
+            self.assertIsNone(_maybe_create_emf_exporter())
 
     def test_exporter_preserves_destination_preferences_and_lifecycle(self):
         destination = ConsoleEmfExporter()
         destination.export = MagicMock(return_value=MetricExportResult.SUCCESS)
         destination.force_flush = MagicMock(return_value=True)
         destination.shutdown = MagicMock(return_value=True)
-        with patch(f"{EMF_MODULE}._create_emf_exporter", return_value=destination):
+        with patch(f"{EMF_MODULE}._maybe_create_emf_exporter", return_value=destination):
             exporter = AwsEmfExporter()
         # pylint: disable=protected-access
         self.assertEqual(exporter._preferred_temporality, destination._preferred_temporality)
