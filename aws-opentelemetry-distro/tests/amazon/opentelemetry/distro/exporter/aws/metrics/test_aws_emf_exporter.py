@@ -39,7 +39,9 @@ class TestAwsEmfExporter(TestCase):
             with self.subTest(headers=headers):
                 fetch_otlp_logs_header.cache_clear()
                 os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = headers
-                with patch(f"{EMF_MODULE}.get_aws_session") as get_session:
+                with patch(f"{EMF_MODULE}.get_aws_session") as get_session, self.assertNoLogs(
+                    "amazon.opentelemetry.distro", level="WARNING"
+                ):
                     exporter = _maybe_create_emf_exporter()
                 self.assertIsInstance(exporter, ConsoleEmfExporter)
                 self.assertEqual(exporter.namespace, namespace)
@@ -67,9 +69,16 @@ class TestAwsEmfExporter(TestCase):
             with self.subTest(headers=headers):
                 fetch_otlp_logs_header.cache_clear()
                 os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = headers
-                with patch(f"{EMF_MODULE}.get_aws_session"), patch(CLOUDWATCH_EXPORTER) as cloudwatch:
+                with patch(f"{EMF_MODULE}.get_aws_session") as get_session, patch(
+                    CLOUDWATCH_EXPORTER
+                ) as cloudwatch, self.assertLogs(EMF_MODULE, level="WARNING") as logs:
                     self.assertIsNone(_maybe_create_emf_exporter())
+                    get_session.assert_not_called()
                     cloudwatch.assert_not_called()
+                self.assertEqual(len(logs.output), 1)
+                self.assertIn(
+                    "OTEL_EXPORTER_OTLP_LOGS_HEADERS to include x-aws-log-group and x-aws-log-stream", logs.output[0]
+                )
 
     def test_missing_botocore_disables_cloudwatch(self):
         os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = "x-aws-log-group=test,x-aws-log-stream=test"

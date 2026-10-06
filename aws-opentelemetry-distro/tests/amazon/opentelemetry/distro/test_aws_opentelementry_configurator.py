@@ -1540,7 +1540,8 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
         # Test when headers are not set
         os.environ.pop(OTEL_EXPORTER_OTLP_LOGS_HEADERS, None)
-        result = fetch_otlp_logs_header()
+        with self.assertNoLogs("amazon.opentelemetry.distro", level="WARNING"):
+            result = fetch_otlp_logs_header()
         self.assertIsInstance(result, OtlpLogHeaderSetting)
         self.assertIsNone(result.log_group)
         self.assertIsNone(result.log_stream)

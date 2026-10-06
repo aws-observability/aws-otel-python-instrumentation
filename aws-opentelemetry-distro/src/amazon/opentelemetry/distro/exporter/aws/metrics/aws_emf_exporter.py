@@ -26,6 +26,13 @@ def _maybe_create_emf_exporter() -> Optional[MetricExporter]:
             )
             return ConsoleEmfExporter(namespace=headers.namespace)
 
+        if not headers.is_valid():
+            _logger.warning(
+                "Improper configuration: Please configure the environment variable OTEL_EXPORTER_OTLP_LOGS_HEADERS "
+                "to include x-aws-log-group and x-aws-log-stream"
+            )
+            return None
+
         session = get_aws_session()
         if not session:
             _logger.warning("botocore is not installed. EMF exporter requires botocore")
@@ -35,9 +42,6 @@ def _maybe_create_emf_exporter() -> Optional[MetricExporter]:
         from amazon.opentelemetry.distro.exporter.aws.metrics.aws_cloudwatch_emf_exporter import (
             AwsCloudWatchEmfExporter,
         )
-
-        if not headers.is_valid():
-            return None
 
         _logger.info(
             "Using the CloudWatch EMF metrics exporter; destination=CloudWatch Logs; authentication=AWS SDK SigV4."
