@@ -68,6 +68,7 @@ from logging import ERROR, Logger, getLogger
 
 from amazon.opentelemetry.distro._utils import (
     OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS,
+    get_aws_dns_suffix,
     get_aws_region,
     get_env,
     is_agent_observability_enabled,
@@ -215,7 +216,7 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
             region = get_aws_region()
             if not os.environ.get(OTEL_EXPORTER_OTLP_ENDPOINT):
                 if region:
-                    endpoint_suffix = "amazonaws.com.cn" if region.startswith("cn-") else "amazonaws.com"
+                    endpoint_suffix = get_aws_dns_suffix(region)
                     os.environ.setdefault(
                         OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, f"https://xray.{region}.{endpoint_suffix}/v1/traces"
                     )
