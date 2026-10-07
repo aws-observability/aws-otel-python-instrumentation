@@ -1027,9 +1027,9 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
     ):
         """Test that ConsoleLogRecordExporter is replaced with CompactConsoleLogRecordExporter when in Lambda"""
 
-        # Mock _is_lambda_environment to return True
+        # Mock is_lambda_environment to return True
         with patch(
-            "amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_lambda_environment", return_value=True
+            "amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_lambda_environment", return_value=True
         ):
             # Test with ConsoleLogRecordExporter
             exporters = {"console": ConsoleLogRecordExporter}
@@ -1051,7 +1051,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
         # Test when not in Lambda environment - should not replace
         with patch(
-            "amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_lambda_environment", return_value=False
+            "amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_lambda_environment", return_value=False
         ):
             exporters = {"console": ConsoleLogRecordExporter}
             _init_logging(exporters, Resource.get_empty())
@@ -1813,7 +1813,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertEqual(result.attributes[AWS_SERVICE_TYPE], "existing-agent")
 
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._fetch_logs_header")
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_lambda_environment")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_lambda_environment")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_aws_session")
     def test_create_emf_exporter_lambda_without_valid_headers(
         self, mock_get_session, mock_is_lambda, mock_fetch_headers
@@ -1840,7 +1840,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             )
 
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._fetch_logs_header")
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_lambda_environment")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_lambda_environment")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_aws_session")
     def test_create_emf_exporter_lambda_with_valid_headers(self, mock_get_session, mock_is_lambda, mock_fetch_headers):
         """Test _create_emf_exporter returns AwsCloudWatchEmfExporter for Lambda with valid headers"""
@@ -1873,7 +1873,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             )
 
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._fetch_logs_header")
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_lambda_environment")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_lambda_environment")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_aws_session")
     def test_create_emf_exporter_non_lambda_with_valid_headers(
         self, mock_get_session, mock_is_lambda, mock_fetch_headers
@@ -1908,7 +1908,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             )
 
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._fetch_logs_header")
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_lambda_environment")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_lambda_environment")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_aws_session")
     def test_create_emf_exporter_non_lambda_without_valid_headers(
         self, mock_get_session, mock_is_lambda, mock_fetch_headers
@@ -1928,7 +1928,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertIsNone(result)
 
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._fetch_logs_header")
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_lambda_environment")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_lambda_environment")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_aws_session")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._logger")
     def test_create_emf_exporter_no_botocore_session(
@@ -1962,7 +1962,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         mock_logger.error.assert_called_once_with("Failed to create EMF exporter: %s", test_exception)
 
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._fetch_logs_header")
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_lambda_environment")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_lambda_environment")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_aws_session")
     def test_create_emf_exporter_lambda_without_valid_headers_none_namespace(
         self, mock_get_session, mock_is_lambda, mock_fetch_headers
@@ -1989,7 +1989,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             )
 
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._fetch_logs_header")
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_lambda_environment")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_lambda_environment")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_aws_session")
     def test_create_emf_exporter_cloudwatch_exporter_import_error(
         self, mock_get_session, mock_is_lambda, mock_fetch_headers

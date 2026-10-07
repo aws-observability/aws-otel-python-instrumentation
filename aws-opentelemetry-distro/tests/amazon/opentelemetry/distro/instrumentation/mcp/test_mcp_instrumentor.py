@@ -10,6 +10,7 @@ import sys
 import time
 import unittest
 import unittest.mock
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from threading import Thread
 from unittest import TestCase
@@ -42,8 +43,10 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_TOOL_NAME,
     GenAiOperationNameValues,
 )
+from opentelemetry.semconv._incubating.attributes.jsonrpc_attributes import JSONRPC_REQUEST_ID
 from opentelemetry.semconv._incubating.attributes.mcp_attributes import (
     MCP_METHOD_NAME,
+    MCP_PROTOCOL_VERSION,
     MCP_RESOURCE_URI,
     MCP_SESSION_ID,
     McpMethodNameValues,
@@ -52,6 +55,7 @@ from opentelemetry.semconv._incubating.attributes.rpc_attributes import RPC_RESP
 from opentelemetry.semconv.attributes.client_attributes import CLIENT_ADDRESS, CLIENT_PORT
 from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
 from opentelemetry.semconv.attributes.network_attributes import NETWORK_TRANSPORT, NetworkTransportValues
+from opentelemetry.semconv.attributes.server_attributes import SERVER_ADDRESS, SERVER_PORT
 from opentelemetry.trace import SpanKind, StatusCode, get_tracer
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
@@ -623,6 +627,108 @@ class TestMcpInstrumentorInProcess(McpInstrumentorTestBase):
             # Should NOT have traceparent (wrap_prepare_headers only injects when suppressed)
             self.assertNotIn("traceparent", result)
 
+    def test_client_metadata_should_be_set_correctly_for_async_mcp_requests_across_threads(self):
+        from mcp import types  # pylint: disable=import-outside-toplevel
+        from mcp.client.session import ClientSession  # pylint: disable=import-outside-toplevel
+
+        # Run a master HTTP session and two workers (HTTP and in-process) on separate pool threads.
+        # Each HTTP session must keep its own host, port, and MCP session ID.
+        # Transport metadata must not leak into another session, including one with no transport info.
+        http_ready, inprocess_ready, closed = Future(), Future(), Future()
+        port = self._get_free_port()
+
+        async def run_http_worker(http_worker_session):
+            http_ready.set_result((asyncio.get_running_loop(), http_worker_session))
+            await asyncio.wrap_future(closed)
+
+        async def run_inprocess_worker(inprocess_worker_session):
+            inprocess_ready.set_result((asyncio.get_running_loop(), inprocess_worker_session))
+            await asyncio.wrap_future(closed)
+
+        async def run_master_session():
+            client = self._get_streamable_http_client()
+            async with client(f"http://localhost:{port}/mcp") as streams:
+                async with ClientSession(streams[0], streams[1]) as master_session:
+                    await master_session.initialize()
+                    await master_session.list_tools()
+                    self.span_exporter.clear()
+                    with tracer.start_as_current_span("caller"):
+                        await asyncio.gather(
+                            asyncio.wrap_future(
+                                asyncio.run_coroutine_threadsafe(http_worker_session.list_tools(), http_loop)
+                            ),
+                            master_session.call_tool("hello", {"name": "World"}),
+                            asyncio.wrap_future(
+                                asyncio.run_coroutine_threadsafe(
+                                    inprocess_worker_session.read_resource("test://example"), inprocess_loop
+                                )
+                            ),
+                        )
+
+        tracer = get_tracer("test", tracer_provider=self.tracer_provider)
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            http_worker = pool.submit(asyncio.run, self._run_http_inprocess(run_http_worker, port))
+            inprocess_worker = pool.submit(asyncio.run, self._run_inprocess(run_inprocess_worker))
+            try:
+                http_loop, http_worker_session = http_ready.result(timeout=10)
+                inprocess_loop, inprocess_worker_session = inprocess_ready.result(timeout=10)
+                master_worker = pool.submit(asyncio.run, run_master_session())
+                master_worker.result(timeout=10)
+            finally:
+                closed.set_result(None)
+            http_worker.result(timeout=10)
+            inprocess_worker.result(timeout=10)
+
+        finished = self.span_exporter.get_finished_spans()
+        spans = [span for span in finished if span.kind == SpanKind.CLIENT]
+        self.assertEqual(len(spans), 3)
+        caller = self._get_span(finished, "caller")
+        list_span = self._get_span(spans, "mcp tools/list")
+        call_span = self._get_span(spans, "mcp tools/call hello")
+        resource_span = self._get_span(spans, "mcp resources/read test://example")
+        server_list_span = self._get_server_span(finished, "mcp tools/list")
+        server_call_span = self._get_server_span(finished, "mcp tools/call hello")
+        self._assert_span_attrs(
+            list_span,
+            {
+                MCP_METHOD_NAME: "tools/list",
+                MCP_PROTOCOL_VERSION: types.LATEST_PROTOCOL_VERSION,
+                JSONRPC_REQUEST_ID: "1",
+                NETWORK_TRANSPORT: NetworkTransportValues.TCP.value,
+                SERVER_ADDRESS: "127.0.0.1",
+                SERVER_PORT: port,
+                MCP_SESSION_ID: self._get_attr(server_list_span, MCP_SESSION_ID),
+            },
+        )
+        self._assert_span_attrs(
+            call_span,
+            {
+                MCP_METHOD_NAME: "tools/call",
+                MCP_PROTOCOL_VERSION: types.LATEST_PROTOCOL_VERSION,
+                JSONRPC_REQUEST_ID: "2",
+                GEN_AI_TOOL_NAME: "hello",
+                GEN_AI_OPERATION_NAME: GenAiOperationNameValues.EXECUTE_TOOL.value,
+                NETWORK_TRANSPORT: NetworkTransportValues.TCP.value,
+                SERVER_ADDRESS: "localhost",
+                SERVER_PORT: port,
+                MCP_SESSION_ID: self._get_attr(server_call_span, MCP_SESSION_ID),
+            },
+        )
+        self.assertEqual(
+            resource_span.attributes,
+            {
+                MCP_METHOD_NAME: "resources/read",
+                MCP_PROTOCOL_VERSION: types.LATEST_PROTOCOL_VERSION,
+                JSONRPC_REQUEST_ID: "1",
+                MCP_RESOURCE_URI: "test://example",
+            },
+        )
+        self.assertNotIn(MCP_SESSION_ID, resource_span.attributes)
+        self.assertNotEqual(self._get_attr(list_span, MCP_SESSION_ID), self._get_attr(call_span, MCP_SESSION_ID))
+        self.assertEqual(list_span.parent.span_id, caller.context.span_id)
+        self.assertEqual(call_span.parent.span_id, caller.context.span_id)
+        self.assertEqual(resource_span.parent.span_id, caller.context.span_id)
+
     async def _run_inprocess(self, callback, raise_exceptions=False):
         from mcp.server.fastmcp import FastMCP  # pylint: disable=import-outside-toplevel
         from mcp.shared.memory import (  # pylint: disable=import-outside-toplevel
@@ -633,14 +739,15 @@ class TestMcpInstrumentorInProcess(McpInstrumentorTestBase):
         async with create_connected_server_and_client_session(server, raise_exceptions=raise_exceptions) as session:
             await callback(session)
 
-    async def _run_http_inprocess(self, callback):
+    async def _run_http_inprocess(self, callback, port=None):
         # pylint: disable=import-outside-toplevel
         import anyio
         import uvicorn
         from mcp.client.session import ClientSession
 
         client = self._get_streamable_http_client()
-        port = self._get_free_port()
+        if port is None:
+            port = self._get_free_port()
         config = uvicorn.Config(self.server.streamable_http_app(), host="127.0.0.1", port=port, log_level="critical")
         server = uvicorn.Server(config)
 
