@@ -9,11 +9,14 @@ from typing import Optional
 
 from packaging.requirements import Requirement
 
+from amazon.opentelemetry.distro.genai.environment_variables import (
+    AGENT_OBSERVABILITY_ENABLED,
+    AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT,
+)
+
 _logger: Logger = getLogger(__name__)
 
-AGENT_OBSERVABILITY_ENABLED = "AGENT_OBSERVABILITY_ENABLED"
 OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS = "OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS"
-AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT = "AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT"
 
 # Region prefix -> DNS suffix for every AWS partition that does not use "amazonaws.com".
 # Mirrors the "dnsSuffix" values in botocore's partitions.json. Regions that match none of

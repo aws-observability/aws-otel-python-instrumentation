@@ -76,6 +76,10 @@ from amazon.opentelemetry.distro._utils import (
 )
 from amazon.opentelemetry.distro.aws_opentelemetry_configurator import APPLICATION_SIGNALS_ENABLED_CONFIG
 from amazon.opentelemetry.distro.debugger.debugger import initialize_debugger
+from amazon.opentelemetry.distro.genai.environment_variables import (
+    AWS_AGENTIC_INSTRUMENTATION,
+    AWS_GENAI_INSTRUMENTATION,
+)
 from amazon.opentelemetry.distro.patches._instrumentation_patch import apply_instrumentation_patches
 from opentelemetry import propagate
 from opentelemetry.distro import OpenTelemetryDistro
@@ -110,17 +114,6 @@ _logger: Logger = getLogger(__name__)
 # Suppress configurator warnings from auto-instrumentation
 _load._logger.setLevel(LEVELS.get(os.environ.get(OTEL_PYTHON_LOG_LEVEL, "error").lower(), ERROR))
 
-
-# Controls AWS native agentic instrumentors when AGENT_OBSERVABILITY_ENABLED=true.
-# This switch only governs the aws_* side; third-party instrumentors are never disabled
-# by ADOT — uninstall them or use OTEL_PYTHON_DISABLED_INSTRUMENTATIONS to opt out.
-# Values:
-#   "auto" (default, also when unset): load aws_* unless a same-library third-party is registered.
-#   "enabled" : load all aws_* unconditionally.
-#   "disabled": skip all aws_*.
-AWS_GENAI_INSTRUMENTATION = "AWS_GENAI_INSTRUMENTATION"
-# Legacy: use AWS_GENAI_INSTRUMENTATION.
-AWS_AGENTIC_INSTRUMENTATION = "AWS_AGENTIC_INSTRUMENTATION"
 
 # Maps third-party instrumentor entry point names to their AWS native equivalents.
 # Used for mutual exclusion: only one side instruments each library at a time.
