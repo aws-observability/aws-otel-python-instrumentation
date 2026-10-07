@@ -19,6 +19,7 @@ from amazon.opentelemetry.distro.serviceevents.collectors.endpoint_collector imp
 from amazon.opentelemetry.distro.serviceevents.collectors.incident_snapshot_collector import IncidentSnapshotCollector
 from amazon.opentelemetry.distro.serviceevents.config import ServiceEventsConfig
 from amazon.opentelemetry.distro.serviceevents.python_monitor import _ServiceEventsMonitorState
+from opentelemetry.instrumentation.logging.environment_variables import OTEL_PYTHON_LOG_LEVEL
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +121,7 @@ class ServiceEventsInstrumentation:
             return
 
         # Configure ServiceEvents logging — reuse OTEL_PYTHON_LOG_LEVEL (default: INFO)
-        otel_log_level = os.getenv("OTEL_PYTHON_LOG_LEVEL", "info").upper()
+        otel_log_level = os.getenv(OTEL_PYTHON_LOG_LEVEL, "info").upper()
         log_level = getattr(logging, otel_log_level, logging.INFO)
         serviceevents_logger = logging.getLogger("amazon.opentelemetry.distro.serviceevents")
         serviceevents_logger.setLevel(log_level)

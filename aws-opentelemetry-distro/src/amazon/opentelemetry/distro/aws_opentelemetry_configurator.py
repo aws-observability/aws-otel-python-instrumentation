@@ -17,7 +17,12 @@ from typing_extensions import override
 
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_LOCAL_SERVICE, AWS_SERVICE_TYPE
 from amazon.opentelemetry.distro._aws_resource_attribute_configurator import get_service_attribute
-from amazon.opentelemetry.distro._utils import get_aws_session, is_agent_observability_enabled
+from amazon.opentelemetry.distro._utils import (
+    AWS_DNS_SUFFIX_PATTERN,
+    get_aws_session,
+    is_agent_observability_enabled,
+    is_lambda_environment,
+)
 from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSampler
 from amazon.opentelemetry.distro.attribute_propagating_span_processor_builder import (
     AttributePropagatingSpanProcessorBuilder,
@@ -64,10 +69,20 @@ from opentelemetry.sdk._configuration import (
 from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor, ConsoleLogRecordExporter, LogRecordExporter
 from opentelemetry.sdk.environment_variables import (
-    _OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED,
+    _OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED as OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED,
+)
+from opentelemetry.sdk.environment_variables import (
     OTEL_EXPORTER_OTLP_ENDPOINT,
+    OTEL_EXPORTER_OTLP_HEADERS,
+    OTEL_EXPORTER_OTLP_LOGS_ENDPOINT,
+    OTEL_EXPORTER_OTLP_LOGS_HEADERS,
+    OTEL_EXPORTER_OTLP_METRICS_ENDPOINT,
+    OTEL_EXPORTER_OTLP_METRICS_HEADERS,
     OTEL_EXPORTER_OTLP_METRICS_PROTOCOL,
     OTEL_EXPORTER_OTLP_PROTOCOL,
+    OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
+    OTEL_EXPORTER_OTLP_TRACES_HEADERS,
+    OTEL_METRIC_EXPORT_INTERVAL,
     OTEL_TRACES_SAMPLER_ARG,
 )
 from opentelemetry.sdk.extension.aws.resource.ec2 import AwsEc2ResourceDetector
@@ -102,19 +117,10 @@ APPLICATION_SIGNALS_ENABLED_CONFIG = "OTEL_AWS_APPLICATION_SIGNALS_ENABLED"
 APPLICATION_SIGNALS_RUNTIME_ENABLED_CONFIG = "OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED"
 DEPRECATED_APP_SIGNALS_EXPORTER_ENDPOINT_CONFIG = "OTEL_AWS_APP_SIGNALS_EXPORTER_ENDPOINT"
 APPLICATION_SIGNALS_EXPORTER_ENDPOINT_CONFIG = "OTEL_AWS_APPLICATION_SIGNALS_EXPORTER_ENDPOINT"
-METRIC_EXPORT_INTERVAL_CONFIG = "OTEL_METRIC_EXPORT_INTERVAL"
 DEFAULT_METRIC_EXPORT_INTERVAL = 60000.0
-AWS_LAMBDA_FUNCTION_NAME_CONFIG = "AWS_LAMBDA_FUNCTION_NAME"
 AWS_XRAY_DAEMON_ADDRESS_CONFIG = "AWS_XRAY_DAEMON_ADDRESS"
 OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED_CONFIG = "OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED"
 SYSTEM_METRICS_INSTRUMENTATION_SCOPE_NAME = "opentelemetry.instrumentation.system_metrics"
-OTEL_EXPORTER_OTLP_TRACES_ENDPOINT = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
-OTEL_EXPORTER_OTLP_LOGS_ENDPOINT = "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"
-OTEL_EXPORTER_OTLP_METRICS_ENDPOINT = "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"
-OTEL_EXPORTER_OTLP_LOGS_HEADERS = "OTEL_EXPORTER_OTLP_LOGS_HEADERS"
-OTEL_EXPORTER_OTLP_TRACES_HEADERS = "OTEL_EXPORTER_OTLP_TRACES_HEADERS"
-OTEL_EXPORTER_OTLP_METRICS_HEADERS = "OTEL_EXPORTER_OTLP_METRICS_HEADERS"
-OTEL_EXPORTER_OTLP_HEADERS = "OTEL_EXPORTER_OTLP_HEADERS"
 
 # Normalized metrics-destination messages. Kept verbatim from the ADOT Java implementation
 # (PR #1456) so the two distributions emit identical wording for the same condition.
@@ -133,9 +139,9 @@ OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS = "OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS"
 XRAY_SERVICE = "xray"
 LOGS_SERIVCE = "logs"
 METRICS_SERVICE = "monitoring"
-AWS_TRACES_OTLP_ENDPOINT_PATTERN = r"https://xray\.([a-z0-9-]+)\.amazonaws\.com(?:\.cn)?/v1/traces$"
-AWS_LOGS_OTLP_ENDPOINT_PATTERN = r"https://logs\.([a-z0-9-]+)\.amazonaws\.com(?:\.cn)?/v1/logs$"
-AWS_METRICS_OTLP_ENDPOINT_PATTERN = r"https://monitoring\.([a-z0-9-]+)\.amazonaws\.com(?:\.cn)?/v1/metrics$"
+AWS_TRACES_OTLP_ENDPOINT_PATTERN = rf"https://xray\.([a-z0-9-]+)\.{AWS_DNS_SUFFIX_PATTERN}/v1/traces$"
+AWS_LOGS_OTLP_ENDPOINT_PATTERN = rf"https://logs\.([a-z0-9-]+)\.{AWS_DNS_SUFFIX_PATTERN}/v1/logs$"
+AWS_METRICS_OTLP_ENDPOINT_PATTERN = rf"https://monitoring\.([a-z0-9-]+)\.{AWS_DNS_SUFFIX_PATTERN}/v1/metrics$"
 
 # Maps a SigV4 signing service to the endpoint pattern that identifies it. Using an explicit
 # mapping rather than a conditional expression keeps each signal independent - the previous
@@ -149,14 +155,6 @@ _AWS_OTLP_ENDPOINT_PATTERNS = {
 
 # UDP package size is not larger than 64KB
 LAMBDA_SPAN_EXPORT_BATCH_SIZE = 10
-
-OTEL_TRACES_EXPORTER = "OTEL_TRACES_EXPORTER"
-OTEL_LOGS_EXPORTER = "OTEL_LOGS_EXPORTER"
-OTEL_METRICS_EXPORTER = "OTEL_METRICS_EXPORTER"
-OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT = "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"
-OTEL_TRACES_SAMPLER = "OTEL_TRACES_SAMPLER"
-OTEL_PYTHON_DISABLED_INSTRUMENTATIONS = "OTEL_PYTHON_DISABLED_INSTRUMENTATIONS"
-OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED = "OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED"
 
 _logger: Logger = getLogger(__name__)
 
@@ -209,7 +207,7 @@ def _initialize_components():
             AwsEksResourceDetector(),
             AwsEcsResourceDetector(),
         ]
-        if not (_is_lambda_environment() or is_agent_observability_enabled())
+        if not (is_lambda_environment() or is_agent_observability_enabled())
         else []
     )
 
@@ -226,7 +224,7 @@ def _initialize_components():
     )
 
     _init_metrics(metric_exporters, resource)
-    logging_enabled = os.getenv(_OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED, "false")
+    logging_enabled = os.getenv(OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED, "false")
     if logging_enabled.strip().lower() == "true":
         _init_logging(log_exporters, resource)
 
@@ -312,7 +310,7 @@ def _init_logging(
     set_logger_provider(provider)
 
     for _, exporter_class in exporters.items():
-        if exporter_class is ConsoleLogRecordExporter and _is_lambda_environment():
+        if exporter_class is ConsoleLogRecordExporter and is_lambda_environment():
             exporter_class = CompactConsoleLogRecordExporter
             _logger.debug(
                 "Lambda environment detected, using CompactConsoleLogRecordExporter instead of ConsoleLogRecordExporter"
@@ -401,7 +399,7 @@ def _init_metrics(
 def _export_unsampled_span_for_lambda(trace_provider: TracerProvider, resource: Resource = None):
     if not _is_application_signals_enabled():
         return
-    if not _is_lambda_environment():
+    if not is_lambda_environment():
         return
 
     traces_endpoint = os.environ.get(AWS_XRAY_DAEMON_ADDRESS_CONFIG, "127.0.0.1:2000")
@@ -535,7 +533,7 @@ def _customize_sampler(sampler: Sampler) -> Sampler:
 
 def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource, sampler: Sampler = None) -> SpanExporter:
     traces_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)
-    if _is_lambda_environment():
+    if is_lambda_environment():
         # Override OTLP http default endpoint to UDP
         if isinstance(span_exporter, OTLPSpanExporter) and traces_endpoint is None:
             traces_endpoint = os.environ.get(AWS_XRAY_DAEMON_ADDRESS_CONFIG, "127.0.0.1:2000")
@@ -614,7 +612,7 @@ def _customize_logs_exporter(log_exporter: LogRecordExporter) -> LogRecordExport
 
 def _customize_span_processors(provider: TracerProvider, resource: Resource, sampler: Sampler) -> None:
     # Add LambdaSpanProcessor to list of processors regardless of application signals.
-    if _is_lambda_environment():
+    if is_lambda_environment():
         provider.add_span_processor(AwsLambdaSpanProcessor())
 
     # Propagates baggage entries matching OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS into span attributes.
@@ -637,7 +635,7 @@ def _customize_span_processors(provider: TracerProvider, resource: Resource, sam
     provider.add_span_processor(AttributePropagatingSpanProcessorBuilder().build())
 
     # Export 100% spans and not export Application-Signals metrics if on Lambda.
-    if _is_lambda_environment():
+    if is_lambda_environment():
         _export_unsampled_span_for_lambda(provider, resource)
         return
 
@@ -816,7 +814,7 @@ def _is_serviceevents_enabled():
     # ServiceEvents is bundled with Application Signals: on by default when App Signals is on,
     # off by default when it isn't, and always off on Lambda regardless. An explicit
     # OTEL_AWS_SERVICE_EVENTS_ENABLED value (true/false) overrides the bundling.
-    if _is_lambda_environment():
+    if is_lambda_environment():
         return False
     explicit = os.environ.get("OTEL_AWS_SERVICE_EVENTS_ENABLED")
     if explicit is not None and explicit.strip() != "":
@@ -828,11 +826,6 @@ def _is_application_signals_runtime_enabled():
     return _is_application_signals_enabled() and (
         os.environ.get(APPLICATION_SIGNALS_RUNTIME_ENABLED_CONFIG, "true").lower() == "true"
     )
-
-
-def _is_lambda_environment():
-    # detect if running in AWS Lambda environment
-    return AWS_LAMBDA_FUNCTION_NAME_CONFIG in os.environ
 
 
 def _header_keys(headers_value: Optional[str]) -> List[str]:
@@ -911,7 +904,7 @@ def _parse_otel_baggage_keys_env_var() -> set[str]:
 
 
 def _get_metric_export_interval():
-    export_interval_millis = float(os.environ.get(METRIC_EXPORT_INTERVAL_CONFIG, DEFAULT_METRIC_EXPORT_INTERVAL))
+    export_interval_millis = float(os.environ.get(OTEL_METRIC_EXPORT_INTERVAL, DEFAULT_METRIC_EXPORT_INTERVAL))
     _logger.debug("Span Metrics export interval: %s", export_interval_millis)
     # Cap export interval to 60 seconds. This is currently required for metrics-trace correlation to work correctly.
     if export_interval_millis > DEFAULT_METRIC_EXPORT_INTERVAL:
@@ -921,7 +914,7 @@ def _get_metric_export_interval():
 
 
 def _span_export_batch_size():
-    return LAMBDA_SPAN_EXPORT_BATCH_SIZE if _is_lambda_environment() else None
+    return LAMBDA_SPAN_EXPORT_BATCH_SIZE if is_lambda_environment() else None
 
 
 class ApplicationSignalsExporterProvider:

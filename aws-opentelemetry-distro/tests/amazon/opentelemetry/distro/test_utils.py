@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 from amazon.opentelemetry.distro._utils import (
     AGENT_OBSERVABILITY_ENABLED,
     AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT,
+    get_aws_dns_suffix,
     get_aws_region,
     get_aws_session,
     is_agent_observability_enabled,
@@ -201,3 +202,22 @@ class TestUtils(TestCase):
         if AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT in os.environ:
             del os.environ[AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT]
         self.assertFalse(is_genai_content_extraction_opted_out())
+
+    def test_get_aws_dns_suffix(self):
+        """Each partition's regions map to that partition's DNS suffix."""
+        for region, expected in (
+            ("us-east-1", "amazonaws.com"),
+            ("eu-west-1", "amazonaws.com"),
+            ("us-gov-west-1", "amazonaws.com"),
+            ("cn-north-1", "amazonaws.com.cn"),
+            ("cn-northwest-1", "amazonaws.com.cn"),
+            ("eusc-de-east-1", "amazonaws.eu"),
+            ("us-iso-east-1", "c2s.ic.gov"),
+            ("us-iso-west-1", "c2s.ic.gov"),
+            ("us-isob-east-1", "sc2s.sgov.gov"),
+            ("eu-isoe-west-1", "cloud.adc-e.uk"),
+            ("us-isof-south-1", "csp.hci.ic.gov"),
+            ("us-isof-east-1", "csp.hci.ic.gov"),
+        ):
+            with self.subTest(region=region):
+                self.assertEqual(get_aws_dns_suffix(region), expected)

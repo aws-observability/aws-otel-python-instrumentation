@@ -48,6 +48,7 @@ from amazon.opentelemetry.distro.debugger._snapshot_models import (
 )
 from amazon.opentelemetry.distro.debugger._snapshot_serializer import SnapshotSerializer
 from amazon.opentelemetry.distro.debugger._stack_utils import capture_stack_frames, is_internal_frame
+from opentelemetry.sdk.environment_variables import OTEL_RESOURCE_ATTRIBUTES, OTEL_SERVICE_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -1574,10 +1575,10 @@ class FunctionWrapper:
         duration_ms = duration_ns // 1_000_000 if duration_ns else None
 
         # Service and environment from OTel resource attributes
-        service_name = os.environ.get("OTEL_SERVICE_NAME")
+        service_name = os.environ.get(OTEL_SERVICE_NAME)
         if not service_name:
             # Try OTEL_RESOURCE_ATTRIBUTES
-            for pair in os.environ.get("OTEL_RESOURCE_ATTRIBUTES", "").split(","):
+            for pair in os.environ.get(OTEL_RESOURCE_ATTRIBUTES, "").split(","):
                 if "=" in pair:
                     key, value = pair.split("=", 1)
                     if key.strip() == "service.name":
@@ -1585,7 +1586,7 @@ class FunctionWrapper:
                         break
 
         environment = None
-        for pair in os.environ.get("OTEL_RESOURCE_ATTRIBUTES", "").split(","):
+        for pair in os.environ.get(OTEL_RESOURCE_ATTRIBUTES, "").split(","):
             if "=" in pair:
                 key, value = pair.split("=", 1)
                 key = key.strip()

@@ -739,6 +739,12 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             "https://xray.us-east-1.AMAZONAWS.COM/V1/traces",
             "https://xray.cn-north-1.amazonaws.com.cn/v1/traces",
             "https://xray.cn-northwest-1.amazonaws.com.cn/v1/traces",
+            "https://xray.us-gov-west-1.amazonaws.com/v1/traces",
+            "https://xray.eusc-de-east-1.amazonaws.eu/v1/traces",
+            "https://xray.us-iso-east-1.c2s.ic.gov/v1/traces",
+            "https://xray.us-isob-east-1.sc2s.sgov.gov/v1/traces",
+            "https://xray.eu-isoe-west-1.cloud.adc-e.uk/v1/traces",
+            "https://xray.us-isof-south-1.csp.hci.ic.gov/v1/traces",
         ]
 
         traces_bad_endpoints = [
@@ -766,6 +772,8 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             "https:/xray.us-east-1.amazonaws.com/v1/traces",
             "https:://xray.us-east-1.amazonaws.com/v1/traces",
             "https://xray.cn-north-1.amazonaws.com.cn.evil/v1/traces",
+            "https://xray.us-iso-east-1.c2s.ic.gov.evil/v1/traces",
+            "https://xray.eu-isoe-west-1.adc-e.uk/v1/traces",
         ]
 
         good_configs = []
@@ -864,6 +872,12 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             "https://logs.us-east-1.AMAZONAWS.COM/V1/logs",
             "https://logs.cn-north-1.amazonaws.com.cn/v1/logs",
             "https://logs.cn-northwest-1.amazonaws.com.cn/v1/logs",
+            "https://logs.us-gov-west-1.amazonaws.com/v1/logs",
+            "https://logs.eusc-de-east-1.amazonaws.eu/v1/logs",
+            "https://logs.us-iso-east-1.c2s.ic.gov/v1/logs",
+            "https://logs.us-isob-east-1.sc2s.sgov.gov/v1/logs",
+            "https://logs.eu-isoe-west-1.cloud.adc-e.uk/v1/logs",
+            "https://logs.us-isof-south-1.csp.hci.ic.gov/v1/logs",
         ]
 
         logs_bad_endpoints = [
@@ -894,6 +908,8 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             "https://logs.us-east-1.amazonaws.com/v1/cloudwatchlogs",
             "https://logs.us-east-1.amazonaws.com/v1/cwlogs",
             "https://logs.cn-north-1.amazonaws.com.cn.evil/v1/logs",
+            "https://logs.us-iso-east-1.c2s.ic.gov.evil/v1/logs",
+            "https://logs.eu-isoe-west-1.adc-e.uk/v1/logs",
         ]
 
         logs_bad_headers = [
@@ -1008,9 +1024,9 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
     ):
         """Test that ConsoleLogRecordExporter is replaced with CompactConsoleLogRecordExporter when in Lambda"""
 
-        # Mock _is_lambda_environment to return True
+        # Mock is_lambda_environment to return True
         with patch(
-            "amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_lambda_environment", return_value=True
+            "amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_lambda_environment", return_value=True
         ):
             # Test with ConsoleLogRecordExporter
             exporters = {"console": ConsoleLogRecordExporter}
@@ -1032,7 +1048,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
         # Test when not in Lambda environment - should not replace
         with patch(
-            "amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_lambda_environment", return_value=False
+            "amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_lambda_environment", return_value=False
         ):
             exporters = {"console": ConsoleLogRecordExporter}
             _init_logging(exporters, Resource.get_empty())
@@ -1352,10 +1368,18 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             "https://monitoring.us-west-2.amazonaws.com/v1/metrics",
             "https://monitoring.cn-north-1.amazonaws.com.cn/v1/metrics",
             "https://monitoring.cn-northwest-1.amazonaws.com.cn/v1/metrics",
+            "https://monitoring.us-gov-west-1.amazonaws.com/v1/metrics",
+            "https://monitoring.eusc-de-east-1.amazonaws.eu/v1/metrics",
+            "https://monitoring.us-iso-east-1.c2s.ic.gov/v1/metrics",
+            "https://monitoring.us-isob-east-1.sc2s.sgov.gov/v1/metrics",
+            "https://monitoring.eu-isoe-west-1.cloud.adc-e.uk/v1/metrics",
+            "https://monitoring.us-isof-south-1.csp.hci.ic.gov/v1/metrics",
         ]
         bad = [
             # lookalike suffix must not be signed
             "https://monitoring.cn-north-1.amazonaws.com.cn.evil/v1/metrics",
+            "https://monitoring.us-iso-east-1.c2s.ic.gov.evil/v1/metrics",
+            "https://monitoring.eu-isoe-west-1.adc-e.uk/v1/metrics",
             "https://monitoring.us-east-1.amazonaws.com.evil/v1/metrics",
             # wrong service host
             "https://xray.us-east-1.amazonaws.com/v1/traces",
