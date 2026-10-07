@@ -12,6 +12,10 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- chore: update OpenTelemetry dependencies to 1.45.1/0.66b1. The CloudWatch Logs OTLP exporter now relies on the
+  upstream OTLP HTTP client's retry handling, which retries HTTP 429, 502, 503 and 504 and honors `Retry-After`
+  (previously 408, 429 and all 5xx were retried). `requests` is now declared as a direct dependency.
+  ([#905](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/905))
 - fix(mcp): inject client transport info into `ClientSession` to preserve it across task and thread boundaries
   ([#921](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/921))
 - feat: recognize and SigV4-sign X-Ray, CloudWatch Logs, and CloudWatch Metrics OTLP endpoints in every AWS

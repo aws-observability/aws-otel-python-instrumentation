@@ -47,17 +47,20 @@ class OTLPAwsMetricExporter(OTLPMetricExporter):
         # does not force gzip: the measured SigV4 signature covers content-type, host and x-amz-date
         # but not Content-Encoding, and whether an unsigned Content-Encoding is acceptable for the
         # metrics endpoint is still open with the CloudWatch service team.
+        #
+        # The upstream client sends its own User-Agent as a per-request header, which takes precedence
+        # over session headers, so the ADOT User-Agent must be passed in via ``headers``.
+        self._session = AwsAuthSession(session=session, aws_region=aws_region, service="monitoring")
         OTLPMetricExporter.__init__(
             self,
             endpoint=endpoint,
             certificate_file=certificate_file,
             client_key_file=client_key_file,
             client_certificate_file=client_certificate_file,
-            headers=headers,
+            headers={**(headers or {}), **_OTLP_AWS_HTTP_HEADERS},
             timeout=timeout,
             compression=compression,
-            session=AwsAuthSession(session=session, aws_region=aws_region, service="monitoring"),
+            session=self._session,
             preferred_temporality=preferred_temporality,
             preferred_aggregation=preferred_aggregation,
         )
-        self._session.headers.update(_OTLP_AWS_HTTP_HEADERS)

@@ -166,7 +166,7 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
         span_data_mock.attributes = span_attributes
 
         dependency_metric: BoundedAttributes = BoundedAttributes(
-            attributes={"new dependency key": "new dependency value", AWS_SPAN_KIND: SpanKind.PRODUCER}
+            attributes={"new dependency key": "new dependency value", AWS_SPAN_KIND: SpanKind.PRODUCER.name}
         )
 
         attribute_map: {str: Attributes} = {
@@ -185,9 +185,9 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
 
         exported_span: ReadableSpan = exported_spans[0]
 
-        # Check the number of attributes and specific attributes
-        expected_attribute_count: int = sum(len(attrs) for attrs in attribute_map.values()) + len(span_attributes)
-        expected_attribute_count: int = sum(len(attrs) for attrs in attribute_map.values()) + len(span_attributes)
+        # Check the number of attributes and specific attributes. As a local root, the span takes all Dependency
+        # metric attributes (with AWS_SPAN_KIND replaced by LOCAL_ROOT) on top of its original attributes.
+        expected_attribute_count: int = len(dependency_metric) + len(span_attributes)
         self.assertEqual(len(exported_span._attributes), expected_attribute_count)
 
         # Check that all expected attributes are present
@@ -218,6 +218,7 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
         dependency_metric: BoundedAttributes = MagicMock()
         dependency_metric.attributes = {}
         dependency_metric.maxlen = None
+        dependency_metric.max_value_len = None
 
         # The dependencyAttributesMock will only be used if
         # AwsSpanProcessingUtil.shouldGenerateDependencyMetricAttributes(span) is true.
