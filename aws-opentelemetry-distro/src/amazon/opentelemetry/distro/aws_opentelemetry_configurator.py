@@ -44,6 +44,7 @@ from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayR
 from amazon.opentelemetry.distro.scope_based_exporter import ScopeBasedPeriodicExportingMetricReader
 from amazon.opentelemetry.distro.scope_based_filtering_view import ScopeBasedRetainingView
 from opentelemetry._logs import get_logger_provider, set_logger_provider
+from opentelemetry.environment_variables import OTEL_METRICS_EXPORTER
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPHttpOTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
@@ -62,10 +63,20 @@ from opentelemetry.sdk._configuration import (
 from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor, ConsoleLogRecordExporter, LogRecordExporter
 from opentelemetry.sdk.environment_variables import (
-    _OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED,
+    _OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED as OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED,
+)
+from opentelemetry.sdk.environment_variables import (
     OTEL_EXPORTER_OTLP_ENDPOINT,
+    OTEL_EXPORTER_OTLP_HEADERS,
+    OTEL_EXPORTER_OTLP_LOGS_ENDPOINT,
+    OTEL_EXPORTER_OTLP_LOGS_HEADERS,
+    OTEL_EXPORTER_OTLP_METRICS_ENDPOINT,
+    OTEL_EXPORTER_OTLP_METRICS_HEADERS,
     OTEL_EXPORTER_OTLP_METRICS_PROTOCOL,
     OTEL_EXPORTER_OTLP_PROTOCOL,
+    OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
+    OTEL_EXPORTER_OTLP_TRACES_HEADERS,
+    OTEL_METRIC_EXPORT_INTERVAL,
     OTEL_TRACES_SAMPLER_ARG,
 )
 from opentelemetry.sdk.extension.aws.resource.ec2 import AwsEc2ResourceDetector
@@ -100,19 +111,11 @@ APPLICATION_SIGNALS_ENABLED_CONFIG = "OTEL_AWS_APPLICATION_SIGNALS_ENABLED"
 APPLICATION_SIGNALS_RUNTIME_ENABLED_CONFIG = "OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED"
 DEPRECATED_APP_SIGNALS_EXPORTER_ENDPOINT_CONFIG = "OTEL_AWS_APP_SIGNALS_EXPORTER_ENDPOINT"
 APPLICATION_SIGNALS_EXPORTER_ENDPOINT_CONFIG = "OTEL_AWS_APPLICATION_SIGNALS_EXPORTER_ENDPOINT"
-METRIC_EXPORT_INTERVAL_CONFIG = "OTEL_METRIC_EXPORT_INTERVAL"
 DEFAULT_METRIC_EXPORT_INTERVAL = 60000.0
 AWS_LAMBDA_FUNCTION_NAME_CONFIG = "AWS_LAMBDA_FUNCTION_NAME"
 AWS_XRAY_DAEMON_ADDRESS_CONFIG = "AWS_XRAY_DAEMON_ADDRESS"
 OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED_CONFIG = "OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED"
 SYSTEM_METRICS_INSTRUMENTATION_SCOPE_NAME = "opentelemetry.instrumentation.system_metrics"
-OTEL_EXPORTER_OTLP_TRACES_ENDPOINT = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
-OTEL_EXPORTER_OTLP_LOGS_ENDPOINT = "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"
-OTEL_EXPORTER_OTLP_METRICS_ENDPOINT = "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"
-OTEL_EXPORTER_OTLP_LOGS_HEADERS = "OTEL_EXPORTER_OTLP_LOGS_HEADERS"
-OTEL_EXPORTER_OTLP_TRACES_HEADERS = "OTEL_EXPORTER_OTLP_TRACES_HEADERS"
-OTEL_EXPORTER_OTLP_METRICS_HEADERS = "OTEL_EXPORTER_OTLP_METRICS_HEADERS"
-OTEL_EXPORTER_OTLP_HEADERS = "OTEL_EXPORTER_OTLP_HEADERS"
 
 # Normalized metrics-destination messages. Kept verbatim from the ADOT Java implementation
 # (PR #1456) so the two distributions emit identical wording for the same condition.
@@ -158,14 +161,6 @@ AWS_EMF_METRICS_NAMESPACE = "x-aws-metric-namespace"
 
 # UDP package size is not larger than 64KB
 LAMBDA_SPAN_EXPORT_BATCH_SIZE = 10
-
-OTEL_TRACES_EXPORTER = "OTEL_TRACES_EXPORTER"
-OTEL_LOGS_EXPORTER = "OTEL_LOGS_EXPORTER"
-OTEL_METRICS_EXPORTER = "OTEL_METRICS_EXPORTER"
-OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT = "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"
-OTEL_TRACES_SAMPLER = "OTEL_TRACES_SAMPLER"
-OTEL_PYTHON_DISABLED_INSTRUMENTATIONS = "OTEL_PYTHON_DISABLED_INSTRUMENTATIONS"
-OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED = "OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED"
 
 _logger: Logger = getLogger(__name__)
 
@@ -254,7 +249,7 @@ def _initialize_components():
     )
 
     _init_metrics(metric_exporters, resource, is_emf_enabled)
-    logging_enabled = os.getenv(_OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED, "false")
+    logging_enabled = os.getenv(OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED, "false")
     if logging_enabled.strip().lower() == "true":
         _init_logging(log_exporters, resource)
 
@@ -985,7 +980,7 @@ def _clear_logs_header_cache():
 
 
 def _get_metric_export_interval():
-    export_interval_millis = float(os.environ.get(METRIC_EXPORT_INTERVAL_CONFIG, DEFAULT_METRIC_EXPORT_INTERVAL))
+    export_interval_millis = float(os.environ.get(OTEL_METRIC_EXPORT_INTERVAL, DEFAULT_METRIC_EXPORT_INTERVAL))
     _logger.debug("Span Metrics export interval: %s", export_interval_millis)
     # Cap export interval to 60 seconds. This is currently required for metrics-trace correlation to work correctly.
     if export_interval_millis > DEFAULT_METRIC_EXPORT_INTERVAL:
@@ -1067,7 +1062,7 @@ def _check_emf_exporter_enabled() -> bool:
     bool: True if "awsemf" was found and removed, False otherwise.
     """
     # Get the current exporter value
-    exporter_value = os.environ.get("OTEL_METRICS_EXPORTER", "")
+    exporter_value = os.environ.get(OTEL_METRICS_EXPORTER, "")
 
     # Check if it's empty
     if not exporter_value:
@@ -1088,9 +1083,9 @@ def _check_emf_exporter_enabled() -> bool:
 
     # Set the new value (or unset if empty)
     if new_value:
-        os.environ["OTEL_METRICS_EXPORTER"] = new_value
-    elif "OTEL_METRICS_EXPORTER" in os.environ:
-        del os.environ["OTEL_METRICS_EXPORTER"]
+        os.environ[OTEL_METRICS_EXPORTER] = new_value
+    elif OTEL_METRICS_EXPORTER in os.environ:
+        del os.environ[OTEL_METRICS_EXPORTER]
 
     return True
 

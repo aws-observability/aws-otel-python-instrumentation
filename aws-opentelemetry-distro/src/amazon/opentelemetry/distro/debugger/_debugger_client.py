@@ -18,6 +18,7 @@ from amazon.opentelemetry.distro._aws_span_processing_util import UNKNOWN_SERVIC
 from amazon.opentelemetry.distro.debugger._data_models import BreakpointConfiguration
 from amazon.opentelemetry.distro.debugger.instrumentation_manager import get_global_manager
 from opentelemetry import trace
+from opentelemetry.sdk.environment_variables import OTEL_SERVICE_NAME
 from opentelemetry.semconv.resource import ResourceAttributes
 
 try:
@@ -111,7 +112,7 @@ class DebuggerClient:
             logger.debug("Error getting service name from OpenTelemetry resource: %s", exception)
 
         # Fall back to environment variable
-        service_name = os.environ.get("OTEL_SERVICE_NAME")
+        service_name = os.environ.get(OTEL_SERVICE_NAME)
         if service_name:
             # Cache environment variable value as well
             self._cached_service_name = service_name

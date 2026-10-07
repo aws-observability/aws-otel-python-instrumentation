@@ -15,6 +15,8 @@ from urllib.parse import urlparse
 from opentelemetry import context as context_api
 from opentelemetry import trace as trace_api
 from opentelemetry import version as otel_version
+from opentelemetry.instrumentation.environment_variables import OTEL_PYTHON_DISABLED_INSTRUMENTATIONS
+from opentelemetry.sdk.environment_variables import OTEL_RESOURCE_ATTRIBUTES, OTEL_SERVICE_NAME
 from opentelemetry.trace import SpanKind
 from opentelemetry.trace.status import Status, StatusCode
 from opentelemetry.util import types
@@ -33,12 +35,12 @@ _EXCEPTION_ESCAPED = "exception.escaped"
 
 def _build_lambda_resource():
     attrs = {}
-    raw = os.environ.get("OTEL_RESOURCE_ATTRIBUTES", "")
+    raw = os.environ.get(OTEL_RESOURCE_ATTRIBUTES, "")
     for pair in raw.split(","):
         if "=" in pair:
             key, val = pair.split("=", 1)
             attrs[key.strip()] = val.strip()
-    otel_service_name = os.environ.get("OTEL_SERVICE_NAME", "")
+    otel_service_name = os.environ.get(OTEL_SERVICE_NAME, "")
     if otel_service_name:
         attrs["service.name"] = otel_service_name
 
@@ -751,9 +753,7 @@ def configure_lite_mode():
     )
 
     enabled = {"botocore", "requests", "urllib3"}
-    disabled = set(
-        d.strip() for d in os.environ.get("OTEL_PYTHON_DISABLED_INSTRUMENTATIONS", "").split(",") if d.strip()
-    )
+    disabled = set(d.strip() for d in os.environ.get(OTEL_PYTHON_DISABLED_INSTRUMENTATIONS, "").split(",") if d.strip())
 
     _instrumentors = {
         "botocore": "opentelemetry.instrumentation.botocore:BotocoreInstrumentor",
