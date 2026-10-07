@@ -9,7 +9,7 @@ from botocore.session import Session
 from amazon.opentelemetry.distro._utils import is_agent_observability_enabled, is_genai_content_extraction_opted_out
 from amazon.opentelemetry.distro.exporter.otlp.aws.common._aws_http_headers import _OTLP_AWS_HTTP_HEADERS
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
-from amazon.opentelemetry.distro.llo_handler import LLOHandler
+from amazon.opentelemetry.distro.genai import LLOHandler
 from opentelemetry._logs import get_logger_provider
 from opentelemetry.exporter.otlp.proto.http import Compression
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter

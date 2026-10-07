@@ -3,7 +3,7 @@
 
 import unittest
 
-from amazon.opentelemetry.distro.gen_ai_nested_client_span_processor import GenAINestedClientSpanProcessor
+from amazon.opentelemetry.distro.genai import GenAINestedClientSpanProcessor
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor

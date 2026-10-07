@@ -43,14 +43,14 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_SQS_QUEUE_NAME,
 )
 from amazon.opentelemetry.distro._aws_metric_attribute_generator import _AwsMetricAttributeGenerator
-from amazon.opentelemetry.distro.metric_attribute_generator import DEPENDENCY_METRIC, SERVICE_METRIC
-from amazon.opentelemetry.distro.semconv._incubating.attributes.gen_ai_attributes import (
+from amazon.opentelemetry.distro.genai.attributes import (
     GEN_AI_BROWSER_ID,
     GEN_AI_CODE_INTERPRETER_ID,
     GEN_AI_GATEWAY_ID,
     GEN_AI_MEMORY_ID,
     GEN_AI_RUNTIME_ID,
 )
+from amazon.opentelemetry.distro.metric_attribute_generator import DEPENDENCY_METRIC, SERVICE_METRIC
 from opentelemetry.attributes import BoundedAttributes
 from opentelemetry.sdk.resources import _DEFAULT_RESOURCE, SERVICE_NAME
 from opentelemetry.sdk.trace import ReadableSpan, Resource

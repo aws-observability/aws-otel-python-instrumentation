@@ -4,7 +4,8 @@
 
 from test_llo_handler_base import LLOHandlerTestBase
 
-from amazon.opentelemetry.distro.llo_handler import LLO_PATTERNS, LLOHandler, PatternType
+from amazon.opentelemetry.distro.genai import LLOHandler
+from amazon.opentelemetry.distro.genai.llo_handler import LLO_PATTERNS, PatternType
 
 
 class TestLLOHandlerPatterns(LLOHandlerTestBase):

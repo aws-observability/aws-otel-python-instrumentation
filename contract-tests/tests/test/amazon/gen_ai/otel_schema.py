@@ -9,7 +9,7 @@ import jsonschema
 
 # TODO: Update this version and schema revision when ADOT's OTel dependency versions are bumped.
 # Keep these schema constants in sync with
-# aws-opentelemetry-distro/tests/amazon/opentelemetry/distro/instrumentation/conftest.py.
+# aws-opentelemetry-distro/tests/amazon/opentelemetry/distro/genai/instrumentation/conftest.py.
 _OTEL_SEMCONV_VERSION = "v1.43.0"
 # semantic-conventions-genai does not publish version tags. This revision's manifest declares the v1.43.0 dependency
 # used by opentelemetry-semantic-conventions 0.65b0.

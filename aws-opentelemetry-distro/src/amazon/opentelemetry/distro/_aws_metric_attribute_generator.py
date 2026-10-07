@@ -57,6 +57,13 @@ from amazon.opentelemetry.distro._aws_span_processing_util import (
     should_generate_dependency_metric_attributes,
     should_generate_service_metric_attributes,
 )
+from amazon.opentelemetry.distro.genai.attributes import (
+    GEN_AI_BROWSER_ID,
+    GEN_AI_CODE_INTERPRETER_ID,
+    GEN_AI_GATEWAY_ID,
+    GEN_AI_MEMORY_ID,
+    GEN_AI_RUNTIME_ID,
+)
 from amazon.opentelemetry.distro.metric_attribute_generator import (
     DEPENDENCY_METRIC,
     SERVICE_METRIC,
@@ -64,13 +71,6 @@ from amazon.opentelemetry.distro.metric_attribute_generator import (
 )
 from amazon.opentelemetry.distro.presigned_url_attributor import PresignedUrlAttribution, PresignedUrlAttributor
 from amazon.opentelemetry.distro.regional_resource_arn_parser import RegionalResourceArnParser
-from amazon.opentelemetry.distro.semconv._incubating.attributes.gen_ai_attributes import (
-    GEN_AI_BROWSER_ID,
-    GEN_AI_CODE_INTERPRETER_ID,
-    GEN_AI_GATEWAY_ID,
-    GEN_AI_MEMORY_ID,
-    GEN_AI_RUNTIME_ID,
-)
 from amazon.opentelemetry.distro.sqs_url_parser import SqsUrlParser
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import BoundedAttributes, ReadableSpan

@@ -4,7 +4,7 @@
 from unittest import TestCase
 from unittest.mock import MagicMock
 
-from amazon.opentelemetry.distro.llo_handler import LLOHandler
+from amazon.opentelemetry.distro.genai import LLOHandler
 from opentelemetry.sdk._logs import LoggerProvider
 
 
