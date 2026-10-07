@@ -77,6 +77,11 @@ def is_agent_observability_enabled() -> bool:
     return os.environ.get(AGENT_OBSERVABILITY_ENABLED, "false").lower() == "true"
 
 
+def is_lambda_environment() -> bool:
+    """Is the process running in an AWS Lambda environment?"""
+    return "AWS_LAMBDA_FUNCTION_NAME" in os.environ
+
+
 def is_genai_content_extraction_opted_out() -> bool:
     """Has the user opted out of GenAI content extraction from spans?"""
     return os.environ.get(AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT, "false").lower() == "true"
