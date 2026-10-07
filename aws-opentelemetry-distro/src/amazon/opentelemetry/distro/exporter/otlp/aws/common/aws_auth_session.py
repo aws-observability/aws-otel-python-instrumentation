@@ -128,10 +128,9 @@ class AwsAuthSession(requests.Session):
             try:
                 signer.add_auth(request)
 
-                if headers is None:
-                    headers = {}
-
-                headers.update(dict(request.headers))
+                # Copy rather than mutate: the upstream OTLP HTTP client passes the same headers
+                # dict on every request, so signing headers must not leak into it.
+                headers = {**(headers or {}), **dict(request.headers)}
 
             except Exception as signing_error:  # pylint: disable=broad-except
                 _logger.error("Failed to sign request: %s", signing_error)

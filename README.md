@@ -105,6 +105,11 @@ CREWAI_DISABLE_TELEMETRY=true</code></pre>
           <p>Redaction occurs in-process within the agent, before telemetry is exported. This may affect other integrations that rely on these attribute values.</p>
         </blockquote>
         <br>
+        <blockquote>
+          <p>[!NOTE]</p>
+          <p>For framework-specific span attributes to redact, refer to the corresponding instrumentation README linked above.</p>
+        </blockquote>
+        <br>
       </td>
     </tr>
     <tr>

@@ -13,6 +13,7 @@ from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
 _LOG = logging.getLogger(__name__)
 
 _SESSION_MODULE = "mcp.shared.session"
+_CLIENT_SESSION_MODULE = "mcp.client.session"
 _SERVER_MODULE = "mcp.server.lowlevel.server"
 _STDIO_MODULE = "mcp.client.stdio"
 _HTTP_MODULE = "mcp.client.streamable_http"
@@ -47,6 +48,7 @@ class McpInstrumentor(BaseInstrumentor):
 
         _LOG.debug("Instrument MCP client-side session methods.")
 
+        try_wrap(_CLIENT_SESSION_MODULE, "ClientSession.__init__", self._client_wrapper.wrap_client_session_init)
         try_wrap(_SESSION_MODULE, "BaseSession.send_request", self._client_wrapper.wrap_session_send)
         try_wrap(_SESSION_MODULE, "BaseSession.send_notification", self._client_wrapper.wrap_session_send)
 
@@ -98,11 +100,13 @@ class McpInstrumentor(BaseInstrumentor):
     def _uninstrument(self, **kwargs: Any) -> None:  # pylint: disable=no-self-use
         try:
             # pylint: disable=import-outside-toplevel
+            from mcp.client import session as client_session
             from mcp.client import sse, stdio, streamable_http
             from mcp.server.fastmcp import server as fastmcp_server
             from mcp.server.lowlevel import server
             from mcp.shared import session
 
+            try_unwrap(client_session.ClientSession, "__init__")
             try_unwrap(session.BaseSession, "send_request")
             try_unwrap(session.BaseSession, "send_notification")
             try_unwrap(server.Server, "_handle_request")

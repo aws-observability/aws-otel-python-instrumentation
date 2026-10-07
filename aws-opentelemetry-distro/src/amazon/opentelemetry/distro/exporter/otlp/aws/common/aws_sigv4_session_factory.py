@@ -24,10 +24,13 @@ module path substrings ``trace_exporter`` / ``_log_exporter`` /
 Per-signal signing service resolution (highest priority first):
     1. ``AWS_SIGV4_SERVICE`` (explicit user override; applies to all signals)
     2. Inferred from the matched signal's OTLP endpoint URL:
-       - ``https://xray.<region>.amazonaws.com/v1/traces``         -> ``xray``
-       - ``https://logs.<region>.amazonaws.com/v1/logs``           -> ``logs``
-       - ``https://monitoring.<region>.amazonaws.com/v1/metrics``  -> ``monitoring``
-       - host contains ``cloudwatch``                              -> ``cloudwatch``
+       - ``https://xray.<region>.<dns-suffix>/v1/traces``         -> ``xray``
+       - ``https://logs.<region>.<dns-suffix>/v1/logs``           -> ``logs``
+       - ``https://monitoring.<region>.<dns-suffix>/v1/metrics``  -> ``monitoring``
+       - host contains ``cloudwatch``                             -> ``cloudwatch``
+       ``<dns-suffix>`` is the DNS suffix of any AWS partition, e.g.
+       ``amazonaws.com``, ``amazonaws.com.cn``, ``c2s.ic.gov``
+       (see ``_utils.AWS_DNS_SUFFIX_PATTERN``).
     3. No service resolved -> the factory returns an unsigned session and
        logs a warning, instead of silently signing under a default service
        that the AWS endpoint may reject.
@@ -45,7 +48,12 @@ from urllib.parse import urlparse
 
 import requests
 
-from amazon.opentelemetry.distro._utils import IS_BOTOCORE_INSTALLED, get_aws_region, get_aws_session
+from amazon.opentelemetry.distro._utils import (
+    AWS_DNS_SUFFIX_PATTERN,
+    IS_BOTOCORE_INSTALLED,
+    get_aws_region,
+    get_aws_session,
+)
 from amazon.opentelemetry.distro.exporter.otlp.aws.common._aws_http_headers import _OTLP_AWS_HTTP_HEADERS
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
 from opentelemetry.sdk.environment_variables import (
@@ -75,10 +83,10 @@ _SIGNAL_TABLE: Tuple[Tuple[str, str, str], ...] = (
 # by the configurator's auto-detection (AWS_TRACES_OTLP_ENDPOINT_PATTERN /
 # AWS_LOGS_OTLP_ENDPOINT_PATTERN) so the two paths agree on what counts as an
 # AWS endpoint.
-_AWS_TRACES_OTLP_ENDPOINT_PATTERN = re.compile(r"https://xray\.([a-z0-9-]+)\.amazonaws\.com(?:\.cn)?/v1/traces$")
-_AWS_LOGS_OTLP_ENDPOINT_PATTERN = re.compile(r"https://logs\.([a-z0-9-]+)\.amazonaws\.com(?:\.cn)?/v1/logs$")
+_AWS_TRACES_OTLP_ENDPOINT_PATTERN = re.compile(rf"https://xray\.([a-z0-9-]+)\.{AWS_DNS_SUFFIX_PATTERN}/v1/traces$")
+_AWS_LOGS_OTLP_ENDPOINT_PATTERN = re.compile(rf"https://logs\.([a-z0-9-]+)\.{AWS_DNS_SUFFIX_PATTERN}/v1/logs$")
 _AWS_METRICS_OTLP_ENDPOINT_PATTERN = re.compile(
-    r"https://monitoring\.([a-z0-9-]+)\.amazonaws\.com(?:\.cn)?/v1/metrics$"
+    rf"https://monitoring\.([a-z0-9-]+)\.{AWS_DNS_SUFFIX_PATTERN}/v1/metrics$"
 )
 _INFERENCE_RULES = (
     (lambda endpoint, host: bool(_AWS_TRACES_OTLP_ENDPOINT_PATTERN.match(endpoint)), "xray"),
