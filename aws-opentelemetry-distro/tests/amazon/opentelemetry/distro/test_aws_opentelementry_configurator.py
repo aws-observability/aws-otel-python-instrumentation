@@ -8,6 +8,8 @@ import time
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
+from requests import Session
+
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_LOCAL_SERVICE, AWS_SERVICE_TYPE
 from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSampler
 from amazon.opentelemetry.distro.attribute_propagating_span_processor import AttributePropagatingSpanProcessor
@@ -1554,10 +1556,13 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         try:
             result = executor(default_exporter, *args)
             self.assertIsInstance(result, expected_exporter_type)
-            # Upstream only uses a requests.Session when one is passed in; otherwise it uses a urllib3 transport.
+            # Upstream always wraps the exporter in a requests-backed transport, creating its own
+            # Session when none is passed in. expected_session=None therefore means "unsigned":
+            # a plain Session rather than our SigV4-signing AwsAuthSession.
             transport_session = getattr(result._client._transport, "_session", None)
             if expected_session is None:
-                self.assertIsNone(transport_session)
+                self.assertIsInstance(transport_session, Session)
+                self.assertNotIsInstance(transport_session, AwsAuthSession)
             else:
                 self.assertIsInstance(transport_session, expected_session)
             self.assertEqual(result._compression.value, expected_compression.value)
