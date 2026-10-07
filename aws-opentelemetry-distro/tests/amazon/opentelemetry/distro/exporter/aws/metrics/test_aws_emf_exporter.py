@@ -3,26 +3,21 @@
 
 import json
 import os
+import sys
+from contextlib import redirect_stdout
+from io import StringIO
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
-from amazon.opentelemetry.distro.aws_opentelemetry_configurator import _init_metrics
-from amazon.opentelemetry.distro.exporter.aws.metrics.aws_emf_exporter import AwsEmfExporter, _maybe_create_emf_exporter
-from amazon.opentelemetry.distro.exporter.aws.metrics.console_emf_exporter import ConsoleEmfExporter
+from amazon.opentelemetry.distro import _utils
+from amazon.opentelemetry.distro.exporter.aws.metrics.aws_emf_exporter import AwsEmfExporter
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs._log_header_config import fetch_otlp_logs_header
-from amazon.opentelemetry.distro.scope_based_exporter import ScopeBasedPeriodicExportingMetricReader
-from amazon.opentelemetry.distro.scope_based_filtering_view import ScopeBasedRetainingView
-from opentelemetry.environment_variables import OTEL_METRICS_EXPORTER
-from opentelemetry.sdk._configuration import _get_exporter_names, _import_exporters
 from opentelemetry.sdk.environment_variables import OTEL_EXPORTER_OTLP_LOGS_HEADERS
-from opentelemetry.sdk.metrics.export import ConsoleMetricExporter, InMemoryMetricReader, MetricExportResult
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import MetricExportResult, MetricsData, PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource
 
-EMF_MODULE = "amazon.opentelemetry.distro.exporter.aws.metrics.aws_emf_exporter"
-CONFIGURATOR_MODULE = "amazon.opentelemetry.distro.aws_opentelemetry_configurator"
-CLOUDWATCH_EXPORTER = (
-    "amazon.opentelemetry.distro.exporter.aws.metrics.aws_cloudwatch_emf_exporter.AwsCloudWatchEmfExporter"
-)
+CLOUDWATCH_HEADERS = "x-aws-log-group=test-group,x-aws-log-stream=test-stream,x-aws-metric-namespace=test-namespace"
 
 
 class TestAwsEmfExporter(TestCase):
@@ -33,165 +28,193 @@ class TestAwsEmfExporter(TestCase):
         fetch_otlp_logs_header.cache_clear()
         self.addCleanup(fetch_otlp_logs_header.cache_clear)
 
-    def test_lambda_stdout_does_not_require_botocore(self):
-        os.environ["AWS_LAMBDA_FUNCTION_NAME"] = "test-function"
-        for headers, namespace in (("", "default"), ("x-aws-metric-namespace=test", "test")):
-            with self.subTest(headers=headers):
-                fetch_otlp_logs_header.cache_clear()
-                os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = headers
-                with patch(f"{EMF_MODULE}.get_aws_session") as get_session, self.assertNoLogs(
-                    "amazon.opentelemetry.distro", level="WARNING"
-                ):
-                    exporter = _maybe_create_emf_exporter()
-                self.assertIsInstance(exporter, ConsoleEmfExporter)
-                self.assertEqual(exporter.namespace, namespace)
-                get_session.assert_not_called()
+        self.logs_client = MagicMock()
+        self.logs_client.put_log_events.return_value = {}
+        client = patch("botocore.session.Session.create_client", return_value=self.logs_client)
+        self.create_client = client.start()
+        self.addCleanup(client.stop)
+        self.exporter = None
+        self.provider = None
+        self.meter = None
+        self.output = None
+        self.addCleanup(self.shutdown_provider)
 
-    def test_valid_headers_select_cloudwatch_on_lambda_and_elsewhere(self):
-        os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = (
-            "x-aws-log-group=test-group,x-aws-log-stream=test-stream,x-aws-metric-namespace=test"
+    def init_provider(self):
+        self.output = StringIO()
+        self.exporter = AwsEmfExporter()
+        self.assertTrue(self.exporter.enabled)
+        self.provider = MeterProvider(
+            resource=Resource.get_empty(),
+            metric_readers=[PeriodicExportingMetricReader(self.exporter, export_interval_millis=600000)],
         )
-        for is_lambda in (False, True):
-            with self.subTest(is_lambda=is_lambda):
-                if is_lambda:
-                    os.environ["AWS_LAMBDA_FUNCTION_NAME"] = "test-function"
-                with patch(f"{EMF_MODULE}.get_aws_session") as get_session, patch(CLOUDWATCH_EXPORTER) as cloudwatch:
-                    self.assertIs(_maybe_create_emf_exporter(), cloudwatch.return_value)
-                    cloudwatch.assert_called_once_with(
-                        session=get_session.return_value,
-                        namespace="test",
-                        log_group_name="test-group",
-                        log_stream_name="test-stream",
-                    )
+        self.meter = self.provider.get_meter("test")
 
-    def test_incomplete_destination_disables_cloudwatch(self):
-        for headers in ("", "x-aws-log-group=test-group", "x-aws-log-stream=test-stream"):
+    def shutdown_provider(self):
+        if self.provider is not None:
+            provider = self.provider
+            self.provider = None
+            provider.shutdown()
+
+    def export_counter(self, flush=True):
+        self.init_provider()
+        with redirect_stdout(self.output):
+            self.meter.create_counter("test_counter").add(7)
+            if flush:
+                self.assertTrue(self.provider.force_flush())
+            self.shutdown_provider()
+        return [json.loads(line) for line in self.output.getvalue().splitlines()]
+
+    def assert_counter(self, records, namespace):
+        matching = [record for record in records if record.get("test_counter") == 7]
+        self.assertTrue(matching)
+        self.assertEqual(matching[0]["_aws"]["CloudWatchMetrics"][0]["Namespace"], namespace)
+
+    def assert_cloudwatch_counter(self):
+        requests = [call.kwargs for call in self.logs_client.put_log_events.call_args_list]
+        self.assertTrue(requests)
+        for request in requests:
+            self.assertEqual(request["logGroupName"], "test-group")
+            self.assertEqual(request["logStreamName"], "test-stream")
+        records = [json.loads(event["message"]) for request in requests for event in request["logEvents"]]
+        self.assert_counter(records, "test-namespace")
+
+    def assert_disabled(self, exporter):
+        self.assertFalse(exporter.enabled)
+        self.assertEqual(exporter.export(MetricsData(resource_metrics=[])), MetricExportResult.FAILURE)
+        self.assertTrue(exporter.force_flush())
+        self.assertTrue(exporter.shutdown())
+        self.logs_client.put_log_events.assert_not_called()
+
+    def test_when_otlp_logs_headers_are_missing_in_lambda_uses_console_exporter(self):
+        os.environ["AWS_LAMBDA_FUNCTION_NAME"] = "test-function"
+        for headers in (None, ""):
+            with self.subTest(headers=headers):
+                fetch_otlp_logs_header.cache_clear()
+                if headers is None:
+                    os.environ.pop(OTEL_EXPORTER_OTLP_LOGS_HEADERS, None)
+                else:
+                    os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = headers
+                self.assert_counter(self.export_counter(), "default")
+        self.create_client.assert_not_called()
+
+    def test_when_otlp_logs_headers_are_incomplete_in_lambda_uses_console_exporter(self):
+        os.environ["AWS_LAMBDA_FUNCTION_NAME"] = "test-function"
+        for headers in ("x-aws-log-group=test-group", "x-aws-log-stream=test-stream"):
             with self.subTest(headers=headers):
                 fetch_otlp_logs_header.cache_clear()
                 os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = headers
-                with patch(f"{EMF_MODULE}.get_aws_session") as get_session, patch(
-                    CLOUDWATCH_EXPORTER
-                ) as cloudwatch, self.assertLogs(EMF_MODULE, level="WARNING") as logs:
-                    self.assertIsNone(_maybe_create_emf_exporter())
-                    get_session.assert_not_called()
-                    cloudwatch.assert_not_called()
+                self.assert_counter(self.export_counter(), "default")
+        self.create_client.assert_not_called()
+
+    def test_when_otlp_logs_headers_are_valid_in_lambda_uses_cloudwatchlogs_exporter(self):
+        os.environ["AWS_LAMBDA_FUNCTION_NAME"] = "test-function"
+        os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = CLOUDWATCH_HEADERS
+        self.assertEqual(self.export_counter(), [])
+        self.assert_cloudwatch_counter()
+        self.create_client.assert_called_once_with("logs", region_name=None)
+
+    def test_when_otlp_logs_headers_are_missing_in_non_lambda_exporter_is_disabled(self):
+        for headers in (None, ""):
+            with self.subTest(headers=headers):
+                fetch_otlp_logs_header.cache_clear()
+                if headers is None:
+                    os.environ.pop(OTEL_EXPORTER_OTLP_LOGS_HEADERS, None)
+                else:
+                    os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = headers
+                with self.assertLogs(level="WARNING") as logs:
+                    exporter = AwsEmfExporter()
+                self.assert_disabled(exporter)
+                self.create_client.assert_not_called()
                 self.assertEqual(len(logs.output), 1)
                 self.assertIn(
                     "OTEL_EXPORTER_OTLP_LOGS_HEADERS to include x-aws-log-group and x-aws-log-stream", logs.output[0]
                 )
 
-    def test_missing_botocore_disables_cloudwatch(self):
-        os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = "x-aws-log-group=test,x-aws-log-stream=test"
-        with patch(f"{EMF_MODULE}.get_aws_session", return_value=None), self.assertLogs(
-            EMF_MODULE, level="WARNING"
-        ) as logs:
-            self.assertIsNone(_maybe_create_emf_exporter())
+    def test_when_otlp_logs_headers_are_incomplete_in_non_lambda_exporter_is_disabled(self):
+        for headers in ("x-aws-log-group=test-group", "x-aws-log-stream=test-stream"):
+            with self.subTest(headers=headers):
+                fetch_otlp_logs_header.cache_clear()
+                os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = headers
+                with self.assertLogs(level="WARNING") as logs:
+                    exporter = AwsEmfExporter()
+                self.assert_disabled(exporter)
+                self.create_client.assert_not_called()
+                self.assertEqual(len(logs.output), 1)
+                self.assertIn(
+                    "OTEL_EXPORTER_OTLP_LOGS_HEADERS to include x-aws-log-group and x-aws-log-stream", logs.output[0]
+                )
+
+    def test_when_otlp_logs_headers_are_valid_in_non_lambda_uses_cloudwatchlogs_exporter(self):
+        os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = CLOUDWATCH_HEADERS
+        self.assertEqual(self.export_counter(), [])
+        self.assert_cloudwatch_counter()
+        self.create_client.assert_called_once_with("logs", region_name=None)
+
+    def test_when_metric_namespace_is_set_in_lambda_console_exporter_uses_configured_namespace(self):
+        os.environ["AWS_LAMBDA_FUNCTION_NAME"] = "test-function"
+        os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = "x-aws-metric-namespace=test-namespace"
+        self.assert_counter(self.export_counter(), "test-namespace")
+        self.create_client.assert_not_called()
+
+    def test_when_botocore_is_not_installed_in_lambda_uses_console_exporter(self):
+        os.environ["AWS_LAMBDA_FUNCTION_NAME"] = "test-function"
+        for headers, namespace in (("", "default"), ("x-aws-metric-namespace=test", "test")):
+            with self.subTest(headers=headers):
+                fetch_otlp_logs_header.cache_clear()
+                os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = headers
+                with patch.object(_utils, "IS_BOTOCORE_INSTALLED", False), self.assertNoLogs(level="WARNING"):
+                    records = self.export_counter()
+                self.assert_counter(records, namespace)
+        self.create_client.assert_not_called()
+
+    def test_when_botocore_is_not_installed_in_non_lambda_exporter_is_disabled(self):
+        os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = CLOUDWATCH_HEADERS
+        with patch.object(_utils, "IS_BOTOCORE_INSTALLED", False), self.assertLogs(level="WARNING") as logs:
+            exporter = AwsEmfExporter()
+        self.assert_disabled(exporter)
+        self.create_client.assert_not_called()
+        self.assertEqual(len(logs.output), 1)
         self.assertIn("botocore is not installed. EMF exporter requires botocore", logs.output[0])
 
-    def test_destination_initialization_failure_is_nonfatal(self):
-        for error in (RuntimeError("invalid headers"), ImportError("cannot import CloudWatch exporter")):
-            with self.subTest(error=error):
-                with patch(f"{EMF_MODULE}.fetch_otlp_logs_header", side_effect=error), self.assertLogs(
-                    EMF_MODULE, level="ERROR"
-                ) as logs:
-                    exporter = AwsEmfExporter()
-                self.assertFalse(exporter.enabled)
-                self.assertEqual(exporter.export(MagicMock()), MetricExportResult.FAILURE)
-                self.assertTrue(exporter.force_flush())
-                self.assertTrue(exporter.shutdown())
-                self.assertIn("Failed to create EMF exporter:", logs.output[0])
-
-    def test_destination_import_failure_is_nonfatal(self):
-        os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = "x-aws-log-group=test,x-aws-log-stream=test"
-        with self.assertLogs(EMF_MODULE, level="ERROR"), patch(f"{EMF_MODULE}.get_aws_session"), patch(
-            "builtins.__import__", side_effect=ImportError("cannot import CloudWatch exporter")
-        ):
-            self.assertIsNone(_maybe_create_emf_exporter())
-
-    def test_exporter_preserves_destination_preferences_and_lifecycle(self):
-        destination = ConsoleEmfExporter()
-        destination.export = MagicMock(return_value=MetricExportResult.SUCCESS)
-        destination.force_flush = MagicMock(return_value=True)
-        destination.shutdown = MagicMock(return_value=True)
-        with patch(f"{EMF_MODULE}._maybe_create_emf_exporter", return_value=destination):
+    def test_when_cloudwatchlogs_exporter_initialization_fails_in_non_lambda_exporter_is_disabled(self):
+        os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = CLOUDWATCH_HEADERS
+        self.create_client.side_effect = RuntimeError("Test exception")
+        with self.assertLogs(level="ERROR") as logs:
             exporter = AwsEmfExporter()
-        # pylint: disable=protected-access
-        self.assertEqual(exporter._preferred_temporality, destination._preferred_temporality)
-        self.assertEqual(exporter._preferred_aggregation, destination._preferred_aggregation)
-        metrics = MagicMock()
-        self.assertEqual(exporter.export(metrics, timeout_millis=123), MetricExportResult.SUCCESS)
-        self.assertTrue(exporter.force_flush(timeout_millis=456))
-        self.assertTrue(exporter.shutdown(timeout_millis=789))
-        destination.export.assert_called_once_with(metrics, timeout_millis=123)
-        destination.force_flush.assert_called_once_with(timeout_millis=456)
-        destination.shutdown.assert_called_once_with(timeout_millis=789)
+        self.assert_disabled(exporter)
+        self.assertEqual(len(logs.output), 1)
+        self.assertIn("Failed to create EMF exporter: Test exception", logs.output[0])
 
-    def test_entry_point_discovers_single_and_mixed_exporters_without_mutating_environment(self):
-        for value in ("awsemf", "console,awsemf"):
-            with self.subTest(exporters=value):
-                os.environ[OTEL_METRICS_EXPORTER] = value
-                _, exporters, _ = _import_exporters([], _get_exporter_names("metrics"), [])
-                self.assertIs(exporters["awsemf"], AwsEmfExporter)
-                self.assertEqual(set(exporters), set(value.split(",")))
-                self.assertEqual(os.environ[OTEL_METRICS_EXPORTER], value)
+    def test_when_cloudwatchlogs_exporter_import_fails_in_non_lambda_exporter_is_disabled(self):
+        os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = CLOUDWATCH_HEADERS
+        cloudwatch_module = "amazon.opentelemetry.distro.exporter.aws.metrics.aws_cloudwatch_emf_exporter"
+        with self.assertLogs(level="ERROR") as logs, patch.dict(sys.modules, {cloudwatch_module: None}):
+            exporter = AwsEmfExporter()
+        self.assert_disabled(exporter)
+        self.create_client.assert_not_called()
+        self.assertEqual(len(logs.output), 1)
+        self.assertIn("Failed to create EMF exporter:", logs.output[0])
+        self.assertIn(cloudwatch_module, logs.output[0])
 
-    def test_registered_exporter_sends_lambda_metrics_to_stdout(self):
+    def test_when_metrics_are_flushed_in_lambda_console_exporter_emits_deltas_and_exponential_histograms(self):
         os.environ["AWS_LAMBDA_FUNCTION_NAME"] = "test-function"
-        os.environ[OTEL_METRICS_EXPORTER] = "awsemf"
-        _, exporters, _ = _import_exporters([], _get_exporter_names("metrics"), [])
-        with patch(f"{CONFIGURATOR_MODULE}.set_meter_provider") as set_provider, patch("builtins.print") as output:
-            _init_metrics(exporters, Resource.get_empty())
-            provider = set_provider.call_args.args[0]
-            try:
-                provider.get_meter("test").create_counter("test_counter").add(7)
-                provider.force_flush()
-                records = [json.loads(call.args[0]) for call in output.call_args_list]
-                self.assertTrue(any(record.get("test_counter") == 7 for record in records))
-            finally:
-                provider.shutdown()
-        self.assertEqual(os.environ[OTEL_METRICS_EXPORTER], "awsemf")
+        self.init_provider()
+        with redirect_stdout(self.output):
+            counter = self.meter.create_counter("test_counter")
+            histogram = self.meter.create_histogram("test_histogram")
+            for value in (7, 3):
+                counter.add(value)
+                histogram.record(1)
+                histogram.record(2)
+                self.assertTrue(self.provider.force_flush())
+            self.shutdown_provider()
+        records = [json.loads(line) for line in self.output.getvalue().splitlines()]
+        self.assertEqual([record["test_counter"] for record in records if record.get("test_counter", 0) > 0], [7, 3])
+        histograms = [record["test_histogram"] for record in records if "test_histogram" in record]
+        self.assertTrue(histograms)
+        self.assertTrue(all("Values" in histogram and "Counts" in histogram for histogram in histograms))
 
-    def test_unconfigured_exporter_does_not_create_a_metric_reader(self):
-        with patch(f"{EMF_MODULE}.get_aws_session", return_value=None), patch(
-            f"{CONFIGURATOR_MODULE}.set_meter_provider"
-        ) as set_provider:
-            _init_metrics({"awsemf": AwsEmfExporter}, Resource.get_empty())
-        provider = set_provider.call_args.args[0]
-        self.addCleanup(provider.shutdown)
-        # pylint: disable=protected-access
-        self.assertEqual(provider._metric_readers, [])
-
-    def test_runtime_view_selection_and_reader_order_are_preserved(self):
-        os.environ["AWS_LAMBDA_FUNCTION_NAME"] = "test-function"
-        os.environ["OTEL_AWS_APPLICATION_SIGNALS_ENABLED"] = "true"
-        os.environ["OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED"] = "true"
-        for extra_exporter in (False, True):
-            with self.subTest(extra_exporter=extra_exporter):
-                exporters = {"awsemf": AwsEmfExporter}
-                if extra_exporter:
-                    exporters["console"] = ConsoleMetricExporter
-                with patch(f"{CONFIGURATOR_MODULE}.set_meter_provider") as set_provider, patch(
-                    f"{CONFIGURATOR_MODULE}.ApplicationSignalsExporterProvider.create_exporter",
-                    return_value=ConsoleMetricExporter(),
-                ):
-                    _init_metrics(exporters, Resource.get_empty())
-                provider = set_provider.call_args.args[0]
-                try:
-                    # pylint: disable=protected-access
-                    readers = provider._metric_readers
-                    self.assertIsInstance(readers[-1]._exporter, AwsEmfExporter)
-                    self.assertIsInstance(readers[-2], ScopeBasedPeriodicExportingMetricReader)
-                    has_runtime_filter = any(
-                        isinstance(view, ScopeBasedRetainingView) for view in provider._sdk_config.views
-                    )
-                    self.assertEqual(has_runtime_filter, not extra_exporter)
-                finally:
-                    provider.shutdown()
-
-    def test_registered_metric_reader_keeps_its_existing_initialization_path(self):
-        with patch(f"{CONFIGURATOR_MODULE}.set_meter_provider") as set_provider:
-            _init_metrics({"test_reader": InMemoryMetricReader}, Resource.get_empty())
-        provider = set_provider.call_args.args[0]
-        self.addCleanup(provider.shutdown)
-        # pylint: disable=protected-access
-        self.assertIsInstance(provider._metric_readers[0], InMemoryMetricReader)
+    def test_when_provider_is_shutdown_in_non_lambda_cloudwatchlogs_exporter_flushes_metrics(self):
+        os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = CLOUDWATCH_HEADERS
+        self.assertEqual(self.export_counter(flush=False), [])
+        self.assert_cloudwatch_counter()

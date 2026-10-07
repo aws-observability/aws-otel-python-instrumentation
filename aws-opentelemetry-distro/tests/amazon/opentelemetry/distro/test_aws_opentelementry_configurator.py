@@ -52,6 +52,7 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
 )
 from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetryDistro
 from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetricsProcessor
+from amazon.opentelemetry.distro.exporter.aws.metrics.aws_emf_exporter import AwsEmfExporter
 from amazon.opentelemetry.distro.exporter.console.logs.compact_console_log_exporter import (
     CompactConsoleLogRecordExporter,
 )
@@ -81,11 +82,12 @@ from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExp
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.metrics import get_meter_provider
 from opentelemetry.processor.baggage import BaggageSpanProcessor
+from opentelemetry.sdk._configuration import _get_exporter_names, _import_exporters
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor, ConsoleLogRecordExporter
 from opentelemetry.sdk.environment_variables import OTEL_TRACES_SAMPLER, OTEL_TRACES_SAMPLER_ARG
 from opentelemetry.sdk.metrics import Counter
 from opentelemetry.sdk.metrics._internal.export import PeriodicExportingMetricReader
-from opentelemetry.sdk.metrics.export import AggregationTemporality
+from opentelemetry.sdk.metrics.export import AggregationTemporality, ConsoleMetricExporter
 from opentelemetry.sdk.metrics.view import LastValueAggregation
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import Span, SpanProcessor, Tracer, TracerProvider
@@ -151,6 +153,24 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
     def tearDown(self):
         os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
         os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", None)
+
+    def test_when_metrics_exporter_is_set_loads_expected_exporters(self):
+        original_exporter = os.environ.get(OTEL_METRICS_EXPORTER)
+        try:
+            for env, expected in (
+                ("console", [ConsoleMetricExporter]),
+                ("awsemf", [AwsEmfExporter]),
+                ("console,awsemf", [ConsoleMetricExporter, AwsEmfExporter]),
+            ):
+                with self.subTest(env=env, expected=expected):
+                    os.environ[OTEL_METRICS_EXPORTER] = env
+                    _, metric_exporters, _ = _import_exporters([], _get_exporter_names("metrics"), [])
+                    self.assertEqual(list(metric_exporters.values()), expected)
+        finally:
+            if original_exporter is None:
+                os.environ.pop(OTEL_METRICS_EXPORTER, None)
+            else:
+                os.environ[OTEL_METRICS_EXPORTER] = original_exporter
 
     # The probability of this passing once without correct IDs is low, 20 times is inconceivable.
     def test_provide_generate_xray_ids(self):
