@@ -12,6 +12,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- fix(mcp): inject client transport info into `ClientSession` to preserve it across task and thread boundaries
+  ([#921](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/921))
 - feat: recognize and SigV4-sign X-Ray, CloudWatch Logs, and CloudWatch Metrics OTLP endpoints in every AWS
   partition: GovCloud, European Sovereign Cloud (`amazonaws.eu`), ISO (`c2s.ic.gov`), ISO-B (`sc2s.sgov.gov`),
   ISO-E (`cloud.adc-e.uk`), and ISO-F (`csp.hci.ic.gov`), in addition to commercial and China. Agent observability
