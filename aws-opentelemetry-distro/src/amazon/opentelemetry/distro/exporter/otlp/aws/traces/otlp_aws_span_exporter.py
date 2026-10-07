@@ -46,18 +46,20 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
         self._logger_provider = logger_provider
         self._llo_handler = None
 
+        # The upstream client sends its own User-Agent as a per-request header, which takes precedence
+        # over session headers, so the ADOT User-Agent must be passed in via ``headers``.
+        self._session = AwsAuthSession(session=session, aws_region=self._aws_region, service="xray")
         OTLPSpanExporter.__init__(
             self,
             endpoint,
             certificate_file,
             client_key_file,
             client_certificate_file,
-            headers,
+            {**(headers or {}), **_OTLP_AWS_HTTP_HEADERS},
             timeout,
             compression,
-            session=AwsAuthSession(session=session, aws_region=self._aws_region, service="xray"),
+            session=self._session,
         )
-        self._session.headers.update(_OTLP_AWS_HTTP_HEADERS)
 
     def _ensure_llo_handler(self):
         """Lazily initialize LLO handler when needed to avoid initialization order issues"""
