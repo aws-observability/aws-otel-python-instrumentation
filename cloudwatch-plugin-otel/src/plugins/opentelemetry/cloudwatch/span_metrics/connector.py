@@ -180,8 +180,17 @@ class SpanMetricsConnector(SpanProcessor):
         self._copy(attributes, span_attributes, MESSAGING_OPERATION_TYPE)
         self._copy(attributes, span_attributes, MESSAGING_CONSUMER_GROUP_NAME)
         # Peer (https://opentelemetry.io/docs/specs/semconv/registry/attributes/server/)
-        self._copy(attributes, span_attributes, SERVER_ADDRESS, NET_PEER_NAME, NET_HOST_NAME)
-        self._copy(attributes, span_attributes, SERVER_PORT, NET_PEER_PORT, NET_HOST_PORT)
+        # server.* always describes the server, but the legacy net.* fallback depends on span kind:
+        # net.peer.* is the remote end of the connection and net.host.* the local end. On SERVER spans
+        # the server is therefore net.host.*, while net.peer.* is the client (net.peer.port is its
+        # ephemeral port), which must never become a dimension. See the HTTP semconv migration guide:
+        # https://opentelemetry.io/docs/specs/semconv/non-normative/http-migration/
+        if span.kind == SpanKind.SERVER:
+            self._copy(attributes, span_attributes, SERVER_ADDRESS, NET_HOST_NAME)
+            self._copy(attributes, span_attributes, SERVER_PORT, NET_HOST_PORT)
+        else:
+            self._copy(attributes, span_attributes, SERVER_ADDRESS, NET_PEER_NAME, NET_HOST_NAME)
+            self._copy(attributes, span_attributes, SERVER_PORT, NET_PEER_PORT, NET_HOST_PORT)
         # GenAI (https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-metrics/)
         self._copy(attributes, span_attributes, GEN_AI_REQUEST_MODEL)
         self._copy(attributes, span_attributes, GEN_AI_PROVIDER_NAME)
