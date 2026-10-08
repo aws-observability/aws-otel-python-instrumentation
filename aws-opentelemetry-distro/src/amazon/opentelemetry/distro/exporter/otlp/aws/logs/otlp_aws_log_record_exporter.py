@@ -56,7 +56,9 @@ class OTLPAwsLogRecordExporter(OTLPLogExporter):
             certificate_file,
             client_key_file,
             client_certificate_file,
-            headers,
+            # Payloads are always gzipped, so the header must say so even when a Content-Encoding header is configured
+            # through OTEL_EXPORTER_OTLP_*_HEADERS. Headers passed here take precedence over those env headers.
+            {**(headers or {}), "Content-Encoding": "gzip"},
             timeout,
             compression=Compression.Gzip,
             session=self._session,

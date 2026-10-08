@@ -73,7 +73,7 @@ class TestOTLPAwsLogsExporter(TestCase):
         data = kwargs.get("data", None)
 
         self.assertEqual(result, LogRecordExportResult.SUCCESS)
-        self.assertEqual(kwargs["headers"]["Content-Encoding"], "gzip")
+        self.assertEqual(CaseInsensitiveDict(kwargs["headers"])["Content-Encoding"], "gzip")
 
         # Gzip first 10 bytes are reserved for metadata headers:
         # https://www.loc.gov/preservation/digital/formats/fdd/fdd000599.shtml?loclr=blogsig
@@ -187,6 +187,26 @@ class TestOTLPAwsLogsExporter(TestCase):
         request_headers = mock_request.call_args.kwargs["headers"]
         self.assertEqual(request_headers["x-aws-log-group"], log_group)
         self.assertEqual(request_headers["x-aws-log-stream"], log_stream)
+
+    @patch.dict("os.environ", {"OTEL_EXPORTER_OTLP_LOGS_HEADERS": "Content-Encoding=deflate"})
+    @patch("requests.Session.request")
+    def test_content_encoding_header_matches_gzip_payload(self, mock_request):
+        mock_request.return_value = self.good_response
+        """Tests that a configured Content-Encoding header cannot mislabel the always-gzipped payload."""
+        for headers in (None, {"Content-Encoding": "deflate"}):
+            with self.subTest(headers=headers):
+                mock_request.reset_mock()
+                exporter = OTLPAwsLogRecordExporter(
+                    session=get_aws_session(), aws_region="us-east-1", endpoint=self._ENDPOINT, headers=headers
+                )
+
+                result = exporter.export(self.logs)
+
+                self.assertEqual(result, LogRecordExportResult.SUCCESS)
+                _, kwargs = mock_request.call_args
+                encodings = [v for k, v in kwargs["headers"].items() if k.lower() == "content-encoding"]
+                self.assertEqual(encodings, ["gzip"])
+                self.assertEqual(kwargs["data"][0:2], b"\x1f\x8b")
 
     @staticmethod
     def generate_test_log_data(count=5):
