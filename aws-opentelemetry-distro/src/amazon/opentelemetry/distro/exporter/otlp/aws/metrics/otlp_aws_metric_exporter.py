@@ -9,7 +9,8 @@ from botocore.session import Session
 from amazon.opentelemetry.distro.exporter.otlp.aws.common._aws_http_headers import _OTLP_AWS_HTTP_HEADERS
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
 from opentelemetry.exporter.otlp.proto.http import Compression
-from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
+from opentelemetry.exporter.otlp.proto.http._common import _resolve_endpoint
+from opentelemetry.exporter.otlp.proto.http.metric_exporter import DEFAULT_METRICS_EXPORT_PATH, OTLPMetricExporter
 from opentelemetry.sdk.environment_variables import OTEL_EXPORTER_OTLP_METRICS_ENDPOINT
 from opentelemetry.sdk.metrics.export import AggregationTemporality
 from opentelemetry.sdk.metrics.view import Aggregation
@@ -53,6 +54,7 @@ class OTLPAwsMetricExporter(OTLPMetricExporter):
         #
         # The upstream client sends its own User-Agent as a per-request header, which takes precedence
         # over session headers, so the ADOT User-Agent must be passed in via ``headers``.
+        endpoint = endpoint or _resolve_endpoint(OTEL_EXPORTER_OTLP_METRICS_ENDPOINT, DEFAULT_METRICS_EXPORT_PATH)
         self._session = AwsAuthSession(
             session=session,
             aws_region=aws_region,
@@ -60,7 +62,7 @@ class OTLPAwsMetricExporter(OTLPMetricExporter):
             or os.environ.get("OTEL_EXPORTER_OTLP_METRICS_SIGV4_SERVICE")
             or os.environ.get("OTEL_EXPORTER_OTLP_SIGV4_SERVICE")
             or "monitoring",
-            endpoint=endpoint or os.environ.get(OTEL_EXPORTER_OTLP_METRICS_ENDPOINT),
+            endpoint=endpoint,
         )
         self._aws_region = self._session._aws_region  # pylint: disable=protected-access
         OTLPMetricExporter.__init__(

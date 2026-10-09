@@ -8,7 +8,8 @@ from botocore.session import Session
 
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
 from opentelemetry.exporter.otlp.proto.http import Compression
-from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
+from opentelemetry.exporter.otlp.proto.http._common import _resolve_endpoint
+from opentelemetry.exporter.otlp.proto.http._log_exporter import DEFAULT_LOGS_EXPORT_PATH, OTLPLogExporter
 from opentelemetry.sdk.environment_variables import OTEL_EXPORTER_OTLP_LOGS_ENDPOINT
 
 
@@ -54,6 +55,7 @@ class OTLPAwsLogRecordExporter(OTLPLogExporter):
             else:
                 headers = log_headers
 
+        endpoint = endpoint or _resolve_endpoint(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, DEFAULT_LOGS_EXPORT_PATH)
         self._session = AwsAuthSession(
             session=session,
             aws_region=aws_region,
@@ -61,7 +63,7 @@ class OTLPAwsLogRecordExporter(OTLPLogExporter):
             or os.environ.get("OTEL_EXPORTER_OTLP_LOGS_SIGV4_SERVICE")
             or os.environ.get("OTEL_EXPORTER_OTLP_SIGV4_SERVICE")
             or "logs",
-            endpoint=endpoint or os.environ.get(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT),
+            endpoint=endpoint,
         )
         self._aws_region = self._session._aws_region  # pylint: disable=protected-access
         OTLPLogExporter.__init__(

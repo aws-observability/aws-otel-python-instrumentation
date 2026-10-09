@@ -340,6 +340,17 @@ class TestAwsExporterEntryPoints(TestCase):
                 self.assertEqual(exporter._aws_region, "us-east-2")
                 self.assertEqual(exporter._client._endpoint, f"https://collector.example.com/v1/{signal}")
 
+    def test_generic_aws_endpoint_region_matches_upstream_resolved_endpoint(self):
+        with patch.dict(os.environ, {"OTEL_EXPORTER_OTLP_ENDPOINT": "https://xray.us-west-2.amazonaws.com/base/"}):
+            for signal, _, exporter_class in _SIGNALS:
+                with self.subTest(signal=signal):
+                    exporter = exporter_class()
+                    self.addCleanup(exporter.shutdown)
+                    self.assertEqual(exporter._aws_region, "us-west-2")
+                    self.assertEqual(
+                        exporter._client._endpoint, f"https://xray.us-west-2.amazonaws.com/base/v1/{signal}"
+                    )
+
     def test_signing_service_precedence_in_exported_requests(self):
         response = requests.Response()
         response.status_code = 200
@@ -419,12 +430,11 @@ class TestAwsExporterEntryPoints(TestCase):
                 self.assertEqual(credentials.access_key, "test-access-key")
                 self.assertEqual(credentials.secret_key, "test-secret-key")
 
-    def test_auth_session_infers_generic_endpoint_region(self):
-        with patch.dict(os.environ, {"OTEL_EXPORTER_OTLP_ENDPOINT": "https://xray.us-west-2.amazonaws.com"}):
-            session = AwsAuthSession(service="xray")
-            self.addCleanup(session.close)
-            self.assertEqual(session._aws_region, "us-west-2")
-            self.assertIsInstance(session._session, Session)
+    def test_auth_session_infers_resolved_endpoint_region(self):
+        session = AwsAuthSession(service="xray", endpoint="https://xray.us-west-2.amazonaws.com/v1/traces")
+        self.addCleanup(session.close)
+        self.assertEqual(session._aws_region, "us-west-2")
+        self.assertIsInstance(session._session, Session)
 
     def test_auth_session_with_no_arguments_uses_environment_signing_service(self):
         with patch.dict(os.environ, {"OTEL_EXPORTER_OTLP_SIGV4_SERVICE": "logs", "AWS_REGION": "us-east-1"}):
