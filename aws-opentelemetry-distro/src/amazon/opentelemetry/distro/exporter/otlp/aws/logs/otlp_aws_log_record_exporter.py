@@ -59,7 +59,6 @@ class OTLPAwsLogRecordExporter(OTLPLogExporter):
             else:
                 headers = log_headers
 
-        endpoint = endpoint or _resolve_endpoint(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, DEFAULT_LOGS_EXPORT_PATH)
         self._session = AwsAuthSession(
             session=session,
             aws_region=aws_region,
@@ -67,7 +66,7 @@ class OTLPAwsLogRecordExporter(OTLPLogExporter):
             or os.environ.get(OTEL_EXPORTER_OTLP_LOGS_SIGV4_SERVICE)
             or os.environ.get(OTEL_EXPORTER_OTLP_SIGV4_SERVICE)
             or "logs",
-            endpoint=endpoint,
+            endpoint=endpoint or _resolve_endpoint(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, DEFAULT_LOGS_EXPORT_PATH),
         )
         self._aws_region = self._session._aws_region  # pylint: disable=protected-access
         OTLPLogExporter.__init__(

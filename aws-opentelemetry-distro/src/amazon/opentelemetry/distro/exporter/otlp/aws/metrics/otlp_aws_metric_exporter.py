@@ -58,7 +58,6 @@ class OTLPAwsMetricExporter(OTLPMetricExporter):
         #
         # The upstream client sends its own User-Agent as a per-request header, which takes precedence
         # over session headers, so the ADOT User-Agent must be passed in via ``headers``.
-        endpoint = endpoint or _resolve_endpoint(OTEL_EXPORTER_OTLP_METRICS_ENDPOINT, DEFAULT_METRICS_EXPORT_PATH)
         self._session = AwsAuthSession(
             session=session,
             aws_region=aws_region,
@@ -66,7 +65,7 @@ class OTLPAwsMetricExporter(OTLPMetricExporter):
             or os.environ.get(OTEL_EXPORTER_OTLP_METRICS_SIGV4_SERVICE)
             or os.environ.get(OTEL_EXPORTER_OTLP_SIGV4_SERVICE)
             or "monitoring",
-            endpoint=endpoint,
+            endpoint=endpoint or _resolve_endpoint(OTEL_EXPORTER_OTLP_METRICS_ENDPOINT, DEFAULT_METRICS_EXPORT_PATH),
         )
         self._aws_region = self._session._aws_region  # pylint: disable=protected-access
         OTLPMetricExporter.__init__(
