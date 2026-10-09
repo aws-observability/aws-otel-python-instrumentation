@@ -15,7 +15,6 @@ from botocore.session import Session
 
 from amazon.opentelemetry.distro._utils import AWS_DNS_SUFFIX_PATTERN, get_aws_session
 from amazon.opentelemetry.distro.patches._pip_system_certs_patches import apply_pip_system_certs_compatibility_patch
-from opentelemetry.sdk.environment_variables import OTEL_EXPORTER_OTLP_ENDPOINT
 
 _logger = logging.getLogger(__name__)
 
@@ -42,9 +41,8 @@ class AwsAuthSession(requests.Session):
         aws_region (str): The AWS region to use for signing (e.g., "us-east-1")
         service (str): The AWS service name for signing (e.g., "logs" or "xray")
         session (Session): Optional botocore session; defaults to the AWS credential chain.
-        endpoint (str): Optional OTLP endpoint used to infer the region when AWS region
-            environment variables are unset. Falls back to the generic OTLP
-            endpoint, then the AWS profile/session region.
+        endpoint (str): Optional resolved OTLP endpoint used to infer the region when
+            AWS region environment variables are unset.
     """
 
     def __init__(
@@ -65,8 +63,7 @@ class AwsAuthSession(requests.Session):
 
         aws_region = aws_region or os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
         if not aws_region:
-            configured_endpoint = endpoint or os.environ.get(OTEL_EXPORTER_OTLP_ENDPOINT, "")
-            host = urlparse(configured_endpoint).hostname or ""
+            host = urlparse(endpoint or "").hostname or ""
             match = re.fullmatch(rf"(?:xray|logs|monitoring)\.([a-z0-9-]+)\.{AWS_DNS_SUFFIX_PATTERN}", host)
             aws_region = match.group(1) if match else session.get_config_variable("region")
 

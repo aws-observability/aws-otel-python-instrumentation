@@ -13,7 +13,8 @@ from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session impor
 from amazon.opentelemetry.distro.llo_handler import LLOHandler
 from opentelemetry._logs import get_logger_provider
 from opentelemetry.exporter.otlp.proto.http import Compression
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.exporter.otlp.proto.http._common import _resolve_endpoint
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import DEFAULT_TRACES_EXPORT_PATH, OTLPSpanExporter
 from opentelemetry.sdk._logs import LoggerProvider
 from opentelemetry.sdk.environment_variables import OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
 from opentelemetry.sdk.trace import ReadableSpan
@@ -54,6 +55,7 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
 
         # The upstream client sends its own User-Agent as a per-request header, which takes precedence
         # over session headers, so the ADOT User-Agent must be passed in via ``headers``.
+        endpoint = endpoint or _resolve_endpoint(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, DEFAULT_TRACES_EXPORT_PATH)
         self._session = AwsAuthSession(
             session=session,
             aws_region=aws_region,
@@ -61,7 +63,7 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
             or os.environ.get("OTEL_EXPORTER_OTLP_TRACES_SIGV4_SERVICE")
             or os.environ.get("OTEL_EXPORTER_OTLP_SIGV4_SERVICE")
             or "xray",
-            endpoint=endpoint or os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT),
+            endpoint=endpoint,
         )
         self._aws_region = self._session._aws_region  # pylint: disable=protected-access
         OTLPSpanExporter.__init__(
