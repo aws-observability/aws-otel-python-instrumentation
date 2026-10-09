@@ -1,13 +1,16 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+import os
 from unittest import TestCase
 from unittest.mock import patch
 
 import requests
 from botocore.credentials import Credentials
+from botocore.session import Session
 
 from amazon.opentelemetry.distro._utils import get_aws_session
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
+from amazon.opentelemetry.distro.exporter.otlp.aws.environment_variables import OTEL_EXPORTER_OTLP_SIGV4_SERVICE
 
 AWS_OTLP_TRACES_ENDPOINT = "https://xray.us-east-1.amazonaws.com/v1/traces"
 AWS_OTLP_LOGS_ENDPOINT = "https://logs.us-east-1.amazonaws.com/v1/logs"
@@ -20,6 +23,21 @@ mock_credentials = Credentials(access_key="test_access_key", secret_key="test_se
 
 
 class TestAwsAuthSession(TestCase):
+    def setUp(self) -> None:
+        self.environment = patch.dict(
+            os.environ,
+            {
+                "AWS_ACCESS_KEY_ID": "test-access-key",
+                "AWS_SECRET_ACCESS_KEY": "test-secret-key",
+                "AWS_EC2_METADATA_DISABLED": "true",
+                "AWS_CONFIG_FILE": os.devnull,
+                "AWS_SHARED_CREDENTIALS_FILE": os.devnull,
+            },
+            clear=True,
+        )
+        self.environment.start()
+        self.addCleanup(self.environment.stop)
+
     @patch("requests.Session.request", return_value=requests.Response())
     @patch("botocore.session.Session.get_credentials", return_value=None)
     def test_aws_auth_session_no_credentials(self, _, mock_request):
@@ -213,9 +231,96 @@ class TestAwsAuthSession(TestCase):
             session.request("POST", AWS_OTLP_TRACES_ENDPOINT, data="", headers={})
 
         threads = [Thread(target=call) for _ in range(8)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
 
         self.assertEqual(mock_get_credentials.call_count, 1)
+
+    # pylint: disable=protected-access
+    def test_aws_auth_session_should_use_environment_when_region_and_session_are_omitted(self):
+        for region_env in ("AWS_REGION", "AWS_DEFAULT_REGION"):
+            with self.subTest(region_env=region_env), patch.dict(os.environ, {region_env: "us-east-2"}):
+                session = AwsAuthSession(service="xray")
+                self.addCleanup(session.close)
+                self.assertEqual(session._aws_region, "us-east-2")
+                credentials = session._session.get_credentials().get_frozen_credentials()
+                self.assertEqual(credentials.access_key, "test-access-key")
+                self.assertEqual(credentials.secret_key, "test-secret-key")
+
+    def test_aws_auth_session_should_resolve_region_from_endpoint(self):
+        session = AwsAuthSession(service="xray", endpoint="https://xray.us-west-2.amazonaws.com/v1/traces")
+        self.addCleanup(session.close)
+        self.assertEqual(session._aws_region, "us-west-2")
+        self.assertIsInstance(session._session, Session)
+
+    def test_aws_auth_session_should_use_environment_signing_service_when_arguments_are_omitted(self):
+        with patch.dict(os.environ, {OTEL_EXPORTER_OTLP_SIGV4_SERVICE: "logs", "AWS_REGION": "us-east-1"}):
+            session = AwsAuthSession()
+            self.addCleanup(session.close)
+            self.assertEqual(session._service, "logs")
+            self.assertEqual(session._aws_region, "us-east-1")
+
+    def test_aws_auth_session_should_apply_region_precedence_with_explicit_session(self):
+        session = Session()
+        session.set_config_variable("region", "eu-west-1")
+        endpoint = "https://xray.us-west-2.amazonaws.com/v1/traces"
+        test_cases = (
+            {
+                "aws_region": "us-east-1",
+                "environment": {"AWS_REGION": "us-east-2", "AWS_DEFAULT_REGION": "us-east-3"},
+                "endpoint": endpoint,
+                "expected_region": "us-east-1",
+            },
+            {
+                "aws_region": None,
+                "environment": {"AWS_REGION": "us-east-2", "AWS_DEFAULT_REGION": "us-east-3"},
+                "endpoint": endpoint,
+                "expected_region": "us-east-2",
+            },
+            {
+                "aws_region": None,
+                "environment": {"AWS_DEFAULT_REGION": "us-east-3"},
+                "endpoint": endpoint,
+                "expected_region": "us-east-3",
+            },
+            {
+                "aws_region": None,
+                "environment": {},
+                "endpoint": endpoint,
+                "expected_region": "us-west-2",
+            },
+            {
+                "aws_region": None,
+                "environment": {},
+                "endpoint": "https://collector.example.com",
+                "expected_region": "eu-west-1",
+            },
+        )
+        for test_case in test_cases:
+            with self.subTest(**test_case), patch.dict(os.environ, test_case["environment"]):
+                auth_session = AwsAuthSession(
+                    aws_region=test_case["aws_region"],
+                    service="xray",
+                    session=session,
+                    endpoint=test_case["endpoint"],
+                )
+                self.addCleanup(auth_session.close)
+                self.assertEqual(auth_session._aws_region, test_case["expected_region"])
+                self.assertIs(auth_session._session, session)
+
+    def test_aws_auth_session_should_raise_value_error_when_configuration_is_invalid(self):
+        session = Session()
+        session.set_config_variable("region", None)
+        test_cases = (
+            {},
+            {"service": "xray"},
+            {"service": "xray", "session": session, "endpoint": "https://collector.example.com"},
+        )
+        with patch(
+            "amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session.get_aws_session", return_value=None
+        ):
+            for arguments in test_cases:
+                with self.subTest(**arguments), self.assertRaises(ValueError):
+                    AwsAuthSession(**arguments)

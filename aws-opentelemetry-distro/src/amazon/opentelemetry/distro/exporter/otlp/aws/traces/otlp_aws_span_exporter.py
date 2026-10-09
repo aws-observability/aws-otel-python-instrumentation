@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
+import os
 from typing import Dict, Optional, Sequence
 
 from botocore.session import Session
@@ -9,11 +10,17 @@ from botocore.session import Session
 from amazon.opentelemetry.distro._utils import is_agent_observability_enabled, is_genai_content_extraction_opted_out
 from amazon.opentelemetry.distro.exporter.otlp.aws.common._aws_http_headers import _OTLP_AWS_HTTP_HEADERS
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
+from amazon.opentelemetry.distro.exporter.otlp.aws.environment_variables import (
+    OTEL_EXPORTER_OTLP_SIGV4_SERVICE,
+    OTEL_EXPORTER_OTLP_TRACES_SIGV4_SERVICE,
+)
 from amazon.opentelemetry.distro.llo_handler import LLOHandler
 from opentelemetry._logs import get_logger_provider
 from opentelemetry.exporter.otlp.proto.http import Compression
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.exporter.otlp.proto.http._common import _resolve_endpoint
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import DEFAULT_TRACES_EXPORT_PATH, OTLPSpanExporter
 from opentelemetry.sdk._logs import LoggerProvider
+from opentelemetry.sdk.environment_variables import OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExportResult
 
@@ -26,13 +33,18 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
     to the XRay OTLP endpoint https://xray.[AWSRegion].amazonaws.com/v1/traces. Utilizes the
     AwsAuthSession to sign and directly inject SigV4 Authentication to the exported request's headers.
 
+    The signing service uses an explicit ``aws_service`` first, then
+    ``OTEL_EXPORTER_OTLP_TRACES_SIGV4_SERVICE``, then ``OTEL_EXPORTER_OTLP_SIGV4_SERVICE``,
+    and defaults to ``xray``.
+
     See: https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-OTLPEndpoint.html
     """
 
     def __init__(
         self,
-        aws_region: str,
-        session: Session,
+        aws_region: Optional[str] = None,
+        aws_service: Optional[str] = None,
+        session: Optional[Session] = None,
         endpoint: Optional[str] = None,
         certificate_file: Optional[str] = None,
         client_key_file: Optional[str] = None,
@@ -42,13 +54,21 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
         compression: Optional[Compression] = None,
         logger_provider: Optional[LoggerProvider] = None,
     ):
-        self._aws_region = aws_region
         self._logger_provider = logger_provider
         self._llo_handler = None
 
         # The upstream client sends its own User-Agent as a per-request header, which takes precedence
         # over session headers, so the ADOT User-Agent must be passed in via ``headers``.
-        self._session = AwsAuthSession(session=session, aws_region=self._aws_region, service="xray")
+        self._session = AwsAuthSession(
+            session=session,
+            aws_region=aws_region,
+            service=aws_service
+            or os.environ.get(OTEL_EXPORTER_OTLP_TRACES_SIGV4_SERVICE)
+            or os.environ.get(OTEL_EXPORTER_OTLP_SIGV4_SERVICE)
+            or "xray",
+            endpoint=endpoint or _resolve_endpoint(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, DEFAULT_TRACES_EXPORT_PATH),
+        )
+        self._aws_region = self._session._aws_region  # pylint: disable=protected-access
         OTLPSpanExporter.__init__(
             self,
             endpoint,
