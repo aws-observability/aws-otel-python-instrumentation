@@ -318,7 +318,7 @@ class TestOTLPAwsSpanExporter(TestCase):
             OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "https://xray.us-west-2.amazonaws.com/v1/traces",
         },
     )
-    def test_should_load_otlp_sigv4_span_exporter(self):
+    def test_otlp_sigv4_span_exporter_should_load_from_entry_point(self):
         loaded = _import_exporters(
             _get_exporter_names("traces"), _get_exporter_names("metrics"), _get_exporter_names("logs")
         )
@@ -349,7 +349,7 @@ class TestOTLPAwsSpanExporter(TestCase):
             OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf",
         },
     )
-    def test_should_load_otlp_sigv4_span_exporter_alongside_otlp_exporter(self):
+    def test_otlp_sigv4_span_exporter_should_load_alongside_otlp_exporter(self):
         loaded = _import_exporters(
             _get_exporter_names("traces"), _get_exporter_names("metrics"), _get_exporter_names("logs")
         )
@@ -360,7 +360,7 @@ class TestOTLPAwsSpanExporter(TestCase):
         self.assertFalse(loaded[1])
         self.assertFalse(loaded[2])
 
-    def test_should_resolve_otlp_sigv4_span_exporter_region_from_endpoint_across_partitions(self):
+    def test_otlp_sigv4_span_exporter_should_resolve_region_from_endpoint_across_partitions(self):
         partitions = (
             ("us-west-2", "amazonaws.com"),
             ("cn-north-1", "amazonaws.com.cn"),
@@ -374,7 +374,7 @@ class TestOTLPAwsSpanExporter(TestCase):
                 self.addCleanup(exporter.shutdown)
                 self.assertEqual(exporter._aws_region, region)
 
-    def test_should_use_otlp_sigv4_span_exporter_with_generic_endpoint_and_environment_region(self):
+    def test_otlp_sigv4_span_exporter_should_use_generic_endpoint_and_environment_region(self):
         with patch.dict(
             os.environ,
             {OTEL_EXPORTER_OTLP_ENDPOINT: "https://collector.example.com", "AWS_DEFAULT_REGION": "us-east-2"},
@@ -384,14 +384,14 @@ class TestOTLPAwsSpanExporter(TestCase):
             self.assertEqual(exporter._aws_region, "us-east-2")
             self.assertEqual(exporter._client._endpoint, "https://collector.example.com/v1/traces")
 
-    def test_should_resolve_otlp_sigv4_span_exporter_region_from_generic_aws_endpoint(self):
+    def test_otlp_sigv4_span_exporter_should_resolve_region_from_generic_aws_endpoint(self):
         with patch.dict(os.environ, {OTEL_EXPORTER_OTLP_ENDPOINT: "https://xray.us-west-2.amazonaws.com/base/"}):
             exporter = OTLPAwsSpanExporter()
             self.addCleanup(exporter.shutdown)
             self.assertEqual(exporter._aws_region, "us-west-2")
             self.assertEqual(exporter._client._endpoint, "https://xray.us-west-2.amazonaws.com/base/v1/traces")
 
-    def test_should_apply_otlp_sigv4_span_exporter_signing_service_precedence(self):
+    def test_otlp_sigv4_span_exporter_should_apply_signing_service_precedence(self):
         response = requests.Response()
         response.status_code = 200
         response._content = b""
@@ -451,7 +451,7 @@ class TestOTLPAwsSpanExporter(TestCase):
                     f"/us-west-2/{expected_service}/aws4_request", request.call_args.kwargs["headers"]["Authorization"]
                 )
 
-    def test_should_preserve_otlp_sigv4_span_exporter_explicit_region_and_session(self):
+    def test_otlp_sigv4_span_exporter_should_preserve_explicit_region_and_session(self):
         session = Session()
         exporter = OTLPAwsSpanExporter(
             aws_region="us-east-1",
@@ -462,7 +462,7 @@ class TestOTLPAwsSpanExporter(TestCase):
         self.assertEqual(exporter._aws_region, "us-east-1")
         self.assertIs(exporter._session._session, session)
 
-    def test_should_configure_otlp_sigv4_span_exporter_from_environment_with_constructor_overrides(self):
+    def test_otlp_sigv4_span_exporter_should_use_environment_settings_with_constructor_overrides(self):
         with patch.dict(
             os.environ,
             {
@@ -488,7 +488,7 @@ class TestOTLPAwsSpanExporter(TestCase):
             self.assertEqual(exporter._client._headers["x-custom"], "explicit")
             self.assertEqual(exporter._client._timeout, 30)
 
-    def test_should_fail_to_initialize_otlp_sigv4_span_exporter_when_region_cannot_be_resolved(self):
+    def test_otlp_sigv4_span_exporter_should_fail_to_initialize_when_region_cannot_be_resolved(self):
         session = Session()
         session.set_config_variable("region", None)
         with self.assertRaisesRegex(ValueError, "requires an AWS endpoint region"):

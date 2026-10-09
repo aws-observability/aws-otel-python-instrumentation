@@ -239,7 +239,7 @@ class TestAwsAuthSession(TestCase):
         self.assertEqual(mock_get_credentials.call_count, 1)
 
     # pylint: disable=protected-access
-    def test_should_use_aws_environment_for_optional_auth_session_arguments(self):
+    def test_aws_auth_session_should_use_environment_when_region_and_session_are_omitted(self):
         for region_env in ("AWS_REGION", "AWS_DEFAULT_REGION"):
             with self.subTest(region_env=region_env), patch.dict(os.environ, {region_env: "us-east-2"}):
                 session = AwsAuthSession(service="xray")
@@ -249,24 +249,24 @@ class TestAwsAuthSession(TestCase):
                 self.assertEqual(credentials.access_key, "test-access-key")
                 self.assertEqual(credentials.secret_key, "test-secret-key")
 
-    def test_should_infer_auth_session_region_from_resolved_endpoint(self):
+    def test_aws_auth_session_should_resolve_region_from_endpoint(self):
         session = AwsAuthSession(service="xray", endpoint="https://xray.us-west-2.amazonaws.com/v1/traces")
         self.addCleanup(session.close)
         self.assertEqual(session._aws_region, "us-west-2")
         self.assertIsInstance(session._session, Session)
 
-    def test_should_use_environment_signing_service_without_auth_session_arguments(self):
+    def test_aws_auth_session_should_use_environment_signing_service_when_arguments_are_omitted(self):
         with patch.dict(os.environ, {OTEL_EXPORTER_OTLP_SIGV4_SERVICE: "logs", "AWS_REGION": "us-east-1"}):
             session = AwsAuthSession()
             self.addCleanup(session.close)
             self.assertEqual(session._service, "logs")
             self.assertEqual(session._aws_region, "us-east-1")
 
-    def test_should_require_auth_session_signing_service(self):
+    def test_aws_auth_session_should_fail_to_initialize_when_signing_service_is_missing(self):
         with self.assertRaisesRegex(ValueError, "requires a signing service"):
             AwsAuthSession()
 
-    def test_should_apply_auth_session_region_precedence_with_explicit_session(self):
+    def test_aws_auth_session_should_apply_region_precedence_with_explicit_session(self):
         session = Session()
         session.set_config_variable("region", "eu-west-1")
         endpoint = "https://xray.us-west-2.amazonaws.com/v1/traces"
@@ -286,7 +286,7 @@ class TestAwsAuthSession(TestCase):
                 self.assertEqual(auth_session._aws_region, expected_region)
                 self.assertIs(auth_session._session, session)
 
-    def test_should_fail_to_initialize_auth_session_when_botocore_session_is_unavailable(self):
+    def test_aws_auth_session_should_fail_to_initialize_when_botocore_session_is_unavailable(self):
         with patch(
             "amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session.get_aws_session", return_value=None
         ):
