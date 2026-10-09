@@ -116,6 +116,20 @@ jobs:
             dist/aws_opentelemetry_distro-${{ steps.python_output.outputs.ADOT_PYTHON_VERSION }}-py3-none-any.whl
             dist/aws_opentelemetry_distro-${{ steps.python_output.outputs.ADOT_PYTHON_VERSION }}.tar.gz
 
+      # Record the exact multi-arch image digest so release-build promotes precisely the image this
+      # run built, pushed, scanned, and E2E-tested. A digest is immutable, so (unlike a tag) a later
+      # rerun cannot repoint it -- release ships exactly what was validated here.
+      - name: Record staging image digest for release promotion
+        run: |
+          DIGEST=$(docker buildx imagetools inspect "${{ steps.python_output.outputs.stagingImage }}" --format '{{.Manifest.Digest}}')
+          echo "${{ env.STAGING_ECR_REGISTRY }}/${{ env.STAGING_ECR_REPOSITORY }}@${DIGEST}" | tee staging-image.txt
+
+      - name: Upload staging image reference
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
+        with:
+          name: staging-image
+          path: staging-image.txt
+
       - name: Upload distro wheel
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
         with:
