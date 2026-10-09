@@ -8,6 +8,10 @@ from botocore.session import Session
 
 from amazon.opentelemetry.distro.exporter.otlp.aws.common._aws_http_headers import _OTLP_AWS_HTTP_HEADERS
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
+from amazon.opentelemetry.distro.exporter.otlp.aws.environment_variables import (
+    OTEL_EXPORTER_OTLP_METRICS_SIGV4_SERVICE,
+    OTEL_EXPORTER_OTLP_SIGV4_SERVICE,
+)
 from opentelemetry.exporter.otlp.proto.http import Compression
 from opentelemetry.exporter.otlp.proto.http._common import _resolve_endpoint
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import DEFAULT_METRICS_EXPORT_PATH, OTLPMetricExporter
@@ -59,8 +63,8 @@ class OTLPAwsMetricExporter(OTLPMetricExporter):
             session=session,
             aws_region=aws_region,
             service=aws_service
-            or os.environ.get("OTEL_EXPORTER_OTLP_METRICS_SIGV4_SERVICE")
-            or os.environ.get("OTEL_EXPORTER_OTLP_SIGV4_SERVICE")
+            or os.environ.get(OTEL_EXPORTER_OTLP_METRICS_SIGV4_SERVICE)
+            or os.environ.get(OTEL_EXPORTER_OTLP_SIGV4_SERVICE)
             or "monitoring",
             endpoint=endpoint,
         )
