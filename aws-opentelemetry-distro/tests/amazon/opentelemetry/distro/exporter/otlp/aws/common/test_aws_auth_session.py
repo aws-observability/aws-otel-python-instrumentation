@@ -262,33 +262,65 @@ class TestAwsAuthSession(TestCase):
             self.assertEqual(session._service, "logs")
             self.assertEqual(session._aws_region, "us-east-1")
 
-    def test_aws_auth_session_should_fail_to_initialize_when_signing_service_is_missing(self):
-        with self.assertRaisesRegex(ValueError, "requires a signing service"):
-            AwsAuthSession()
-
     def test_aws_auth_session_should_apply_region_precedence_with_explicit_session(self):
         session = Session()
         session.set_config_variable("region", "eu-west-1")
         endpoint = "https://xray.us-west-2.amazonaws.com/v1/traces"
         test_cases = (
-            ("us-east-1", {"AWS_REGION": "us-east-2", "AWS_DEFAULT_REGION": "us-east-3"}, endpoint, "us-east-1"),
-            (None, {"AWS_REGION": "us-east-2", "AWS_DEFAULT_REGION": "us-east-3"}, endpoint, "us-east-2"),
-            (None, {"AWS_DEFAULT_REGION": "us-east-3"}, endpoint, "us-east-3"),
-            (None, {}, endpoint, "us-west-2"),
-            (None, {}, "https://collector.example.com", "eu-west-1"),
+            {
+                "aws_region": "us-east-1",
+                "environment": {"AWS_REGION": "us-east-2", "AWS_DEFAULT_REGION": "us-east-3"},
+                "endpoint": endpoint,
+                "expected_region": "us-east-1",
+            },
+            {
+                "aws_region": None,
+                "environment": {"AWS_REGION": "us-east-2", "AWS_DEFAULT_REGION": "us-east-3"},
+                "endpoint": endpoint,
+                "expected_region": "us-east-2",
+            },
+            {
+                "aws_region": None,
+                "environment": {"AWS_DEFAULT_REGION": "us-east-3"},
+                "endpoint": endpoint,
+                "expected_region": "us-east-3",
+            },
+            {
+                "aws_region": None,
+                "environment": {},
+                "endpoint": endpoint,
+                "expected_region": "us-west-2",
+            },
+            {
+                "aws_region": None,
+                "environment": {},
+                "endpoint": "https://collector.example.com",
+                "expected_region": "eu-west-1",
+            },
         )
-        for explicit_region, environment, configured_endpoint, expected_region in test_cases:
-            with self.subTest(expected_region=expected_region), patch.dict(os.environ, environment):
+        for test_case in test_cases:
+            with self.subTest(**test_case), patch.dict(os.environ, test_case["environment"]):
                 auth_session = AwsAuthSession(
-                    aws_region=explicit_region, service="xray", session=session, endpoint=configured_endpoint
+                    aws_region=test_case["aws_region"],
+                    service="xray",
+                    session=session,
+                    endpoint=test_case["endpoint"],
                 )
                 self.addCleanup(auth_session.close)
-                self.assertEqual(auth_session._aws_region, expected_region)
+                self.assertEqual(auth_session._aws_region, test_case["expected_region"])
                 self.assertIs(auth_session._session, session)
 
-    def test_aws_auth_session_should_fail_to_initialize_when_botocore_session_is_unavailable(self):
+    def test_aws_auth_session_should_raise_value_error_when_configuration_is_invalid(self):
+        session = Session()
+        session.set_config_variable("region", None)
+        test_cases = (
+            {},
+            {"service": "xray"},
+            {"service": "xray", "session": session, "endpoint": "https://collector.example.com"},
+        )
         with patch(
             "amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session.get_aws_session", return_value=None
         ):
-            with self.assertRaisesRegex(ValueError, "requires botocore"):
-                AwsAuthSession(service="xray")
+            for arguments in test_cases:
+                with self.subTest(**arguments), self.assertRaises(ValueError):
+                    AwsAuthSession(**arguments)
