@@ -383,7 +383,7 @@ class TestAwsExporterEntryPoints(TestCase):
                         **environment,
                     },
                 ):
-                    exporter = exporter_class(service=explicit_service)
+                    exporter = exporter_class(aws_service=explicit_service)
                     with patch.object(requests.Session, "request", return_value=response) as request:
                         self._emit(signal, exporter)
                     self.assertEqual(request.call_count, 1)
