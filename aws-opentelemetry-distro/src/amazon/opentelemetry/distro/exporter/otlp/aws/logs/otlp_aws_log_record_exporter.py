@@ -24,7 +24,7 @@ class OTLPAwsLogRecordExporter(OTLPLogExporter):
     2. Always compresses data with gzip before sending
     3. Optionally sets the x-aws-log-group / x-aws-log-stream headers
 
-    The signing service uses an explicit ``service`` first, then
+    The signing service uses an explicit ``aws_service`` first, then
     ``OTEL_EXPORTER_OTLP_LOGS_SIGV4_SERVICE``, then ``OTEL_EXPORTER_OTLP_SIGV4_SERVICE``,
     and defaults to ``logs``.
 
@@ -37,6 +37,7 @@ class OTLPAwsLogRecordExporter(OTLPLogExporter):
     def __init__(
         self,
         aws_region: Optional[str] = None,
+        aws_service: Optional[str] = None,
         session: Optional[Session] = None,
         log_group: Optional[str] = None,
         log_stream: Optional[str] = None,
@@ -46,7 +47,6 @@ class OTLPAwsLogRecordExporter(OTLPLogExporter):
         client_certificate_file: Optional[str] = None,
         headers: Optional[Dict[str, str]] = None,
         timeout: Optional[int] = None,
-        service: Optional[str] = None,
     ):
         if log_group and log_stream:
             log_headers = {"x-aws-log-group": log_group, "x-aws-log-stream": log_stream}
@@ -59,7 +59,7 @@ class OTLPAwsLogRecordExporter(OTLPLogExporter):
         self._session = AwsAuthSession(
             session=session,
             aws_region=aws_region,
-            service=service
+            service=aws_service
             or os.environ.get("OTEL_EXPORTER_OTLP_LOGS_SIGV4_SERVICE")
             or os.environ.get("OTEL_EXPORTER_OTLP_SIGV4_SERVICE")
             or "logs",

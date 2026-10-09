@@ -29,7 +29,7 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
     to the XRay OTLP endpoint https://xray.[AWSRegion].amazonaws.com/v1/traces. Utilizes the
     AwsAuthSession to sign and directly inject SigV4 Authentication to the exported request's headers.
 
-    The signing service uses an explicit ``service`` first, then
+    The signing service uses an explicit ``aws_service`` first, then
     ``OTEL_EXPORTER_OTLP_TRACES_SIGV4_SERVICE``, then ``OTEL_EXPORTER_OTLP_SIGV4_SERVICE``,
     and defaults to ``xray``.
 
@@ -39,6 +39,7 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
     def __init__(
         self,
         aws_region: Optional[str] = None,
+        aws_service: Optional[str] = None,
         session: Optional[Session] = None,
         endpoint: Optional[str] = None,
         certificate_file: Optional[str] = None,
@@ -48,7 +49,6 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
         timeout: Optional[int] = None,
         compression: Optional[Compression] = None,
         logger_provider: Optional[LoggerProvider] = None,
-        service: Optional[str] = None,
     ):
         self._logger_provider = logger_provider
         self._llo_handler = None
@@ -59,7 +59,7 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
         self._session = AwsAuthSession(
             session=session,
             aws_region=aws_region,
-            service=service
+            service=aws_service
             or os.environ.get("OTEL_EXPORTER_OTLP_TRACES_SIGV4_SERVICE")
             or os.environ.get("OTEL_EXPORTER_OTLP_SIGV4_SERVICE")
             or "xray",

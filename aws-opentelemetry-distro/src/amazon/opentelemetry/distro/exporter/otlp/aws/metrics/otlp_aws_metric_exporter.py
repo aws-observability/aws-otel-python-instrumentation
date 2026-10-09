@@ -21,7 +21,7 @@ class OTLPAwsMetricExporter(OTLPMetricExporter):
     This exporter extends the functionality of the OTLPMetricExporter to allow metrics to be exported
     to the CloudWatch Metrics OTLP endpoint https://monitoring.[AWSRegion].amazonaws.com/v1/metrics.
     Utilizes the AwsAuthSession to sign and directly inject SigV4 Authentication to the exported
-    request's headers. The signing service uses an explicit ``service`` first, then
+    request's headers. The signing service uses an explicit ``aws_service`` first, then
     ``OTEL_EXPORTER_OTLP_METRICS_SIGV4_SERVICE``, then ``OTEL_EXPORTER_OTLP_SIGV4_SERVICE``,
     and defaults to ``monitoring``.
 
@@ -35,6 +35,7 @@ class OTLPAwsMetricExporter(OTLPMetricExporter):
     def __init__(
         self,
         aws_region: Optional[str] = None,
+        aws_service: Optional[str] = None,
         session: Optional[Session] = None,
         endpoint: Optional[str] = None,
         certificate_file: Optional[str] = None,
@@ -45,7 +46,6 @@ class OTLPAwsMetricExporter(OTLPMetricExporter):
         compression: Optional[Compression] = None,
         preferred_temporality: Optional[Dict[type, AggregationTemporality]] = None,
         preferred_aggregation: Optional[Dict[type, Aggregation]] = None,
-        service: Optional[str] = None,
     ):
         # Compression is passed through unchanged. Unlike OTLPAwsLogRecordExporter, this exporter
         # does not force gzip: the measured SigV4 signature covers content-type, host and x-amz-date
@@ -58,7 +58,7 @@ class OTLPAwsMetricExporter(OTLPMetricExporter):
         self._session = AwsAuthSession(
             session=session,
             aws_region=aws_region,
-            service=service
+            service=aws_service
             or os.environ.get("OTEL_EXPORTER_OTLP_METRICS_SIGV4_SERVICE")
             or os.environ.get("OTEL_EXPORTER_OTLP_SIGV4_SERVICE")
             or "monitoring",
