@@ -2,14 +2,20 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
+import os
+import re
 from threading import Lock
+from typing import Optional
+from urllib.parse import urlparse
 
 import requests
 from botocore.auth import SigV4Auth
 from botocore.awsrequest import AWSRequest
 from botocore.session import Session
 
+from amazon.opentelemetry.distro._utils import AWS_DNS_SUFFIX_PATTERN, get_aws_session
 from amazon.opentelemetry.distro.patches._pip_system_certs_patches import apply_pip_system_certs_compatibility_patch
+from opentelemetry.sdk.environment_variables import OTEL_EXPORTER_OTLP_ENDPOINT
 
 _logger = logging.getLogger(__name__)
 
@@ -35,9 +41,40 @@ class AwsAuthSession(requests.Session):
     Args:
         aws_region (str): The AWS region to use for signing (e.g., "us-east-1")
         service (str): The AWS service name for signing (e.g., "logs" or "xray")
+        session (Session): Optional botocore session; defaults to the AWS credential chain.
+        endpoint (str): Optional OTLP endpoint used to infer the region when AWS region
+            environment variables are unset. Falls back to the generic OTLP
+            endpoint, then the AWS profile/session region.
     """
 
-    def __init__(self, aws_region: str, service: str, session: Session):
+    def __init__(
+        self,
+        aws_region: Optional[str] = None,
+        service: Optional[str] = None,
+        session: Optional[Session] = None,
+        endpoint: Optional[str] = None,
+    ):
+        service = service or os.environ.get("OTEL_EXPORTER_OTLP_SIGV4_SERVICE")
+        if not service:
+            raise ValueError("AwsAuthSession requires a signing service or OTEL_EXPORTER_OTLP_SIGV4_SERVICE.")
+
+        if session is None:
+            session = get_aws_session()
+        if session is None:
+            raise ValueError("The otlp/sigv4 exporter requires botocore; install aws-opentelemetry-distro[patch].")
+
+        aws_region = aws_region or os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
+        if not aws_region:
+            configured_endpoint = endpoint or os.environ.get(OTEL_EXPORTER_OTLP_ENDPOINT, "")
+            host = urlparse(configured_endpoint).hostname or ""
+            match = re.fullmatch(rf"(?:xray|logs|monitoring)\.([a-z0-9-]+)\.{AWS_DNS_SUFFIX_PATTERN}", host)
+            aws_region = match.group(1) if match else session.get_config_variable("region")
+
+        if not aws_region:
+            raise ValueError(
+                "The otlp/sigv4 exporter requires an AWS endpoint region, AWS_REGION, or AWS_DEFAULT_REGION."
+            )
+
         self._aws_region: str = aws_region
         self._service: str = service
         self._session: Session = session
