@@ -56,7 +56,7 @@ def _maybe_create_emf_exporter() -> Optional[MetricExporter]:
         return None
 
 
-class AwsEmfExporter(MetricExporter):
+class _AutoAwsEmfExporter(MetricExporter):
     """Environment-configured EMF exporter for the OpenTelemetry entry point."""
 
     def __init__(self) -> None:
