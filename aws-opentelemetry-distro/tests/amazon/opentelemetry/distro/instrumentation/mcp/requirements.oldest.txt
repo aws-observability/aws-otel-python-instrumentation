@@ -1,2 +1,4 @@
 mcp==1.10.0
+# MCP 1.10.0 imports a private Pydantic helper removed in 2.14.
+pydantic<2.14
 uvicorn
