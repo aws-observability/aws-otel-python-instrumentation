@@ -14,6 +14,7 @@ from botocore.awsrequest import AWSRequest
 from botocore.session import Session
 
 from amazon.opentelemetry.distro._utils import AWS_DNS_SUFFIX_PATTERN, get_aws_session
+from amazon.opentelemetry.distro.exporter.otlp.aws.environment_variables import OTEL_EXPORTER_OTLP_SIGV4_SERVICE
 from amazon.opentelemetry.distro.patches._pip_system_certs_patches import apply_pip_system_certs_compatibility_patch
 
 _logger = logging.getLogger(__name__)
@@ -52,7 +53,7 @@ class AwsAuthSession(requests.Session):
         session: Optional[Session] = None,
         endpoint: Optional[str] = None,
     ):
-        service = service or os.environ.get("OTEL_EXPORTER_OTLP_SIGV4_SERVICE")
+        service = service or os.environ.get(OTEL_EXPORTER_OTLP_SIGV4_SERVICE)
         if not service:
             raise ValueError("AwsAuthSession requires a signing service or OTEL_EXPORTER_OTLP_SIGV4_SERVICE.")
 

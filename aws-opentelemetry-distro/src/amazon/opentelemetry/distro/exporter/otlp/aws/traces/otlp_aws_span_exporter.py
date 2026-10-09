@@ -10,6 +10,10 @@ from botocore.session import Session
 from amazon.opentelemetry.distro._utils import is_agent_observability_enabled, is_genai_content_extraction_opted_out
 from amazon.opentelemetry.distro.exporter.otlp.aws.common._aws_http_headers import _OTLP_AWS_HTTP_HEADERS
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
+from amazon.opentelemetry.distro.exporter.otlp.aws.environment_variables import (
+    OTEL_EXPORTER_OTLP_SIGV4_SERVICE,
+    OTEL_EXPORTER_OTLP_TRACES_SIGV4_SERVICE,
+)
 from amazon.opentelemetry.distro.llo_handler import LLOHandler
 from opentelemetry._logs import get_logger_provider
 from opentelemetry.exporter.otlp.proto.http import Compression
@@ -60,8 +64,8 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
             session=session,
             aws_region=aws_region,
             service=aws_service
-            or os.environ.get("OTEL_EXPORTER_OTLP_TRACES_SIGV4_SERVICE")
-            or os.environ.get("OTEL_EXPORTER_OTLP_SIGV4_SERVICE")
+            or os.environ.get(OTEL_EXPORTER_OTLP_TRACES_SIGV4_SERVICE)
+            or os.environ.get(OTEL_EXPORTER_OTLP_SIGV4_SERVICE)
             or "xray",
             endpoint=endpoint,
         )

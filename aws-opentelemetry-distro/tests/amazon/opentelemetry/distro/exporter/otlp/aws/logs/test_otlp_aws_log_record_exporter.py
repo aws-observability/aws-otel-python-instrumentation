@@ -1,19 +1,39 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+import os
 import time
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
 import requests
+from botocore.session import Session
 from requests.structures import CaseInsensitiveDict
 
 from amazon.opentelemetry.distro._utils import get_aws_session
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
+from amazon.opentelemetry.distro.exporter.otlp.aws.environment_variables import (
+    OTEL_EXPORTER_OTLP_LOGS_SIGV4_SERVICE,
+    OTEL_EXPORTER_OTLP_METRICS_SIGV4_SERVICE,
+    OTEL_EXPORTER_OTLP_SIGV4_SERVICE,
+    OTEL_EXPORTER_OTLP_TRACES_SIGV4_SERVICE,
+)
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_log_record_exporter import OTLPAwsLogRecordExporter
 from opentelemetry._logs._internal import LogRecord
 from opentelemetry._logs.severity import SeverityNumber
+from opentelemetry.environment_variables import OTEL_LOGS_EXPORTER, OTEL_METRICS_EXPORTER, OTEL_TRACES_EXPORTER
+from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
+from opentelemetry.sdk._configuration import _get_exporter_names, _import_exporters
 from opentelemetry.sdk._logs import ReadableLogRecord
 from opentelemetry.sdk._logs.export import LogRecordExportResult
+from opentelemetry.sdk.environment_variables import (
+    OTEL_EXPORTER_OTLP_ENDPOINT,
+    OTEL_EXPORTER_OTLP_HEADERS,
+    OTEL_EXPORTER_OTLP_LOGS_ENDPOINT,
+    OTEL_EXPORTER_OTLP_LOGS_HEADERS,
+    OTEL_EXPORTER_OTLP_LOGS_TIMEOUT,
+    OTEL_EXPORTER_OTLP_PROTOCOL,
+    OTEL_EXPORTER_OTLP_TIMEOUT,
+)
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.util.instrumentation import InstrumentationScope
 from opentelemetry.trace import TraceFlags
@@ -26,6 +46,20 @@ class TestOTLPAwsLogsExporter(TestCase):
     _ENDPOINT = "https://logs.us-west-2.amazonaws.com/v1/logs"
 
     def setUp(self):
+        self.environment = patch.dict(
+            os.environ,
+            {
+                "AWS_ACCESS_KEY_ID": "test-access-key",
+                "AWS_SECRET_ACCESS_KEY": "test-secret-key",
+                "AWS_EC2_METADATA_DISABLED": "true",
+                "AWS_CONFIG_FILE": os.devnull,
+                "AWS_SHARED_CREDENTIALS_FILE": os.devnull,
+            },
+            clear=True,
+        )
+        self.environment.start()
+        self.addCleanup(self.environment.stop)
+
         self.logs = self.generate_test_log_data()
         self.exporter = OTLPAwsLogRecordExporter(
             session=get_aws_session(), aws_region="us-east-1", endpoint=self._ENDPOINT
@@ -187,6 +221,194 @@ class TestOTLPAwsLogsExporter(TestCase):
         request_headers = mock_request.call_args.kwargs["headers"]
         self.assertEqual(request_headers["x-aws-log-group"], log_group)
         self.assertEqual(request_headers["x-aws-log-stream"], log_stream)
+
+    # pylint: disable=protected-access
+    @patch.dict(
+        os.environ,
+        {
+            OTEL_LOGS_EXPORTER: "otlp/sigv4",
+            OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: "https://logs.us-west-2.amazonaws.com/v1/logs",
+            OTEL_EXPORTER_OTLP_LOGS_HEADERS: "x-aws-log-group=test-group,x-aws-log-stream=test-stream",
+        },
+    )
+    def test_should_load_otlp_sigv4_log_record_exporter(self):
+        loaded = _import_exporters(
+            _get_exporter_names("traces"), _get_exporter_names("metrics"), _get_exporter_names("logs")
+        )
+        exporters = loaded[2]
+        self.assertIs(exporters["otlp/sigv4"], OTLPAwsLogRecordExporter)
+        exporter = exporters["otlp/sigv4"]()
+        self.addCleanup(exporter.shutdown)
+        response = requests.Response()
+        response.status_code = 200
+        response._content = b""
+        with patch.object(requests.Session, "request", return_value=response) as request:
+            self.assertEqual(exporter.export(self.logs), LogRecordExportResult.SUCCESS)
+        self.assertEqual(request.call_count, 1)
+        headers = request.call_args.kwargs["headers"]
+        authorization = [value for (key, value) in headers.items() if key.lower() == "authorization"]
+        self.assertEqual(len(authorization), 1)
+        self.assertTrue(authorization[0].startswith("AWS4-HMAC-SHA256"))
+        self.assertIn("/us-west-2/logs/aws4_request", authorization[0])
+        self.assertEqual(request.call_args.kwargs["url"], "https://logs.us-west-2.amazonaws.com/v1/logs")
+        self.assertTrue(request.call_args.kwargs["data"])
+        self.assertEqual(headers["x-aws-log-group"], "test-group")
+        self.assertEqual(headers["x-aws-log-stream"], "test-stream")
+        self.assertEqual(headers["Content-Encoding"], "gzip")
+
+    @patch.dict(
+        os.environ,
+        {
+            OTEL_TRACES_EXPORTER: "none",
+            OTEL_METRICS_EXPORTER: "none",
+            OTEL_LOGS_EXPORTER: "otlp/sigv4,otlp",
+            OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf",
+        },
+    )
+    def test_should_load_otlp_sigv4_log_record_exporter_alongside_otlp_exporter(self):
+        loaded = _import_exporters(
+            _get_exporter_names("traces"), _get_exporter_names("metrics"), _get_exporter_names("logs")
+        )
+        exporters = loaded[2]
+        self.assertEqual(set(exporters), {"otlp/sigv4", "otlp_proto_http"})
+        self.assertIs(exporters["otlp/sigv4"], OTLPAwsLogRecordExporter)
+        self.assertIs(exporters["otlp_proto_http"], OTLPLogExporter)
+        self.assertFalse(loaded[0])
+        self.assertFalse(loaded[1])
+
+    def test_should_resolve_otlp_sigv4_log_record_exporter_region_from_endpoint_across_partitions(self):
+        partitions = (
+            ("us-west-2", "amazonaws.com"),
+            ("cn-north-1", "amazonaws.com.cn"),
+            ("eusc-de-east-1", "amazonaws.eu"),
+            ("us-iso-east-1", "c2s.ic.gov"),
+        )
+        for region, suffix in partitions:
+            endpoint = f"https://logs.{region}.{suffix}/v1/logs"
+            with self.subTest(region=region), patch.dict(os.environ, {OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: endpoint}):
+                exporter = OTLPAwsLogRecordExporter()
+                self.addCleanup(exporter.shutdown)
+                self.assertEqual(exporter._aws_region, region)
+
+    def test_should_use_otlp_sigv4_log_record_exporter_with_generic_endpoint_and_environment_region(self):
+        with patch.dict(
+            os.environ,
+            {OTEL_EXPORTER_OTLP_ENDPOINT: "https://collector.example.com", "AWS_DEFAULT_REGION": "us-east-2"},
+        ):
+            exporter = OTLPAwsLogRecordExporter()
+            self.addCleanup(exporter.shutdown)
+            self.assertEqual(exporter._aws_region, "us-east-2")
+            self.assertEqual(exporter._client._endpoint, "https://collector.example.com/v1/logs")
+
+    def test_should_resolve_otlp_sigv4_log_record_exporter_region_from_generic_aws_endpoint(self):
+        with patch.dict(os.environ, {OTEL_EXPORTER_OTLP_ENDPOINT: "https://xray.us-west-2.amazonaws.com/base/"}):
+            exporter = OTLPAwsLogRecordExporter()
+            self.addCleanup(exporter.shutdown)
+            self.assertEqual(exporter._aws_region, "us-west-2")
+            self.assertEqual(exporter._client._endpoint, "https://xray.us-west-2.amazonaws.com/base/v1/logs")
+
+    def test_should_apply_otlp_sigv4_log_record_exporter_signing_service_precedence(self):
+        response = requests.Response()
+        response.status_code = 200
+        response._content = b""
+        test_cases = (
+            ({}, None, "logs"),
+            ({OTEL_EXPORTER_OTLP_SIGV4_SERVICE: "shared-service"}, None, "shared-service"),
+            (
+                {
+                    OTEL_EXPORTER_OTLP_SIGV4_SERVICE: "shared-service",
+                    OTEL_EXPORTER_OTLP_TRACES_SIGV4_SERVICE: "traces-service",
+                    OTEL_EXPORTER_OTLP_METRICS_SIGV4_SERVICE: "metrics-service",
+                    OTEL_EXPORTER_OTLP_LOGS_SIGV4_SERVICE: "logs-service",
+                },
+                None,
+                "logs-service",
+            ),
+            (
+                {OTEL_EXPORTER_OTLP_SIGV4_SERVICE: "shared-service", OTEL_EXPORTER_OTLP_LOGS_SIGV4_SERVICE: ""},
+                None,
+                "shared-service",
+            ),
+            ({OTEL_EXPORTER_OTLP_SIGV4_SERVICE: "", OTEL_EXPORTER_OTLP_LOGS_SIGV4_SERVICE: ""}, None, "logs"),
+            (
+                {
+                    OTEL_EXPORTER_OTLP_TRACES_SIGV4_SERVICE: "traces-service",
+                    OTEL_EXPORTER_OTLP_METRICS_SIGV4_SERVICE: "metrics-service",
+                },
+                None,
+                "logs",
+            ),
+            (
+                {
+                    OTEL_EXPORTER_OTLP_SIGV4_SERVICE: "shared-service",
+                    OTEL_EXPORTER_OTLP_TRACES_SIGV4_SERVICE: "traces-service",
+                    OTEL_EXPORTER_OTLP_METRICS_SIGV4_SERVICE: "metrics-service",
+                    OTEL_EXPORTER_OTLP_LOGS_SIGV4_SERVICE: "logs-service",
+                },
+                "explicit-service",
+                "explicit-service",
+            ),
+        )
+        for environment, explicit_service, expected_service in test_cases:
+            with self.subTest(environment=environment, explicit_service=explicit_service), patch.dict(
+                os.environ,
+                {
+                    "AWS_REGION": "us-west-2",
+                    OTEL_EXPORTER_OTLP_ENDPOINT: "https://collector.example.com",
+                    **environment,
+                },
+            ):
+                exporter = OTLPAwsLogRecordExporter(aws_service=explicit_service)
+                self.addCleanup(exporter.shutdown)
+                with patch.object(requests.Session, "request", return_value=response) as request:
+                    self.assertEqual(exporter.export(self.logs), LogRecordExportResult.SUCCESS)
+                self.assertEqual(request.call_count, 1)
+                self.assertIn(
+                    f"/us-west-2/{expected_service}/aws4_request", request.call_args.kwargs["headers"]["Authorization"]
+                )
+
+    def test_should_preserve_otlp_sigv4_log_record_exporter_explicit_region_and_session(self):
+        session = Session()
+        exporter = OTLPAwsLogRecordExporter(
+            aws_region="us-east-1",
+            session=session,
+            endpoint="https://logs.us-west-2.amazonaws.com/v1/logs",
+        )
+        self.addCleanup(exporter.shutdown)
+        self.assertEqual(exporter._aws_region, "us-east-1")
+        self.assertIs(exporter._session._session, session)
+
+    def test_should_configure_otlp_sigv4_log_record_exporter_from_environment_with_constructor_overrides(self):
+        with patch.dict(
+            os.environ,
+            {
+                "AWS_REGION": "us-east-1",
+                OTEL_EXPORTER_OTLP_ENDPOINT: "https://generic.example.com",
+                OTEL_EXPORTER_OTLP_HEADERS: "x-custom=generic",
+                OTEL_EXPORTER_OTLP_TIMEOUT: "10",
+                OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: "https://signal.example.com",
+                OTEL_EXPORTER_OTLP_LOGS_HEADERS: "x-custom=signal",
+                OTEL_EXPORTER_OTLP_LOGS_TIMEOUT: "20",
+            },
+        ):
+            exporter = OTLPAwsLogRecordExporter()
+            self.addCleanup(exporter.shutdown)
+            self.assertEqual(exporter._client._endpoint, "https://signal.example.com")
+            self.assertEqual(exporter._client._headers["x-custom"], "signal")
+            self.assertEqual(exporter._client._timeout, 20)
+            exporter = OTLPAwsLogRecordExporter(
+                endpoint="https://explicit.example.com", headers={"x-custom": "explicit"}, timeout=30
+            )
+            self.addCleanup(exporter.shutdown)
+            self.assertEqual(exporter._client._endpoint, "https://explicit.example.com")
+            self.assertEqual(exporter._client._headers["x-custom"], "explicit")
+            self.assertEqual(exporter._client._timeout, 30)
+
+    def test_should_fail_to_initialize_otlp_sigv4_log_record_exporter_when_region_cannot_be_resolved(self):
+        session = Session()
+        session.set_config_variable("region", None)
+        with self.assertRaisesRegex(ValueError, "requires an AWS endpoint region"):
+            OTLPAwsLogRecordExporter(session=session, endpoint="https://collector.example.com")
 
     @staticmethod
     def generate_test_log_data(count=5):
