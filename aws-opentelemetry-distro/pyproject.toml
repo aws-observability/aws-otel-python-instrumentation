@@ -114,6 +114,13 @@ aws_distro = "amazon.opentelemetry.distro.aws_opentelemetry_distro:AwsOpenTeleme
 
 [project.entry-points.opentelemetry_metrics_exporter]
 awsemf = "amazon.opentelemetry.distro.exporter.aws.metrics.aws_emf_exporter:AwsEmfExporter"
+"otlp/sigv4" = "amazon.opentelemetry.distro.exporter.otlp.aws.metrics.otlp_aws_metric_exporter:OTLPAwsMetricExporter"
+
+[project.entry-points.opentelemetry_logs_exporter]
+"otlp/sigv4" = "amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_log_record_exporter:OTLPAwsLogRecordExporter"
+
+[project.entry-points.opentelemetry_traces_exporter]
+"otlp/sigv4" = "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter:OTLPAwsSpanExporter"
 
 [project.entry-points.opentelemetry_instrumentor]
 aws_llama-index = "amazon.opentelemetry.distro.instrumentation.llama_index:LlamaIndexInstrumentor"

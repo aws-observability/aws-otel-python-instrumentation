@@ -12,6 +12,9 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- feat: register ``otlp/sigv4`` exporter entry points for logs, metrics, and traces,
+  with optional shared and signal-specific signing service overrides,
+  environment-configured signing regions, and botocore sessions.
 - revert: remove the `aws_sigv4` OTLP credential-provider entry point and session factory introduced in #794.
   ([#926](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/926))
 - chore: update OpenTelemetry dependencies to 1.45.1/0.66b1. The CloudWatch Logs OTLP exporter now relies on the
