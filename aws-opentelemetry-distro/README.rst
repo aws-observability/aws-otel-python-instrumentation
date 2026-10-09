@@ -43,9 +43,7 @@ Credentials come from botocore's standard credential chain. All constructor argu
 are optional. The signing region uses an explicit ``aws_region`` first, then ``AWS_REGION`` or
 ``AWS_DEFAULT_REGION``, then the configured AWS endpoint's region, and finally
 the AWS profile/session region. An explicit ``session`` is preserved; otherwise
-one is created from the AWS environment/profile. Endpoints, headers, timeouts,
-and TLS certificates use their standard signal-specific environment variables,
-falling back to generic OTLP settings when omitted.
+one is created from the AWS environment/profile.
 For Python logging auto-instrumentation, also set
 ``OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED=true``.
 
