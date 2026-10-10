@@ -10,7 +10,7 @@ from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
 from amazon.opentelemetry.distro import _utils
-from amazon.opentelemetry.distro.exporter.aws.metrics.aws_emf_exporter import AwsEmfExporter
+from amazon.opentelemetry.distro.exporter.aws.metrics._auto_aws_emf_exporter import _AutoAwsEmfExporter
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs._log_header_config import fetch_otlp_logs_header
 from opentelemetry.sdk.environment_variables import OTEL_EXPORTER_OTLP_LOGS_HEADERS
 from opentelemetry.sdk.metrics import MeterProvider
@@ -20,7 +20,7 @@ from opentelemetry.sdk.resources import Resource
 CLOUDWATCH_HEADERS = "x-aws-log-group=test-group,x-aws-log-stream=test-stream,x-aws-metric-namespace=test-namespace"
 
 
-class TestAwsEmfExporter(TestCase):
+class TestAutoAwsEmfExporter(TestCase):
     def setUp(self):
         environment = patch.dict(os.environ, {}, clear=True)
         environment.start()
@@ -41,7 +41,7 @@ class TestAwsEmfExporter(TestCase):
 
     def init_provider(self):
         self.output = StringIO()
-        self.exporter = AwsEmfExporter()
+        self.exporter = _AutoAwsEmfExporter()
         self.assertTrue(self.exporter.enabled)
         self.provider = MeterProvider(
             resource=Resource.get_empty(),
@@ -122,7 +122,7 @@ class TestAwsEmfExporter(TestCase):
                 else:
                     os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = headers
                 with self.assertLogs(level="WARNING") as logs:
-                    exporter = AwsEmfExporter()
+                    exporter = _AutoAwsEmfExporter()
                 self.assert_disabled(exporter)
                 self.create_client.assert_not_called()
                 self.assertEqual(len(logs.output), 1)
@@ -136,7 +136,7 @@ class TestAwsEmfExporter(TestCase):
                 fetch_otlp_logs_header.cache_clear()
                 os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = headers
                 with self.assertLogs(level="WARNING") as logs:
-                    exporter = AwsEmfExporter()
+                    exporter = _AutoAwsEmfExporter()
                 self.assert_disabled(exporter)
                 self.create_client.assert_not_called()
                 self.assertEqual(len(logs.output), 1)
@@ -170,7 +170,7 @@ class TestAwsEmfExporter(TestCase):
     def test_when_botocore_is_not_installed_in_non_lambda_exporter_is_disabled(self):
         os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = CLOUDWATCH_HEADERS
         with patch.object(_utils, "IS_BOTOCORE_INSTALLED", False), self.assertLogs(level="WARNING") as logs:
-            exporter = AwsEmfExporter()
+            exporter = _AutoAwsEmfExporter()
         self.assert_disabled(exporter)
         self.create_client.assert_not_called()
         self.assertEqual(len(logs.output), 1)
@@ -180,7 +180,7 @@ class TestAwsEmfExporter(TestCase):
         os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = CLOUDWATCH_HEADERS
         self.create_client.side_effect = RuntimeError("Test exception")
         with self.assertLogs(level="ERROR") as logs:
-            exporter = AwsEmfExporter()
+            exporter = _AutoAwsEmfExporter()
         self.assert_disabled(exporter)
         self.assertEqual(len(logs.output), 1)
         self.assertIn("Failed to create EMF exporter: Test exception", logs.output[0])
@@ -189,7 +189,7 @@ class TestAwsEmfExporter(TestCase):
         os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = CLOUDWATCH_HEADERS
         cloudwatch_module = "amazon.opentelemetry.distro.exporter.aws.metrics.aws_cloudwatch_emf_exporter"
         with self.assertLogs(level="ERROR") as logs, patch.dict(sys.modules, {cloudwatch_module: None}):
-            exporter = AwsEmfExporter()
+            exporter = _AutoAwsEmfExporter()
         self.assert_disabled(exporter)
         self.create_client.assert_not_called()
         self.assertEqual(len(logs.output), 1)
