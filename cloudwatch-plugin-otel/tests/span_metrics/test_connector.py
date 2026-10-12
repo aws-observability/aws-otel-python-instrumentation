@@ -501,6 +501,74 @@ class TestSpanMetricsConnectorDerivedAttributes(SpanMetricsConnectorTestBase):
         self.assertEqual(calls.attributes[SERVER_ADDRESS], "payments.example.com")
         self.assertNotIn("net.peer.name", calls.attributes)
 
+    def test_legacy_server_span_prefers_host_over_client_peer(self):
+        # On a SERVER span the legacy net.peer.* keys describe the client; net.peer.port is the client's
+        # ephemeral port and would make every connection a new metric series.
+        calls = self.record_span(
+            "peer-legacy-server-with-client",
+            kind=SpanKind.SERVER,
+            attributes={
+                "net.peer.name": "client.example.com",
+                "net.peer.port": 54321,
+                "net.host.name": "payments.example.com",
+                "net.host.port": 8443,
+            },
+        )
+        self.assertEqual(calls.attributes["net.host.name"], "payments.example.com")
+        self.assertEqual(calls.attributes["net.host.port"], 8443)
+        self.assertNotIn("net.peer.name", calls.attributes)
+        self.assertNotIn("net.peer.port", calls.attributes)
+        self.assertNotIn(SERVER_ADDRESS, calls.attributes)
+        self.assertNotIn(SERVER_PORT, calls.attributes)
+
+    def test_legacy_server_span_with_only_client_peer_emits_no_peer_dimension(self):
+        calls = self.record_span(
+            "peer-legacy-server-client-only",
+            kind=SpanKind.SERVER,
+            attributes={"net.peer.name": "client.example.com", "net.peer.port": 54321},
+        )
+        for key in ("net.peer.name", "net.peer.port", "net.host.name", "net.host.port", SERVER_ADDRESS, SERVER_PORT):
+            self.assertNotIn(key, calls.attributes)
+
+    def test_legacy_peer_attributes_kept_for_non_server_kinds(self):
+        # On CLIENT/PRODUCER/CONSUMER spans net.peer.* is the remote server or broker, so it is kept.
+        for kind in (SpanKind.CLIENT, SpanKind.PRODUCER, SpanKind.CONSUMER, SpanKind.INTERNAL):
+            with self.subTest(kind=kind.name):
+                calls = self.record_span(
+                    f"peer-legacy-{kind.name}",
+                    kind=kind,
+                    attributes={
+                        "net.peer.name": "payments.example.com",
+                        "net.peer.port": 8443,
+                        "net.host.name": "local.example.com",
+                        "net.host.port": 54321,
+                    },
+                )
+                self.assertEqual(calls.attributes["net.peer.name"], "payments.example.com")
+                self.assertEqual(calls.attributes["net.peer.port"], 8443)
+                self.assertNotIn("net.host.name", calls.attributes)
+                self.assertNotIn("net.host.port", calls.attributes)
+
+    def test_stable_server_attributes_win_for_all_kinds(self):
+        for kind in (SpanKind.SERVER, SpanKind.CLIENT):
+            with self.subTest(kind=kind.name):
+                calls = self.record_span(
+                    f"peer-stable-{kind.name}",
+                    kind=kind,
+                    attributes={
+                        SERVER_ADDRESS: "payments.example.com",
+                        SERVER_PORT: 8443,
+                        "net.peer.name": "other.example.com",
+                        "net.peer.port": 54321,
+                        "net.host.name": "local.example.com",
+                        "net.host.port": 8080,
+                    },
+                )
+                self.assertEqual(calls.attributes[SERVER_ADDRESS], "payments.example.com")
+                self.assertEqual(calls.attributes[SERVER_PORT], 8443)
+                for key in ("net.peer.name", "net.peer.port", "net.host.name", "net.host.port"):
+                    self.assertNotIn(key, calls.attributes)
+
     def test_gen_ai_attributes_copied(self):
         calls = self.record_span(
             "gen-ai",
@@ -731,6 +799,21 @@ class TestSpanMetricsConnectorHttpServer(SpanMetricsConnectorTestBase):
         self.assertEqual(calls.attributes[HTTP_METHOD], "GET")
         self.assertEqual(calls.attributes[HTTP_STATUS_CODE], 200)
         self.assertEqual(calls.attributes[HTTP_ROUTE], "/items/<item_id>")
+
+    def test_client_port_not_a_dimension_on_server_span(self):
+        # Under the default (legacy) HTTP semconv the server span carries the client's ephemeral port as
+        # net.peer.port; requests from different client ports must still aggregate into one series.
+        for remote_port in (50001, 50002, 50003):
+            response = self.client.get("/items/42", environ_base={"REMOTE_PORT": str(remote_port)})
+            self.assertEqual(response.status_code, 200)
+
+        peer_ports = {span.attributes.get("net.peer.port") for span in self.get_finished_spans()}
+        self.assertEqual(peer_ports, {50001, 50002, 50003})
+
+        calls = self.get_metric_data_point(_SpanMetrics.CALLS_NAME, "GET /items/<item_id>")
+        self.assertEqual(calls.value, 3)
+        self.assertNotIn("net.peer.port", calls.attributes)
+        self.assertNotIn("net.peer.name", calls.attributes)
 
 
 class TestSpanMetricsConnectorDb(SpanMetricsConnectorTestBase):
