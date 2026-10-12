@@ -560,8 +560,9 @@ class DIFastAPIRouteHandlerTest(DITestInfrastructure):
     table (mirroring its Flask app.view_functions patch). As a result, a request
     routed by FastAPI now goes through the DI wrapper and a snapshot is produced.
 
-    Traces are enabled here (OTLP gRPC to the mock collector) so the route-handler
-    SERVER span is observable during the run; the assertion itself is snapshot-based.
+    Traces are enabled here (OTLP http/protobuf to the mock collector) so the
+    route-handler SERVER span is observable during the run; the assertion itself is
+    snapshot-based.
     """
 
     __test__ = True
@@ -578,12 +579,14 @@ class DIFastAPIRouteHandlerTest(DITestInfrastructure):
     @override
     def get_application_extra_environment_variables(self) -> Dict[str, str]:
         # Enable the OTel traces exporter so FastAPI per-request SERVER spans are
-        # exported to the mock collector (gRPC 4315). This makes the route-handler
+        # exported to the mock collector (OTLP HTTP 4316). This makes the route-handler
         # span observable; the test assertion remains snapshot-based.
+        # Must be http/protobuf: FastAPI >= 0.142 auto-configures telemetry from these
+        # env vars and fails app startup for any other OTLP protocol.
         return {
             "OTEL_TRACES_EXPORTER": "otlp",
-            "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc",
-            "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": "http://collector:4315",
+            "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
+            "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": "http://collector:4316/v1/traces",
         }
 
     def test_route_handler_produces_snapshot(self) -> None:

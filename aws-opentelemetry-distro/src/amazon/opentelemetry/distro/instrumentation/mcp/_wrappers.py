@@ -42,7 +42,8 @@ AWS_INSTRUMENTATION_MCP_SUPPRESS_HTTP_INSTRUMENTATION = "AWS_INSTRUMENTATION_MCP
 OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION = "OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION"
 
 # Context key for storing client transport metadata alongside the session span.
-_TRANSPORT_KEY = context.create_key("mcp_client_transport")
+_CLIENT_TRANSPORT_INFO_ATTR = "_otel_mcp_client_transport_info"
+_CLIENT_TRANSPORT_INFO_KEY = context.create_key(_CLIENT_TRANSPORT_INFO_ATTR)
 
 
 class McpWrapper:
@@ -85,7 +86,12 @@ class McpWrapper:
         return False
 
     @staticmethod
-    def _set_mcp_attributes(span: trace.Span, message: Any, request_id: Optional[int]) -> None:
+    def _set_mcp_attributes(
+        span: trace.Span,
+        message: Any,
+        request_id: Optional[int],
+        client_transport_info: Optional[Dict[str, Any]] = None,
+    ) -> None:
         """
         Populate span with MCP semantic convention attributes.
 
@@ -96,6 +102,7 @@ class McpWrapper:
             span: Span to enrich with attributes
             message: MCP message (ClientRequest, ServerRequest, etc.)
             request_id: Request ID if available (None for notifications)
+            client_transport_info: Session transport metadata, if available
         """
         from mcp import types  # pylint: disable=import-outside-toplevel
 
@@ -148,9 +155,8 @@ class McpWrapper:
         else:
             span.update_name(create_mcp_span_name(str(message.method)))
 
-        transport_info = context.get_value(_TRANSPORT_KEY)
-        if isinstance(transport_info, dict):
-            for key, value in transport_info.items():
+        if isinstance(client_transport_info, dict):
+            for key, value in client_transport_info.items():
                 span.set_attribute(key, value)
 
     @staticmethod
@@ -194,6 +200,15 @@ class ClientWrapper(McpWrapper):
     """
     Wrapper for MCP client-side operations.
     """
+
+    @staticmethod
+    def wrap_client_session_init(wrapped: Callable[..., Any], instance: Any, args: Any, kwargs: Any) -> Any:
+        transport_info = context.get_value(_CLIENT_TRANSPORT_INFO_KEY)
+        result = wrapped(*args, **kwargs)
+        if isinstance(transport_info, dict):
+            # Keep the transport's dictionary so session ID updates remain visible.
+            setattr(instance, _CLIENT_TRANSPORT_INFO_ATTR, transport_info)
+        return result
 
     def wrap_session_send(
         self,
@@ -243,7 +258,9 @@ class ClientWrapper(McpWrapper):
                 message_json["params"]["_meta"].update(carrier)
 
                 request_id = getattr(instance, "_request_id", None)
-                self._set_mcp_attributes(span, message, request_id)
+                self._set_mcp_attributes(
+                    span, message, request_id, getattr(instance, _CLIENT_TRANSPORT_INFO_ATTR, None)
+                )
 
                 modified_message = message.model_validate(message_json)
                 new_args = (modified_message,) + args[1:]
@@ -380,7 +397,7 @@ class ClientWrapper(McpWrapper):
     def wrap_extract_session_id(wrapped: Callable[..., Any], instance: Any, args: Any, kwargs: Any) -> Any:
         result = wrapped(*args, **kwargs)
         if instance.session_id:
-            transport_info = context.get_value(_TRANSPORT_KEY)
+            transport_info = context.get_value(_CLIENT_TRANSPORT_INFO_KEY)
             if isinstance(transport_info, dict):
                 transport_info[MCP_SESSION_ID] = instance.session_id
         return result
@@ -393,7 +410,7 @@ class ClientWrapper(McpWrapper):
         # of disjointed traces without a common ancestor.
         span = self._tracer.start_span(self._SESSION_SPAN_NAME, kind=SpanKind.INTERNAL)
         ctx = trace.set_span_in_context(span)
-        ctx = context.set_value(_TRANSPORT_KEY, transport_info, ctx)
+        ctx = context.set_value(_CLIENT_TRANSPORT_INFO_KEY, transport_info, ctx)
 
         return span, context.attach(ctx)
 

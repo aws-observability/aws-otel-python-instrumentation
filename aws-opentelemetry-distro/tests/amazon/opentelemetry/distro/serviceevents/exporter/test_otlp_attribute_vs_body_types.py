@@ -8,14 +8,13 @@ These tests prove WHY the hybrid approach (flat attributes + structured body)
 is necessary for the ServiceEvents OTLP log data model:
 
 Key findings:
-- Span/Resource attributes: only accept primitives (bool, str, bytes, int, float)
-  and homogeneous sequences. Dicts are REJECTED by SDK validation.
-- LogRecord attributes (Python): technically accept dicts via AnyValue protobuf,
-  BUT Java's AttributeKey<T> has no mapKey — so dicts in attributes break
-  cross-SDK parity.
+- Attributes (Python): since OTel Python 1.45.0 all attributes accept any AnyValue,
+  including dicts, nested sequences and mixed-type sequences.
+- BUT Java's AttributeKey<T> has no mapKey and only supports homogeneous primitive
+  arrays — so dicts, lists of dicts and mixed-type sequences in attributes break
+  cross-SDK parity. Avoid them in attributes.
 - Body (AnyValue): accepts primitives + Mapping (dict) + Sequence with full
   nesting. This is where structured data belongs for cross-SDK compatibility.
-- Mixed-type sequences: stored as None (data lost) — avoid in attributes.
 """
 
 import unittest
@@ -137,23 +136,22 @@ class TestOtlpAttributeTypeConstraints(unittest.TestCase):
         # Python passes through, converted to tuple
         self.assertIn("errors", record.log_record.attributes)
 
-    def test_attributes_mixed_type_sequence_stored_as_none(self):
-        """Mixed-type sequences are stored as None in attributes (value lost).
+    def test_attributes_mixed_type_sequence_passes_through_in_python_log_records(self):
+        """Python LogRecord attributes accept mixed-type sequences.
 
-        The SDK detects mixed types and sets the value to None.
-        This proves mixed-type sequences are not safely representable in attributes.
+        Java SDK cannot represent this — attribute arrays must be homogeneous.
+        For cross-SDK parity, mixed-type sequences should be avoided in attributes.
         """
         record = self._emit_and_get(
             body="test",
             attributes={
                 "keep": "yes",
-                "mixed": [1, "two", 3.0],  # mixed types → stored as None
+                "mixed": [1, "two", 3.0],
             },
         )
         self.assertEqual(record.log_record.attributes["keep"], "yes")
-        # Key exists but value is None — data is lost
-        self.assertIn("mixed", record.log_record.attributes)
-        self.assertIsNone(record.log_record.attributes["mixed"])
+        # Python passes through, converted to tuple
+        self.assertEqual(record.log_record.attributes["mixed"], (1, "two", 3.0))
 
     # ── Body type tests ───────────────────────────────────────────────
 
@@ -344,50 +342,6 @@ class TestOtlpAttributeTypeConstraints(unittest.TestCase):
         # Body: deeply nested structure preserved
         self.assertEqual(record.body["exception_info"][0]["call_path"][0]["function_id"], "f1")
         self.assertTrue(record.body["exception_info"][0]["call_path"][0]["error"])
-
-
-class TestAttributeTypeValidation(unittest.TestCase):
-    """Direct validation of OTel SDK type constants."""
-
-    def test_valid_attr_types_are_primitives_only(self):
-        """_VALID_ATTR_VALUE_TYPES contains only primitives — no dict, no list."""
-        import opentelemetry.attributes as attrs
-
-        valid = attrs._VALID_ATTR_VALUE_TYPES
-        self.assertIn(bool, valid)
-        self.assertIn(str, valid)
-        self.assertIn(int, valid)
-        self.assertIn(float, valid)
-        self.assertIn(bytes, valid)
-        self.assertNotIn(dict, valid)
-        self.assertNotIn(list, valid)
-
-    def test_valid_anyvalue_types_include_mapping(self):
-        """_VALID_ANY_VALUE_TYPES includes Mapping (dict) — Body can hold dicts."""
-        import collections.abc
-
-        import opentelemetry.attributes as attrs
-
-        valid = attrs._VALID_ANY_VALUE_TYPES
-        self.assertIn(collections.abc.Mapping, valid)
-        self.assertIn(collections.abc.Sequence, valid)
-        self.assertIn(str, valid)
-        self.assertIn(int, valid)
-
-    def test_attr_types_are_strict_subset_of_anyvalue_types(self):
-        """Attribute types are a strict subset of AnyValue types.
-        This proves Body supports more types than Attributes."""
-        import opentelemetry.attributes as attrs
-
-        attr_types = set(attrs._VALID_ATTR_VALUE_TYPES)
-        any_types = set(attrs._VALID_ANY_VALUE_TYPES)
-
-        # Every attr type is also an anyvalue type
-        for t in attr_types:
-            self.assertIn(t, any_types, f"{t} is in attr types but not anyvalue types")
-
-        # AnyValue has MORE types than attributes
-        self.assertGreater(len(any_types), len(attr_types))
 
 
 if __name__ == "__main__":

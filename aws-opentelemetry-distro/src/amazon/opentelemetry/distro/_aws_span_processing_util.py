@@ -7,6 +7,7 @@ from typing import Dict, List
 from urllib.parse import ParseResult, urlparse
 
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_CONSUMER_PARENT_SPAN_KIND, AWS_LOCAL_OPERATION
+from amazon.opentelemetry.distro._utils import is_lambda_environment
 from opentelemetry.sdk.trace import InstrumentationScope, ReadableSpan
 from opentelemetry.semconv.trace import MessagingOperationValues, SpanAttributes
 from opentelemetry.trace import SpanKind
@@ -160,7 +161,7 @@ def get_ingress_operation(__, span: ReadableSpan) -> str:
     """
     operation: str = span.name
     scope = getattr(span, "instrumentation_scope", None)
-    if _AWS_LAMBDA_FUNCTION_NAME in os.environ and scope.name != "opentelemetry.instrumentation.flask":
+    if is_lambda_environment() and scope.name != "opentelemetry.instrumentation.flask":
         operation = os.environ.get(_AWS_LAMBDA_FUNCTION_NAME) + "/FunctionHandler"
     elif should_use_internal_operation(span):
         operation = INTERNAL_OPERATION

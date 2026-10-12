@@ -15,6 +15,7 @@ from typing import List, Optional, Tuple
 
 from amazon.opentelemetry.distro.serviceevents.models.resource_attributes import ResourceAttributes
 from amazon.opentelemetry.distro.version import __version__ as ADOT_VERSION
+from opentelemetry.sdk.environment_variables import OTEL_RESOURCE_ATTRIBUTES, OTEL_SERVICE_NAME
 
 _logger = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ def _get_service_name_from_resource_attributes() -> Optional[str]:
     Returns:
         Service name if found, None otherwise.
     """
-    env_resources = os.environ.get("OTEL_RESOURCE_ATTRIBUTES", "")
+    env_resources = os.environ.get(OTEL_RESOURCE_ATTRIBUTES, "")
     if not env_resources:
         return None
 
@@ -56,7 +57,7 @@ def _get_environment_from_resource_attributes() -> Optional[str]:
     Returns:
         Environment name if found, None otherwise.
     """
-    env_resources = os.environ.get("OTEL_RESOURCE_ATTRIBUTES", "")
+    env_resources = os.environ.get(OTEL_RESOURCE_ATTRIBUTES, "")
     if not env_resources:
         return None
 
@@ -328,7 +329,7 @@ class ServiceEventsConfig:
             3. Default value
             """
             # First try OTEL_SERVICE_NAME
-            service_name = os.getenv("OTEL_SERVICE_NAME")
+            service_name = os.getenv(OTEL_SERVICE_NAME)
             if service_name:
                 return service_name
 

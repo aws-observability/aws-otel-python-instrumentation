@@ -22,31 +22,45 @@ mock_credentials = Credentials(access_key="test_access_key", secret_key="test_se
 class TestAwsAuthSession(TestCase):
     @patch("requests.Session.request", return_value=requests.Response())
     @patch("botocore.session.Session.get_credentials", return_value=None)
-    def test_aws_auth_session_no_credentials(self, _, __):
+    def test_aws_auth_session_no_credentials(self, _, mock_request):
         """Tests that aws_auth_session will not inject SigV4 Headers if retrieving credentials returns None."""
 
         session = AwsAuthSession("us-east-1", "xray", get_aws_session())
-        actual_headers = {"test": "test"}
 
-        session.request("POST", AWS_OTLP_TRACES_ENDPOINT, data="", headers=actual_headers)
+        session.request("POST", AWS_OTLP_TRACES_ENDPOINT, data="", headers={"test": "test"})
 
+        actual_headers = mock_request.call_args.kwargs["headers"]
         self.assertNotIn(AUTHORIZATION_HEADER, actual_headers)
         self.assertNotIn(X_AMZ_DATE_HEADER, actual_headers)
         self.assertNotIn(X_AMZ_SECURITY_TOKEN_HEADER, actual_headers)
 
     @patch("requests.Session.request", return_value=requests.Response())
     @patch("botocore.session.Session.get_credentials", return_value=mock_credentials)
-    def test_aws_auth_session(self, _, __):
+    def test_aws_auth_session(self, _, mock_request):
         """Tests that aws_auth_session will inject SigV4 Headers if botocore is installed."""
 
         session = AwsAuthSession("us-east-1", "xray", get_aws_session())
-        actual_headers = {"test": "test"}
 
-        session.request("POST", AWS_OTLP_TRACES_ENDPOINT, data="", headers=actual_headers)
+        session.request("POST", AWS_OTLP_TRACES_ENDPOINT, data="", headers={"test": "test"})
 
+        actual_headers = mock_request.call_args.kwargs["headers"]
+        self.assertEqual(actual_headers["test"], "test")
         self.assertIn(AUTHORIZATION_HEADER, actual_headers)
         self.assertIn(X_AMZ_DATE_HEADER, actual_headers)
         self.assertIn(X_AMZ_SECURITY_TOKEN_HEADER, actual_headers)
+
+    @patch("requests.Session.request", return_value=requests.Response())
+    @patch("botocore.session.Session.get_credentials", return_value=mock_credentials)
+    def test_aws_auth_session_does_not_mutate_caller_headers(self, _, __):
+        """The upstream OTLP HTTP client reuses one headers dict across requests, so signing
+        headers must not be written back into it."""
+
+        session = AwsAuthSession("us-east-1", "xray", get_aws_session())
+        caller_headers = {"test": "test"}
+
+        session.request("POST", AWS_OTLP_TRACES_ENDPOINT, data="", headers=caller_headers)
+
+        self.assertEqual(caller_headers, {"test": "test"})
 
     @patch("requests.Session.request", return_value=requests.Response())
     @patch("botocore.session.Session.get_credentials", return_value=mock_credentials)
@@ -67,7 +81,7 @@ class TestAwsAuthSession(TestCase):
         self.assertEqual(mock_get_credentials.call_count, 1)
 
     @patch("requests.Session.request", return_value=requests.Response())
-    def test_credentials_retry_after_transient_failure(self, _):
+    def test_credentials_retry_after_transient_failure(self, mock_request):
         """A transient ``get_credentials()`` failure must NOT latch the resolved
         flag. The next ``request()`` call must retry resolution. This preserves
         self-healing behavior on transient errors (e.g., IMDS timeouts) and matches
@@ -82,19 +96,16 @@ class TestAwsAuthSession(TestCase):
             session = AwsAuthSession("us-east-1", "xray", get_aws_session())
 
             # 1st request: get_credentials raises, no auth headers added.
-            headers_first = {}
-            session.request("POST", AWS_OTLP_TRACES_ENDPOINT, data="", headers=headers_first)
-            self.assertNotIn(AUTHORIZATION_HEADER, headers_first)
+            session.request("POST", AWS_OTLP_TRACES_ENDPOINT, data="", headers={})
+            self.assertNotIn(AUTHORIZATION_HEADER, mock_request.call_args.kwargs["headers"])
 
             # 2nd request: get_credentials succeeds, auth headers must appear.
-            headers_second = {}
-            session.request("POST", AWS_OTLP_TRACES_ENDPOINT, data="", headers=headers_second)
-            self.assertIn(AUTHORIZATION_HEADER, headers_second)
+            session.request("POST", AWS_OTLP_TRACES_ENDPOINT, data="", headers={})
+            self.assertIn(AUTHORIZATION_HEADER, mock_request.call_args.kwargs["headers"])
 
             # 3rd request: cached credentials reused, no further get_credentials calls.
-            headers_third = {}
-            session.request("POST", AWS_OTLP_TRACES_ENDPOINT, data="", headers=headers_third)
-            self.assertIn(AUTHORIZATION_HEADER, headers_third)
+            session.request("POST", AWS_OTLP_TRACES_ENDPOINT, data="", headers={})
+            self.assertIn(AUTHORIZATION_HEADER, mock_request.call_args.kwargs["headers"])
 
             # Two resolution attempts: one failed, one succeeded; third request reuses cache.
             self.assertEqual(mock_get_credentials.call_count, 2)
@@ -161,32 +172,31 @@ class TestAwsAuthSession(TestCase):
         side_effect=RuntimeError("simulated patch failure"),
     )
     @patch("botocore.session.Session.get_credentials", return_value=mock_credentials)
-    def test_patch_failure_does_not_break_request(self, _, __, ___):
+    def test_patch_failure_does_not_break_request(self, _, __, mock_request):
         """If the SSL-context-rebind helper itself raises, the failure is logged
         but ``request()`` still proceeds and signs successfully. The patch is
         defensive infrastructure, not a hard precondition."""
         session = AwsAuthSession("us-east-1", "xray", get_aws_session())
-        actual_headers: dict = {}
 
-        session.request("POST", AWS_OTLP_TRACES_ENDPOINT, data="", headers=actual_headers)
+        session.request("POST", AWS_OTLP_TRACES_ENDPOINT, data="", headers={})
 
-        self.assertIn(AUTHORIZATION_HEADER, actual_headers)
+        self.assertIn(AUTHORIZATION_HEADER, mock_request.call_args.kwargs["headers"])
 
     @patch("requests.Session.request", return_value=requests.Response())
     @patch("botocore.session.Session.get_credentials", return_value=mock_credentials)
-    def test_signing_failure_does_not_break_request(self, _, __):
+    def test_signing_failure_does_not_break_request(self, _, mock_request):
         """If SigV4 signing itself raises, ``request()`` still issues the
         unauthenticated request rather than crashing the caller."""
         session = AwsAuthSession("us-east-1", "xray", get_aws_session())
 
         with patch("amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session.SigV4Auth") as mock_sigv4:
             mock_sigv4.return_value.add_auth.side_effect = RuntimeError("signing boom")
-            actual_headers: dict = {}
             # Should not raise
-            session.request("POST", AWS_OTLP_TRACES_ENDPOINT, data="", headers=actual_headers)
+            session.request("POST", AWS_OTLP_TRACES_ENDPOINT, data="", headers={})
 
         # No auth header because signing raised before headers could be merged.
-        self.assertNotIn(AUTHORIZATION_HEADER, actual_headers)
+        mock_request.assert_called_once()
+        self.assertNotIn(AUTHORIZATION_HEADER, mock_request.call_args.kwargs["headers"])
 
     @patch("requests.Session.request", return_value=requests.Response())
     @patch("botocore.session.Session.get_credentials", return_value=mock_credentials)

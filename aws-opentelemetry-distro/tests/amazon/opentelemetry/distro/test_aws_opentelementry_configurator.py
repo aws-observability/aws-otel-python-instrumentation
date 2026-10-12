@@ -19,19 +19,17 @@ from amazon.opentelemetry.distro.aws_lambda_span_processor import AwsLambdaSpanP
 from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter import AwsMetricAttributesSpanExporter
 from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     LAMBDA_SPAN_EXPORT_BATCH_SIZE,
+    METRICS_SERVICE,
     OTEL_EXPORTER_OTLP_LOGS_ENDPOINT,
     OTEL_EXPORTER_OTLP_LOGS_HEADERS,
     OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
     ApplicationSignalsExporterProvider,
     AwsOpenTelemetryConfigurator,
-    OtlpLogHeaderSetting,
-    _check_emf_exporter_enabled,
-    _clear_logs_header_cache,
     _create_aws_otlp_exporter,
-    _create_emf_exporter,
     _custom_import_sampler,
     _customize_log_record_processor,
     _customize_logs_exporter,
+    _customize_metric_exporter,
     _customize_metric_exporters,
     _customize_resource,
     _customize_sampler,
@@ -39,19 +37,22 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     _customize_span_processors,
     _export_unsampled_span_for_agent_observability,
     _export_unsampled_span_for_lambda,
-    _fetch_logs_header,
+    _has_authorization_header,
     _init_logging,
     _init_serviceevents,
     _init_tracing,
     _is_application_signals_enabled,
     _is_application_signals_runtime_enabled,
+    _is_aws_otlp_endpoint,
     _is_defer_to_workers_enabled,
     _is_serviceevents_enabled,
     _is_wsgi_master_process,
     _parse_config_string,
+    fetch_otlp_logs_header,
 )
 from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetryDistro
 from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetricsProcessor
+from amazon.opentelemetry.distro.exporter.aws.metrics._auto_aws_emf_exporter import _AutoAwsEmfExporter
 from amazon.opentelemetry.distro.exporter.console.logs.compact_console_log_exporter import (
     CompactConsoleLogRecordExporter,
 )
@@ -61,7 +62,9 @@ from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session impor
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor import (
     AwsCloudWatchOtlpBatchLogRecordProcessor,
 )
+from amazon.opentelemetry.distro.exporter.otlp.aws.logs._log_header_config import OtlpLogHeaderSetting
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_log_record_exporter import OTLPAwsLogRecordExporter
+from amazon.opentelemetry.distro.exporter.otlp.aws.metrics.otlp_aws_metric_exporter import OTLPAwsMetricExporter
 from amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter import OTLPAwsSpanExporter
 from amazon.opentelemetry.distro.gen_ai_nested_client_span_processor import GenAINestedClientSpanProcessor
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
@@ -79,9 +82,13 @@ from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExp
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.metrics import get_meter_provider
 from opentelemetry.processor.baggage import BaggageSpanProcessor
+from opentelemetry.sdk._configuration import _get_exporter_names, _import_exporters
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor, ConsoleLogRecordExporter
 from opentelemetry.sdk.environment_variables import OTEL_TRACES_SAMPLER, OTEL_TRACES_SAMPLER_ARG
+from opentelemetry.sdk.metrics import Counter
 from opentelemetry.sdk.metrics._internal.export import PeriodicExportingMetricReader
+from opentelemetry.sdk.metrics.export import AggregationTemporality, ConsoleMetricExporter
+from opentelemetry.sdk.metrics.view import LastValueAggregation
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import Span, SpanProcessor, Tracer, TracerProvider
 from opentelemetry.sdk.trace.export import SpanExporter
@@ -146,6 +153,24 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
     def tearDown(self):
         os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
         os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", None)
+
+    def test_when_metrics_exporter_is_set_loads_expected_exporters(self):
+        original_exporter = os.environ.get(OTEL_METRICS_EXPORTER)
+        try:
+            for env, expected in (
+                ("console", [ConsoleMetricExporter]),
+                ("awsemf", [_AutoAwsEmfExporter]),
+                ("console,awsemf", [ConsoleMetricExporter, _AutoAwsEmfExporter]),
+            ):
+                with self.subTest(env=env, expected=expected):
+                    os.environ[OTEL_METRICS_EXPORTER] = env
+                    _, metric_exporters, _ = _import_exporters([], _get_exporter_names("metrics"), [])
+                    self.assertEqual(list(metric_exporters.values()), expected)
+        finally:
+            if original_exporter is None:
+                os.environ.pop(OTEL_METRICS_EXPORTER, None)
+            else:
+                os.environ[OTEL_METRICS_EXPORTER] = original_exporter
 
     # The probability of this passing once without correct IDs is low, 20 times is inconceivable.
     def test_provide_generate_xray_ids(self):
@@ -732,6 +757,14 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             "https://xray.us-east-1.amazonaws.com/V1/TRACES",
             "https://XRAY.US-EAST-1.AMAZONAWS.COM/v1/traces",
             "https://xray.us-east-1.AMAZONAWS.COM/V1/traces",
+            "https://xray.cn-north-1.amazonaws.com.cn/v1/traces",
+            "https://xray.cn-northwest-1.amazonaws.com.cn/v1/traces",
+            "https://xray.us-gov-west-1.amazonaws.com/v1/traces",
+            "https://xray.eusc-de-east-1.amazonaws.eu/v1/traces",
+            "https://xray.us-iso-east-1.c2s.ic.gov/v1/traces",
+            "https://xray.us-isob-east-1.sc2s.sgov.gov/v1/traces",
+            "https://xray.eu-isoe-west-1.cloud.adc-e.uk/v1/traces",
+            "https://xray.us-isof-south-1.csp.hci.ic.gov/v1/traces",
         ]
 
         traces_bad_endpoints = [
@@ -758,6 +791,9 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             "https://xray.us-east-1.amazonaws.com:443/v1/traces",
             "https:/xray.us-east-1.amazonaws.com/v1/traces",
             "https:://xray.us-east-1.amazonaws.com/v1/traces",
+            "https://xray.cn-north-1.amazonaws.com.cn.evil/v1/traces",
+            "https://xray.us-iso-east-1.c2s.ic.gov.evil/v1/traces",
+            "https://xray.eu-isoe-west-1.adc-e.uk/v1/traces",
         ]
 
         good_configs = []
@@ -778,7 +814,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             bad_configs.append(config)
 
         for config in good_configs:
-            _clear_logs_header_cache()
+            fetch_otlp_logs_header.cache_clear()
             self.customize_exporter_test(
                 config,
                 _customize_span_exporter,
@@ -790,13 +826,13 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             )
 
         for config in bad_configs:
-            _clear_logs_header_cache()
+            fetch_otlp_logs_header.cache_clear()
             self.customize_exporter_test(
                 config,
                 _customize_span_exporter,
                 OTLPSpanExporter(),
                 OTLPSpanExporter,
-                Session,
+                None,
                 Compression.NoCompression,
                 Resource.get_empty(),
             )
@@ -804,6 +840,38 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertIsInstance(
             _customize_span_exporter(OTLPGrpcSpanExporter(), Resource.get_empty()), OTLPGrpcSpanExporter
         )
+
+    def test_customize_aws_exporters_sigv4_in_china_regions(self):
+        """Test that China OTLP endpoints select signed exporters with the correct service and region."""
+        for region in ("cn-north-1", "cn-northwest-1"):
+            with self.subTest(signal="traces", region=region), patch.dict(
+                os.environ,
+                {OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: f"https://xray.{region}.amazonaws.com.cn/v1/traces"},
+            ):
+                exporter = _customize_span_exporter(OTLPSpanExporter(), Resource.get_empty())
+
+                self.assertIsInstance(exporter, OTLPAwsSpanExporter)
+                self.assertIsInstance(exporter._session, AwsAuthSession)
+                self.assertEqual(exporter._session._service, "xray")
+                self.assertEqual(exporter._session._aws_region, region)
+
+            fetch_otlp_logs_header.cache_clear()
+            try:
+                with self.subTest(signal="logs", region=region), patch.dict(
+                    os.environ,
+                    {
+                        OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: f"https://logs.{region}.amazonaws.com.cn/v1/logs",
+                        OTEL_EXPORTER_OTLP_LOGS_HEADERS: "x-aws-log-group=test,x-aws-log-stream=test",
+                    },
+                ):
+                    exporter = _customize_logs_exporter(OTLPLogExporter())
+
+                    self.assertIsInstance(exporter, OTLPAwsLogRecordExporter)
+                    self.assertIsInstance(exporter._session, AwsAuthSession)
+                    self.assertEqual(exporter._session._service, "logs")
+                    self.assertEqual(exporter._session._aws_region, region)
+            finally:
+                fetch_otlp_logs_header.cache_clear()
 
     def test_customize_logs_exporter_sigv4(self):
         logs_good_endpoints = [
@@ -822,6 +890,14 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             "https://logs.us-east-1.amazonaws.com/V1/LOGS",
             "https://LOGS.US-EAST-1.AMAZONAWS.COM/v1/logs",
             "https://logs.us-east-1.AMAZONAWS.COM/V1/logs",
+            "https://logs.cn-north-1.amazonaws.com.cn/v1/logs",
+            "https://logs.cn-northwest-1.amazonaws.com.cn/v1/logs",
+            "https://logs.us-gov-west-1.amazonaws.com/v1/logs",
+            "https://logs.eusc-de-east-1.amazonaws.eu/v1/logs",
+            "https://logs.us-iso-east-1.c2s.ic.gov/v1/logs",
+            "https://logs.us-isob-east-1.sc2s.sgov.gov/v1/logs",
+            "https://logs.eu-isoe-west-1.cloud.adc-e.uk/v1/logs",
+            "https://logs.us-isof-south-1.csp.hci.ic.gov/v1/logs",
         ]
 
         logs_bad_endpoints = [
@@ -851,6 +927,9 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             "https://logs.us-east-1.amazonaws.com/v1/logging",
             "https://logs.us-east-1.amazonaws.com/v1/cloudwatchlogs",
             "https://logs.us-east-1.amazonaws.com/v1/cwlogs",
+            "https://logs.cn-north-1.amazonaws.com.cn.evil/v1/logs",
+            "https://logs.us-iso-east-1.c2s.ic.gov.evil/v1/logs",
+            "https://logs.eu-isoe-west-1.adc-e.uk/v1/logs",
         ]
 
         logs_bad_headers = [
@@ -888,7 +967,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             bad_configs.append(config)
 
         for config in good_configs:
-            _clear_logs_header_cache()
+            fetch_otlp_logs_header.cache_clear()
             self.customize_exporter_test(
                 config,
                 _customize_logs_exporter,
@@ -899,9 +978,9 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             )
 
         for config in bad_configs:
-            _clear_logs_header_cache()
+            fetch_otlp_logs_header.cache_clear()
             self.customize_exporter_test(
-                config, _customize_logs_exporter, OTLPLogExporter(), OTLPLogExporter, Session, Compression.NoCompression
+                config, _customize_logs_exporter, OTLPLogExporter(), OTLPLogExporter, None, Compression.NoCompression
             )
 
         self.assertIsInstance(_customize_logs_exporter(OTLPGrpcLogExporter()), OTLPGrpcLogExporter)
@@ -965,9 +1044,9 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
     ):
         """Test that ConsoleLogRecordExporter is replaced with CompactConsoleLogRecordExporter when in Lambda"""
 
-        # Mock _is_lambda_environment to return True
+        # Mock is_lambda_environment to return True
         with patch(
-            "amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_lambda_environment", return_value=True
+            "amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_lambda_environment", return_value=True
         ):
             # Test with ConsoleLogRecordExporter
             exporters = {"console": ConsoleLogRecordExporter}
@@ -989,7 +1068,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
         # Test when not in Lambda environment - should not replace
         with patch(
-            "amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_lambda_environment", return_value=False
+            "amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_lambda_environment", return_value=False
         ):
             exporters = {"console": ConsoleLogRecordExporter}
             _init_logging(exporters, Resource.get_empty())
@@ -1290,6 +1369,201 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
         os.environ.pop("OTEL_METRIC_EXPORT_INTERVAL", None)
 
+    # --- collector-less OTLP metrics SigV4 -------------------------------------------------
+
+    METRICS_ENDPOINT_KEY = "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"
+
+    def _clear_metrics_env(self):
+        for key in (
+            self.METRICS_ENDPOINT_KEY,
+            "OTEL_EXPORTER_OTLP_METRICS_HEADERS",
+            "OTEL_EXPORTER_OTLP_HEADERS",
+        ):
+            os.environ.pop(key, None)
+
+    def test_is_aws_otlp_endpoint_metrics(self):
+        """monitoring endpoints are recognized in both partitions, and lookalikes are rejected."""
+        good = [
+            "https://monitoring.us-east-1.amazonaws.com/v1/metrics",
+            "https://monitoring.us-west-2.amazonaws.com/v1/metrics",
+            "https://monitoring.cn-north-1.amazonaws.com.cn/v1/metrics",
+            "https://monitoring.cn-northwest-1.amazonaws.com.cn/v1/metrics",
+            "https://monitoring.us-gov-west-1.amazonaws.com/v1/metrics",
+            "https://monitoring.eusc-de-east-1.amazonaws.eu/v1/metrics",
+            "https://monitoring.us-iso-east-1.c2s.ic.gov/v1/metrics",
+            "https://monitoring.us-isob-east-1.sc2s.sgov.gov/v1/metrics",
+            "https://monitoring.eu-isoe-west-1.cloud.adc-e.uk/v1/metrics",
+            "https://monitoring.us-isof-south-1.csp.hci.ic.gov/v1/metrics",
+        ]
+        bad = [
+            # lookalike suffix must not be signed
+            "https://monitoring.cn-north-1.amazonaws.com.cn.evil/v1/metrics",
+            "https://monitoring.us-iso-east-1.c2s.ic.gov.evil/v1/metrics",
+            "https://monitoring.eu-isoe-west-1.adc-e.uk/v1/metrics",
+            "https://monitoring.us-east-1.amazonaws.com.evil/v1/metrics",
+            # wrong service host
+            "https://xray.us-east-1.amazonaws.com/v1/traces",
+            "https://logs.us-east-1.amazonaws.com/v1/logs",
+            # wrong path
+            "https://monitoring.us-east-1.amazonaws.com/v1/traces",
+            # not https
+            "http://monitoring.us-east-1.amazonaws.com/v1/metrics",
+            # non-AWS
+            "http://localhost:4318/v1/metrics",
+        ]
+
+        for endpoint in good:
+            with self.subTest(endpoint=endpoint):
+                self.assertTrue(_is_aws_otlp_endpoint(endpoint, METRICS_SERVICE))
+
+        for endpoint in bad:
+            with self.subTest(endpoint=endpoint):
+                self.assertFalse(_is_aws_otlp_endpoint(endpoint, METRICS_SERVICE))
+
+    def test_is_aws_otlp_endpoint_unknown_service_returns_false(self):
+        """An unrecognized service no longer falls through to the logs pattern."""
+        self.assertFalse(_is_aws_otlp_endpoint("https://logs.us-east-1.amazonaws.com/v1/logs", "not-a-service"))
+
+    def test_customize_metric_exporter_signs_aws_endpoints(self):
+        """Commercial and China monitoring endpoints select the signing exporter with correct scope."""
+        for region, endpoint in (
+            ("us-east-1", "https://monitoring.us-east-1.amazonaws.com/v1/metrics"),
+            ("cn-north-1", "https://monitoring.cn-north-1.amazonaws.com.cn/v1/metrics"),
+            ("cn-northwest-1", "https://monitoring.cn-northwest-1.amazonaws.com.cn/v1/metrics"),
+        ):
+            with self.subTest(region=region):
+                self._clear_metrics_env()
+                os.environ[self.METRICS_ENDPOINT_KEY] = endpoint
+                try:
+                    result = _customize_metric_exporter(OTLPHttpOTLPMetricExporter(endpoint=endpoint))
+
+                    self.assertIsInstance(result, OTLPAwsMetricExporter)
+                    self.assertIsInstance(result._session, AwsAuthSession)
+                    self.assertEqual(result._session._service, METRICS_SERVICE)
+                    self.assertEqual(result._session._aws_region, region)
+                finally:
+                    self._clear_metrics_env()
+
+    def test_customize_metric_exporter_preserves_temporality_and_aggregation(self):
+        """Replacing the exporter must not silently change what the metrics mean."""
+        endpoint = "https://monitoring.us-east-1.amazonaws.com/v1/metrics"
+        self._clear_metrics_env()
+        os.environ[self.METRICS_ENDPOINT_KEY] = endpoint
+        try:
+            temporality = {Counter: AggregationTemporality.DELTA}
+            aggregation = {Counter: LastValueAggregation()}
+            original = OTLPHttpOTLPMetricExporter(
+                endpoint=endpoint,
+                preferred_temporality=temporality,
+                preferred_aggregation=aggregation,
+            )
+
+            result = _customize_metric_exporter(original)
+
+            self.assertIsInstance(result, OTLPAwsMetricExporter)
+            self.assertEqual(result._preferred_temporality[Counter], AggregationTemporality.DELTA)
+            self.assertIs(result._preferred_aggregation[Counter], aggregation[Counter])
+        finally:
+            self._clear_metrics_env()
+
+    def test_customize_metric_exporter_passthrough_cases(self):
+        """Non-AWS endpoints, unset endpoints, and gRPC exporters are returned untouched."""
+        self._clear_metrics_env()
+        try:
+            # no metrics endpoint configured
+            plain = OTLPHttpOTLPMetricExporter()
+            self.assertIs(_customize_metric_exporter(plain), plain)
+
+            # non-AWS endpoint
+            os.environ[self.METRICS_ENDPOINT_KEY] = "http://localhost:4318/v1/metrics"
+            local = OTLPHttpOTLPMetricExporter(endpoint="http://localhost:4318/v1/metrics")
+            self.assertIs(_customize_metric_exporter(local), local)
+
+            # AWS endpoint but gRPC exporter: warn and leave untouched, never sign
+            os.environ[self.METRICS_ENDPOINT_KEY] = "https://monitoring.us-east-1.amazonaws.com/v1/metrics"
+            grpc_exporter = OTLPGrpcOTLPMetricExporter()
+            self.assertIs(_customize_metric_exporter(grpc_exporter), grpc_exporter)
+        finally:
+            self._clear_metrics_env()
+
+    def test_customize_metric_exporter_global_endpoint_does_not_activate_sigv4(self):
+        """A global OTEL_EXPORTER_OTLP_ENDPOINT must not activate metrics SigV4 (matches traces/logs)."""
+        self._clear_metrics_env()
+        os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = "https://monitoring.us-east-1.amazonaws.com"
+        try:
+            plain = OTLPHttpOTLPMetricExporter()
+            self.assertIs(_customize_metric_exporter(plain), plain)
+        finally:
+            os.environ.pop("OTEL_EXPORTER_OTLP_ENDPOINT", None)
+            self._clear_metrics_env()
+
+    def test_signal_specific_authorization_disables_sigv4(self):
+        """A signal-specific Authorization header is honored and SigV4 is not layered on top."""
+        endpoint = "https://monitoring.us-east-1.amazonaws.com/v1/metrics"
+        self._clear_metrics_env()
+        os.environ[self.METRICS_ENDPOINT_KEY] = endpoint
+        os.environ["OTEL_EXPORTER_OTLP_METRICS_HEADERS"] = "Authorization=Bearer%20token,x-custom=v"
+        try:
+            original = OTLPHttpOTLPMetricExporter(endpoint=endpoint)
+            result = _customize_metric_exporter(original)
+
+            self.assertIs(result, original)
+            self.assertNotIsInstance(result, OTLPAwsMetricExporter)
+        finally:
+            self._clear_metrics_env()
+
+    def test_global_authorization_does_not_disable_sigv4_and_warns(self):
+        """Per the revised rule, only the signal-specific variable selects bearer auth."""
+        endpoint = "https://monitoring.us-east-1.amazonaws.com/v1/metrics"
+        self._clear_metrics_env()
+        os.environ[self.METRICS_ENDPOINT_KEY] = endpoint
+        os.environ["OTEL_EXPORTER_OTLP_HEADERS"] = "Authorization=Bearer%20token"
+        try:
+            with self.assertLogs("amazon.opentelemetry.distro.aws_opentelemetry_configurator", level="WARNING") as logs:
+                result = _customize_metric_exporter(OTLPHttpOTLPMetricExporter(endpoint=endpoint))
+
+            # SigV4 still applied ...
+            self.assertIsInstance(result, OTLPAwsMetricExporter)
+            # ... and the silently-replaced global header is surfaced.
+            self.assertTrue(any("OTEL_EXPORTER_OTLP_HEADERS" in message for message in logs.output))
+        finally:
+            self._clear_metrics_env()
+
+    def test_signal_specific_headers_without_authorization_still_sign(self):
+        """Signal-specific headers that carry no Authorization must not disable SigV4."""
+        endpoint = "https://monitoring.us-east-1.amazonaws.com/v1/metrics"
+        self._clear_metrics_env()
+        os.environ[self.METRICS_ENDPOINT_KEY] = endpoint
+        os.environ["OTEL_EXPORTER_OTLP_METRICS_HEADERS"] = "x-custom=value"
+        try:
+            result = _customize_metric_exporter(OTLPHttpOTLPMetricExporter(endpoint=endpoint))
+            self.assertIsInstance(result, OTLPAwsMetricExporter)
+        finally:
+            self._clear_metrics_env()
+
+    def test_authorization_header_detection_parsing(self):
+        """Header-name parsing: case-insensitive, first '=' split, tolerant of encoded values."""
+        self.assertTrue(_has_authorization_header("Authorization=Bearer%20abc"))
+        self.assertTrue(_has_authorization_header("authorization=Bearer abc"))
+        self.assertTrue(_has_authorization_header("AUTHORIZATION=x"))
+        self.assertTrue(_has_authorization_header("x-a=1, Authorization=Bearer=with=equals"))
+        self.assertTrue(_has_authorization_header(" Authorization =v"))
+        self.assertFalse(_has_authorization_header("x-authorization-extra=v"))
+        self.assertFalse(_has_authorization_header("x-custom=value"))
+        self.assertFalse(_has_authorization_header(""))
+        self.assertFalse(_has_authorization_header(None))
+        # a bare key with no '=' is not a header assignment
+        self.assertFalse(_has_authorization_header("Authorization"))
+
+    def test_create_aws_otlp_exporter_unknown_service_returns_none(self):
+        self.assertIsNone(
+            _create_aws_otlp_exporter(
+                endpoint="https://monitoring.us-east-1.amazonaws.com/v1/metrics",
+                service="not-a-service",
+                region="us-east-1",
+            )
+        )
+
     def customize_exporter_test(
         self, config, executor, default_exporter, expected_exporter_type, expected_session, expected_compression, *args
     ):
@@ -1299,51 +1573,27 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         try:
             result = executor(default_exporter, *args)
             self.assertIsInstance(result, expected_exporter_type)
-            self.assertIsInstance(result._session, expected_session)
-            self.assertEqual(result._compression, expected_compression)
+            # Upstream always wraps the exporter in a requests-backed transport, creating its own
+            # Session when none is passed in. expected_session=None therefore means "unsigned":
+            # a plain Session rather than our SigV4-signing AwsAuthSession.
+            transport_session = getattr(result._client._transport, "_session", None)
+            if expected_session is None:
+                self.assertIsInstance(transport_session, Session)
+                self.assertNotIsInstance(transport_session, AwsAuthSession)
+            else:
+                self.assertIsInstance(transport_session, expected_session)
+            self.assertEqual(result._compression.value, expected_compression.value)
         finally:
             for key in config.keys():
                 os.environ.pop(key, None)
 
-    def test_check_emf_exporter_enabled(self):
-        # Test when OTEL_METRICS_EXPORTER is not set
-        os.environ.pop("OTEL_METRICS_EXPORTER", None)
-        self.assertFalse(_check_emf_exporter_enabled())
-
-        # Test when OTEL_METRICS_EXPORTER is empty
-        os.environ["OTEL_METRICS_EXPORTER"] = ""
-        self.assertFalse(_check_emf_exporter_enabled())
-
-        # Test when awsemf is not in the list
-        os.environ["OTEL_METRICS_EXPORTER"] = "console,otlp"
-        self.assertFalse(_check_emf_exporter_enabled())
-
-        # Test when awsemf is in the list
-        os.environ["OTEL_METRICS_EXPORTER"] = "console,awsemf,otlp"
-        self.assertTrue(_check_emf_exporter_enabled())
-        # Should remove awsemf from the list
-        self.assertEqual(os.environ["OTEL_METRICS_EXPORTER"], "console,otlp")
-
-        # Test when awsemf is the only exporter
-        os.environ["OTEL_METRICS_EXPORTER"] = "awsemf"
-        self.assertTrue(_check_emf_exporter_enabled())
-        # Should remove the environment variable entirely
-        self.assertNotIn("OTEL_METRICS_EXPORTER", os.environ)
-
-        # Test with spaces in the list
-        os.environ["OTEL_METRICS_EXPORTER"] = " console , awsemf , otlp "
-        self.assertTrue(_check_emf_exporter_enabled())
-        self.assertEqual(os.environ["OTEL_METRICS_EXPORTER"], "console,otlp")
-
-        # Clean up
-        os.environ.pop("OTEL_METRICS_EXPORTER", None)
-
-    def test_fetch_logs_header(self):
-        _clear_logs_header_cache()
+    def test_fetch_otlp_logs_header(self):
+        fetch_otlp_logs_header.cache_clear()
 
         # Test when headers are not set
         os.environ.pop(OTEL_EXPORTER_OTLP_LOGS_HEADERS, None)
-        result = _fetch_logs_header()
+        with self.assertNoLogs("amazon.opentelemetry.distro", level="WARNING"):
+            result = fetch_otlp_logs_header()
         self.assertIsInstance(result, OtlpLogHeaderSetting)
         self.assertIsNone(result.log_group)
         self.assertIsNone(result.log_stream)
@@ -1351,59 +1601,59 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertFalse(result.is_valid())
 
         # Test singleton behavior - should return the same cached instance
-        result2 = _fetch_logs_header()
+        result2 = fetch_otlp_logs_header()
         self.assertIs(result, result2)  # Same object reference
 
-        _clear_logs_header_cache()
+        fetch_otlp_logs_header.cache_clear()
         os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = "x-aws-log-group=test-group,x-aws-log-stream=test-stream"
-        result = _fetch_logs_header()
+        result = fetch_otlp_logs_header()
         self.assertEqual(result.log_group, "test-group")
         self.assertEqual(result.log_stream, "test-stream")
         self.assertIsNone(result.namespace)
         self.assertTrue(result.is_valid())
 
         # Test singleton behavior again
-        result2 = _fetch_logs_header()
+        result2 = fetch_otlp_logs_header()
         self.assertIs(result, result2)
 
-        _clear_logs_header_cache()
+        fetch_otlp_logs_header.cache_clear()
         os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = (
             "x-aws-log-group=test-group,x-aws-log-stream=test-stream,x-aws-metric-namespace=test-namespace"
         )
-        result = _fetch_logs_header()
+        result = fetch_otlp_logs_header()
         self.assertEqual(result.namespace, "test-namespace")
         self.assertTrue(result.is_valid())
 
-        _clear_logs_header_cache()
+        fetch_otlp_logs_header.cache_clear()
         os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = "x-aws-log-stream=test-stream"
-        result = _fetch_logs_header()
+        result = fetch_otlp_logs_header()
         self.assertEqual(result.log_stream, "test-stream")
         self.assertFalse(result.is_valid())
 
-        _clear_logs_header_cache()
+        fetch_otlp_logs_header.cache_clear()
         os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = "x-aws-log-group=test-group"
-        result = _fetch_logs_header()
+        result = fetch_otlp_logs_header()
         self.assertEqual(result.log_group, "test-group")
         self.assertIsNone(result.log_stream)
         self.assertFalse(result.is_valid())
 
-        _clear_logs_header_cache()
+        fetch_otlp_logs_header.cache_clear()
         os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = "x-aws-log-group=,x-aws-log-stream=test-stream"
-        result = _fetch_logs_header()
+        result = fetch_otlp_logs_header()
         self.assertIsNone(result.log_group)
         self.assertEqual(result.log_stream, "test-stream")
         self.assertFalse(result.is_valid())
 
-        _clear_logs_header_cache()
+        fetch_otlp_logs_header.cache_clear()
         os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = "x-aws-log-group=test-group,x-aws-log-stream="
-        result = _fetch_logs_header()
+        result = fetch_otlp_logs_header()
         self.assertEqual(result.log_group, "test-group")
         self.assertIsNone(result.log_stream)
         self.assertFalse(result.is_valid())
 
         # Clean up
         os.environ.pop(OTEL_EXPORTER_OTLP_LOGS_HEADERS, None)
-        _clear_logs_header_cache()
+        fetch_otlp_logs_header.cache_clear()
 
     @patch(
         "amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_agent_observability_enabled",
@@ -1546,206 +1796,6 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         # Should preserve existing agent type and not override it
         self.assertEqual(result.attributes[AWS_LOCAL_SERVICE], "test-service")
         self.assertEqual(result.attributes[AWS_SERVICE_TYPE], "existing-agent")
-
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._fetch_logs_header")
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_lambda_environment")
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_aws_session")
-    def test_create_emf_exporter_lambda_without_valid_headers(
-        self, mock_get_session, mock_is_lambda, mock_fetch_headers
-    ):
-        """Test _create_emf_exporter returns ConsoleEmfExporter for Lambda without valid log headers"""
-        # Setup mocks
-        mock_is_lambda.return_value = True
-        mock_header_setting = MagicMock()
-        mock_header_setting.is_valid.return_value = False
-        mock_header_setting.namespace = "test-namespace"
-        mock_fetch_headers.return_value = mock_header_setting
-
-        with patch(
-            "amazon.opentelemetry.distro.exporter.aws.metrics.console_emf_exporter.ConsoleEmfExporter"
-        ) as mock_console_exporter:
-            mock_exporter_instance = MagicMock()
-            mock_console_exporter.return_value = mock_exporter_instance
-
-            result = _create_emf_exporter()
-
-            self.assertEqual(result, mock_exporter_instance)
-            mock_console_exporter.assert_called_once_with(
-                namespace="test-namespace",
-            )
-
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._fetch_logs_header")
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_lambda_environment")
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_aws_session")
-    def test_create_emf_exporter_lambda_with_valid_headers(self, mock_get_session, mock_is_lambda, mock_fetch_headers):
-        """Test _create_emf_exporter returns AwsCloudWatchEmfExporter for Lambda with valid headers"""
-        # Setup mocks
-        mock_is_lambda.return_value = True
-        mock_session = MagicMock()
-        mock_get_session.return_value = mock_session
-
-        mock_header_setting = MagicMock()
-        mock_header_setting.is_valid.return_value = True
-        mock_header_setting.namespace = "test-namespace"
-        mock_header_setting.log_group = "test-group"
-        mock_header_setting.log_stream = "test-stream"
-        mock_fetch_headers.return_value = mock_header_setting
-
-        with patch(
-            "amazon.opentelemetry.distro.exporter.aws.metrics.aws_cloudwatch_emf_exporter.AwsCloudWatchEmfExporter"
-        ) as mock_cloudwatch_exporter:
-            mock_exporter_instance = MagicMock()
-            mock_cloudwatch_exporter.return_value = mock_exporter_instance
-
-            result = _create_emf_exporter()
-
-            self.assertEqual(result, mock_exporter_instance)
-            mock_cloudwatch_exporter.assert_called_once_with(
-                session=mock_session,
-                namespace="test-namespace",
-                log_group_name="test-group",
-                log_stream_name="test-stream",
-            )
-
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._fetch_logs_header")
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_lambda_environment")
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_aws_session")
-    def test_create_emf_exporter_non_lambda_with_valid_headers(
-        self, mock_get_session, mock_is_lambda, mock_fetch_headers
-    ):
-        """Test _create_emf_exporter returns AwsCloudWatchEmfExporter for non-Lambda with valid headers"""
-        # Setup mocks
-        mock_is_lambda.return_value = False
-        mock_session = MagicMock()
-        mock_get_session.return_value = mock_session
-
-        mock_header_setting = MagicMock()
-        mock_header_setting.is_valid.return_value = True
-        mock_header_setting.namespace = "test-namespace"
-        mock_header_setting.log_group = "test-group"
-        mock_header_setting.log_stream = "test-stream"
-        mock_fetch_headers.return_value = mock_header_setting
-
-        with patch(
-            "amazon.opentelemetry.distro.exporter.aws.metrics.aws_cloudwatch_emf_exporter.AwsCloudWatchEmfExporter"
-        ) as mock_cloudwatch_exporter:
-            mock_exporter_instance = MagicMock()
-            mock_cloudwatch_exporter.return_value = mock_exporter_instance
-
-            result = _create_emf_exporter()
-
-            self.assertEqual(result, mock_exporter_instance)
-            mock_cloudwatch_exporter.assert_called_once_with(
-                session=mock_session,
-                namespace="test-namespace",
-                log_group_name="test-group",
-                log_stream_name="test-stream",
-            )
-
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._fetch_logs_header")
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_lambda_environment")
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_aws_session")
-    def test_create_emf_exporter_non_lambda_without_valid_headers(
-        self, mock_get_session, mock_is_lambda, mock_fetch_headers
-    ):
-        """Test _create_emf_exporter returns None for non-Lambda without valid headers"""
-        # Setup mocks
-        mock_is_lambda.return_value = False
-        mock_session = MagicMock()
-        mock_get_session.return_value = mock_session
-
-        mock_header_setting = MagicMock()
-        mock_header_setting.is_valid.return_value = False
-        mock_fetch_headers.return_value = mock_header_setting
-
-        result = _create_emf_exporter()
-
-        self.assertIsNone(result)
-
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._fetch_logs_header")
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_lambda_environment")
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_aws_session")
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._logger")
-    def test_create_emf_exporter_no_botocore_session(
-        self, mock_logger, mock_get_session, mock_is_lambda, mock_fetch_headers
-    ):
-        """Test _create_emf_exporter returns None when botocore session is not available"""
-        # Setup mocks
-        mock_is_lambda.return_value = False
-        mock_get_session.return_value = None  # Simulate missing botocore
-
-        mock_header_setting = MagicMock()
-        mock_header_setting.is_valid.return_value = True
-        mock_fetch_headers.return_value = mock_header_setting
-
-        result = _create_emf_exporter()
-
-        self.assertIsNone(result)
-        mock_logger.warning.assert_called_once_with("botocore is not installed. EMF exporter requires botocore")
-
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._fetch_logs_header")
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._logger")
-    def test_create_emf_exporter_exception_handling(self, mock_logger, mock_fetch_headers):
-        """Test _create_emf_exporter handles exceptions gracefully"""
-        # Setup mocks to raise exception
-        test_exception = Exception("Test exception")
-        mock_fetch_headers.side_effect = test_exception
-
-        result = _create_emf_exporter()
-
-        self.assertIsNone(result)
-        mock_logger.error.assert_called_once_with("Failed to create EMF exporter: %s", test_exception)
-
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._fetch_logs_header")
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_lambda_environment")
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_aws_session")
-    def test_create_emf_exporter_lambda_without_valid_headers_none_namespace(
-        self, mock_get_session, mock_is_lambda, mock_fetch_headers
-    ):
-        """Test _create_emf_exporter with Lambda environment and None namespace"""
-        # Setup mocks
-        mock_is_lambda.return_value = True
-        mock_header_setting = MagicMock()
-        mock_header_setting.is_valid.return_value = False
-        mock_header_setting.namespace = None
-        mock_fetch_headers.return_value = mock_header_setting
-
-        with patch(
-            "amazon.opentelemetry.distro.exporter.aws.metrics.console_emf_exporter.ConsoleEmfExporter"
-        ) as mock_console_exporter:
-            mock_exporter_instance = MagicMock()
-            mock_console_exporter.return_value = mock_exporter_instance
-
-            result = _create_emf_exporter()
-
-            self.assertEqual(result, mock_exporter_instance)
-            mock_console_exporter.assert_called_once_with(
-                namespace=None,
-            )
-
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._fetch_logs_header")
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_lambda_environment")
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_aws_session")
-    def test_create_emf_exporter_cloudwatch_exporter_import_error(
-        self, mock_get_session, mock_is_lambda, mock_fetch_headers
-    ):
-        """Test _create_emf_exporter handles import errors for CloudWatch exporter"""
-        # Setup mocks
-        mock_is_lambda.return_value = False
-        mock_session = MagicMock()
-        mock_get_session.return_value = mock_session
-
-        mock_header_setting = MagicMock()
-        mock_header_setting.is_valid.return_value = True
-        mock_fetch_headers.return_value = mock_header_setting
-
-        # Mock import to raise ImportError
-        with patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._logger") as mock_logger:
-            with patch("builtins.__import__", side_effect=ImportError("Cannot import CloudWatch exporter")):
-                result = _create_emf_exporter()
-
-                self.assertIsNone(result)
-                mock_logger.error.assert_called_once()
 
 
 def validate_distro_environ():

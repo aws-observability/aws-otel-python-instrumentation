@@ -12,6 +12,26 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- revert: remove the `aws_sigv4` OTLP credential-provider entry point and session factory introduced in #794.
+  ([#926](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/926))
+- chore: update OpenTelemetry dependencies to 1.45.1/0.66b1. The CloudWatch Logs OTLP exporter now relies on the
+  upstream OTLP HTTP client's retry handling, which retries HTTP 429, 502, 503 and 504 and honors `Retry-After`
+  (previously 408, 429 and all 5xx were retried). `requests` is now declared as a direct dependency.
+  ([#905](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/905))
+- fix(mcp): inject client transport info into `ClientSession` to preserve it across task and thread boundaries
+  ([#921](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/921))
+- feat: recognize and SigV4-sign X-Ray, CloudWatch Logs, and CloudWatch Metrics OTLP endpoints in every AWS
+  partition: GovCloud, European Sovereign Cloud (`amazonaws.eu`), ISO (`c2s.ic.gov`), ISO-B (`sc2s.sgov.gov`),
+  ISO-E (`cloud.adc-e.uk`), and ISO-F (`csp.hci.ic.gov`), in addition to commercial and China. Agent observability
+  default endpoints now use the partition's DNS suffix.
+- fix(agent-observability): support X-Ray and CloudWatch Logs OTLP endpoints in AWS China regions
+- feat(metrics): sign collector-less OTLP metrics with SigV4 when exporting to the CloudWatch Metrics
+  OTLP endpoint, in both the commercial and AWS China partitions. Requires
+  `OTEL_METRICS_EXPORTER=otlp`, `OTEL_EXPORTER_OTLP_METRICS_PROTOCOL=http/protobuf`, and
+  `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=https://monitoring.<region>.amazonaws.com/v1/metrics`
+  (`.amazonaws.com.cn` in China). An `Authorization` header set in
+  `OTEL_EXPORTER_OTLP_<SIGNAL>_HEADERS` is preserved and SigV4 is not applied on top.
+
 ## v0.20.0 - 2026-09-14
 
 - feat(genai): add AWS-prefixed controls for GenAI instrumentation, MCP HTTP suppression, OpenAI Agents
@@ -85,8 +105,6 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## v0.18.0 - 2026-06-18
 
-- feat: support pluggable session injection for the OTLP HTTP exporter via the upstream OTel SDK hook
-  ([#794](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/794))
 - Nightly dependency update: OpenTelemetry 1.42.1/0.63b1
   ([#762](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/762))
 - feat(agent-observability): add `AWS_AGENTIC_INSTRUMENTATION` (`auto`/`enabled`/`disabled`, case-insensitive) as an escape hatch over auto-detection when `AGENT_OBSERVABILITY_ENABLED=true`; the switch only governs AWS native instrumentors and never disables third-party ones

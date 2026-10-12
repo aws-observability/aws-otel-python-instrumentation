@@ -23,6 +23,7 @@ from amazon.opentelemetry.distro.serviceevents.models import (
 )
 from amazon.opentelemetry.distro.serviceevents.utils import get_instance_id
 from amazon.opentelemetry.distro.serviceevents.utils.seh_histogram import SEHHistogram
+from opentelemetry.sdk.environment_variables import OTEL_SERVICE_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +69,7 @@ class EndpointMetricCollector(BaseCollector):
         self.environment = environment
 
         # Get service name from config or env var
-        self.service_name = service_name or os.getenv("OTEL_SERVICE_NAME", "UnknownService")
+        self.service_name = service_name or os.getenv(OTEL_SERVICE_NAME, "UnknownService")
 
         self.sdk_version = sdk_version
         self.git_commit_sha = os.getenv("OTEL_AWS_SERVICE_EVENTS_GIT_COMMIT_SHA")

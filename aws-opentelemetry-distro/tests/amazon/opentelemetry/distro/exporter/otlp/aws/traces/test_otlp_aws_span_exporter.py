@@ -44,11 +44,12 @@ class TestOTLPAwsSpanExporter(TestCase):
             session=get_aws_session(), aws_region="us-east-1", endpoint=endpoint, headers=custom_headers
         )
 
-        for key in _OTLP_AWS_HTTP_HEADERS.keys():
-            self.assertIn(key, exporter._session.headers)
+        # Upstream sends these as per-request headers (lowercased keys), which take precedence over session headers.
+        request_headers = exporter._client._headers
+        for key, value in _OTLP_AWS_HTTP_HEADERS.items():
+            self.assertEqual(request_headers[key.lower()], value)
 
-        self.assertEqual(exporter._session.headers["X-Custom-Header"], "custom-value")
-        self.assertIn("User-Agent", exporter._session.headers)
+        self.assertEqual(request_headers["x-custom-header"], "custom-value")
 
     @patch("amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.is_agent_observability_enabled")
     def test_ensure_llo_handler_when_disabled(self, mock_is_enabled):
