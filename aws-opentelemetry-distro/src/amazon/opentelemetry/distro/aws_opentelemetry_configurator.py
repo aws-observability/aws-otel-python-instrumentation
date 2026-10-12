@@ -34,7 +34,7 @@ from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder imp
     AwsMetricAttributesSpanExporterBuilder,
 )
 from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSpanMetricsProcessorBuilder
-from amazon.opentelemetry.distro.exporter.aws.metrics.aws_emf_exporter import AwsEmfExporter
+from amazon.opentelemetry.distro.exporter.aws.metrics._auto_aws_emf_exporter import _AutoAwsEmfExporter
 from amazon.opentelemetry.distro.exporter.console.logs.compact_console_log_exporter import (
     CompactConsoleLogRecordExporter,
 )
@@ -379,7 +379,7 @@ def _init_metrics(
             metric_readers.append(exporter_or_reader_class(**exporter_args))
         else:
             exporter = exporter_or_reader_class(**exporter_args)
-            if isinstance(exporter, AwsEmfExporter):
+            if isinstance(exporter, _AutoAwsEmfExporter):
                 if exporter.enabled:
                     emf_readers.append(PeriodicExportingMetricReader(exporter))
             else:

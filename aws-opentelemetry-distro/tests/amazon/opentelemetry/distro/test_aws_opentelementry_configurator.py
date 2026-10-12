@@ -52,7 +52,7 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
 )
 from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetryDistro
 from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetricsProcessor
-from amazon.opentelemetry.distro.exporter.aws.metrics.aws_emf_exporter import AwsEmfExporter
+from amazon.opentelemetry.distro.exporter.aws.metrics._auto_aws_emf_exporter import _AutoAwsEmfExporter
 from amazon.opentelemetry.distro.exporter.console.logs.compact_console_log_exporter import (
     CompactConsoleLogRecordExporter,
 )
@@ -159,8 +159,8 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         try:
             for env, expected in (
                 ("console", [ConsoleMetricExporter]),
-                ("awsemf", [AwsEmfExporter]),
-                ("console,awsemf", [ConsoleMetricExporter, AwsEmfExporter]),
+                ("awsemf", [_AutoAwsEmfExporter]),
+                ("console,awsemf", [ConsoleMetricExporter, _AutoAwsEmfExporter]),
             ):
                 with self.subTest(env=env, expected=expected):
                     os.environ[OTEL_METRICS_EXPORTER] = env
