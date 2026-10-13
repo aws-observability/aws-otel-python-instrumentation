@@ -18,7 +18,12 @@ class MysqlConnectorTest(DatabaseContractTestBase):
     @classmethod
     def set_up_dependency_container(cls) -> None:
         cls.container = (
-            MySqlContainer(image="public.ecr.aws/docker/library/mysql:latest", MYSQL_USER=DATABASE_USER, MYSQL_PASSWORD=DATABASE_PASSWORD, MYSQL_DATABASE=DATABASE_NAME)
+            MySqlContainer(
+                image="public.ecr.aws/docker/library/mysql:latest",
+                MYSQL_USER=DATABASE_USER,
+                MYSQL_PASSWORD=DATABASE_PASSWORD,
+                MYSQL_DATABASE=DATABASE_NAME,
+            )
             .with_kwargs(network=NETWORK_NAME)
             .with_name(DATABASE_HOST)
         )
