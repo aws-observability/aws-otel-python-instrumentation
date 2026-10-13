@@ -26,7 +26,10 @@ permissions:
 
 jobs:
   select-tests:
-    runs-on: ubuntu-latest
+    runs-on:
+      - codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}
+      - image:ubuntu-8.0
+      - instance-size:large
     outputs:
       tests: ${{ steps.filter.outputs.tests }}
     steps:
@@ -34,6 +37,9 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
         with:
           ref: ${{ inputs.ref || github.sha }}
+
+      - name: Set up CodeBuild runner
+        uses: ./.github/actions/codebuild-runner-setup
 
       - name: Select tests supporting Python ${{ inputs.python-version }}
         id: filter
@@ -51,7 +57,10 @@ jobs:
 
   contract-test:
     needs: select-tests
-    runs-on: ubuntu-latest
+    runs-on:
+      - codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}
+      - image:ubuntu-8.0
+      - instance-size:large
     strategy:
       fail-fast: false # ensures the entire test matrix is run, even if one permutation fails
       matrix:
@@ -62,6 +71,9 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
         with:
           ref: ${{ inputs.ref || github.sha }}
+
+      - name: Set up CodeBuild runner
+        uses: ./.github/actions/codebuild-runner-setup
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 #3.11.1
