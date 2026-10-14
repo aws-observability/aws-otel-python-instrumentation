@@ -361,7 +361,7 @@ jobs:
         || 'all-pr-checks-pass'
       }}
     # Fork PRs run on GitHub-hosted runners; the CodeBuild webhook requires approval for them.
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(format('["codebuild-adot-python-runner-{0}-{1}", "image:ubuntu-8.0", "instance-size:large"]', github.run_id, github.run_attempt)) }}
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(format('["codebuild-adot-python-runner-{0}-{1}", "image:ubuntu-8.0", "instance-size:small"]', github.run_id, github.run_attempt)) }}
     needs: [static-code-checks, lint, spotless, unit-tests, cloudwatch-plugin-otel-unit-tests, build-wheel, build-cloudwatch-plugin-otel, build-and-scan-image, contract-tests, build-lambda]
     if: always()
     steps:
