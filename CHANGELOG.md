@@ -12,6 +12,10 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- fix: with `OTEL_AWS_HTTP_OPERATION_PATHS` set, child spans now inherit the overridden operation from their server
+  span, so dependency metrics are reported under the same operation as the service metrics instead of the original
+  span name.
+  ([#931](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/931))
 - revert: remove the `aws_sigv4` OTLP credential-provider entry point and session factory introduced in #794.
   ([#926](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/926))
 - chore: update OpenTelemetry dependencies to 1.45.1/0.66b1. The CloudWatch Logs OTLP exporter now relies on the
@@ -24,6 +28,9 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   partition: GovCloud, European Sovereign Cloud (`amazonaws.eu`), ISO (`c2s.ic.gov`), ISO-B (`sc2s.sgov.gov`),
   ISO-E (`cloud.adc-e.uk`), and ISO-F (`csp.hci.ic.gov`), in addition to commercial and China. Agent observability
   default endpoints now use the partition's DNS suffix.
+
+## v0.21.0 - 2026-10-01
+
 - fix(agent-observability): support X-Ray and CloudWatch Logs OTLP endpoints in AWS China regions
 - feat(metrics): sign collector-less OTLP metrics with SigV4 when exporting to the CloudWatch Metrics
   OTLP endpoint, in both the commercial and AWS China partitions. Requires

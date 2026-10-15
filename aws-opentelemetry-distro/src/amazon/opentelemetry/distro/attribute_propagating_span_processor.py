@@ -9,7 +9,12 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_SDK_DESCENDANT,
     AWS_TRACE_FLAG_SAMPLED,
 )
-from amazon.opentelemetry.distro._aws_span_processing_util import is_aws_sdk_span, is_local_root
+from amazon.opentelemetry.distro._aws_span_processing_util import (
+    apply_operation_path_span_name,
+    get_operation_paths,
+    is_aws_sdk_span,
+    is_local_root,
+)
 from opentelemetry.context import Context
 from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor
 from opentelemetry.semconv.trace import SpanAttributes
@@ -76,15 +81,26 @@ class AttributePropagatingSpanProcessor(SpanProcessor):
         propagation_data: str = None
         if is_local_root(span):
             if not _is_server_kind(span):
-                propagation_data = self._propagation_data_extractor(span)
+                propagation_data = self._extract_propagation_data(span)
         elif parent_span and isinstance(parent_span, ReadableSpan) and _is_server_kind(parent_span):
-            propagation_data = self._propagation_data_extractor(parent_span)
+            propagation_data = self._extract_propagation_data(parent_span)
         elif parent_span and isinstance(parent_span, ReadableSpan):
             propagation_data = parent_span.attributes.get(self._propagation_data_key)
 
         if propagation_data is not None:
             span.set_attribute(self._propagation_data_key, propagation_data)
         span.set_attribute(AWS_TRACE_FLAG_SAMPLED, span.get_span_context().trace_flags.sampled)
+
+    def _extract_propagation_data(self, span: ReadableSpan) -> str:
+        """Apply the OTEL_AWS_HTTP_OPERATION_PATHS span name override (if configured and matching) before
+        extracting the propagation data, so that children inherit the same operation that the span's own metrics
+        and exported span use (the override is otherwise only applied at span end). The override is applied to a
+        snapshot, so the live span is not modified. This is a no-op when the env var is unset or no pattern matches
+        the span's URL path.
+        """
+        if get_operation_paths():
+            span = apply_operation_path_span_name(_snapshot(span))
+        return self._propagation_data_extractor(span)
 
     # pylint: disable=no-self-use
     @override
@@ -107,3 +123,20 @@ def _is_consumer_kind(span: ReadableSpan) -> bool:
 
 def _is_server_kind(span: ReadableSpan) -> bool:
     return SpanKind.SERVER == span.kind
+
+
+def _snapshot(span: ReadableSpan) -> ReadableSpan:
+    return ReadableSpan(
+        name=span.name,
+        context=span.context,
+        parent=span.parent,
+        resource=span.resource,
+        attributes=span.attributes,
+        events=span.events,
+        links=span.links,
+        kind=span.kind,
+        status=span.status,
+        start_time=span.start_time,
+        end_time=span.end_time,
+        instrumentation_scope=span.instrumentation_scope,
+    )
