@@ -139,9 +139,13 @@ OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS = "OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS"
 XRAY_SERVICE = "xray"
 LOGS_SERIVCE = "logs"
 METRICS_SERVICE = "monitoring"
+OSIS_SERVICE = "osis"
 AWS_TRACES_OTLP_ENDPOINT_PATTERN = rf"https://xray\.([a-z0-9-]+)\.{AWS_DNS_SUFFIX_PATTERN}/v1/traces$"
 AWS_LOGS_OTLP_ENDPOINT_PATTERN = rf"https://logs\.([a-z0-9-]+)\.{AWS_DNS_SUFFIX_PATTERN}/v1/logs$"
 AWS_METRICS_OTLP_ENDPOINT_PATTERN = rf"https://monitoring\.([a-z0-9-]+)\.{AWS_DNS_SUFFIX_PATTERN}/v1/metrics$"
+# An Amazon OpenSearch Ingestion (OSIS) pipeline serves every signal from one host, and the ingestion
+# path is set per pipeline, so only the host is matched: https://<pipeline-id>.<region>.osis.amazonaws.com/<path>
+AWS_OSIS_OTLP_ENDPOINT_PATTERN = rf"https://[a-z0-9-]+\.([a-z0-9-]+)\.osis\.{AWS_DNS_SUFFIX_PATTERN}(?:/[^?#]*)?$"
 
 # Maps a SigV4 signing service to the endpoint pattern that identifies it. Using an explicit
 # mapping rather than a conditional expression keeps each signal independent - the previous
@@ -151,6 +155,7 @@ _AWS_OTLP_ENDPOINT_PATTERNS = {
     XRAY_SERVICE: AWS_TRACES_OTLP_ENDPOINT_PATTERN,
     LOGS_SERIVCE: AWS_LOGS_OTLP_ENDPOINT_PATTERN,
     METRICS_SERVICE: AWS_METRICS_OTLP_ENDPOINT_PATTERN,
+    OSIS_SERVICE: AWS_OSIS_OTLP_ENDPOINT_PATTERN,
 }
 
 # UDP package size is not larger than 64KB
@@ -430,6 +435,10 @@ def _export_unsampled_span_for_agent_observability(trace_provider: TracerProvide
         span_exporter = _create_aws_otlp_exporter(endpoint=endpoint, service=XRAY_SERVICE, region=region)
     else:
         span_exporter = OTLPSpanExporter(endpoint=traces_endpoint)
+        if _is_aws_otlp_endpoint(traces_endpoint, OSIS_SERVICE):
+            span_exporter = _customize_osis_exporter(
+                span_exporter, traces_endpoint, OTLPSpanExporter, OTEL_EXPORTER_OTLP_TRACES_HEADERS
+            )
 
     trace_provider.add_span_processor(BatchUnsampledSpanProcessor(span_exporter=span_exporter))
 
@@ -552,6 +561,10 @@ def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource, sa
                 "Improper configuration: please export/set "
                 "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http/protobuf and OTEL_TRACES_EXPORTER=otlp"
             )
+    elif traces_endpoint and _is_aws_otlp_endpoint(traces_endpoint, OSIS_SERVICE):
+        span_exporter = _customize_osis_exporter(
+            span_exporter, traces_endpoint, OTLPSpanExporter, OTEL_EXPORTER_OTLP_TRACES_HEADERS
+        )
 
     if not _is_application_signals_enabled():
         return span_exporter
@@ -579,6 +592,9 @@ def _customize_log_record_processor(logger_provider: LoggerProvider, log_exporte
 
 def _customize_logs_exporter(log_exporter: LogRecordExporter) -> LogRecordExporter:
     logs_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT)
+
+    if logs_endpoint and _is_aws_otlp_endpoint(logs_endpoint, OSIS_SERVICE):
+        return _customize_osis_exporter(log_exporter, logs_endpoint, OTLPLogExporter, OTEL_EXPORTER_OTLP_LOGS_HEADERS)
 
     if logs_endpoint and _is_aws_otlp_endpoint(logs_endpoint, LOGS_SERIVCE):
 
@@ -664,6 +680,17 @@ def _customize_metric_exporter(metric_exporter: MetricExporter) -> MetricExporte
     returned unchanged, so non-AWS endpoints and gRPC keep their existing behavior.
     """
     metrics_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_METRICS_ENDPOINT)
+
+    if metrics_endpoint and _is_aws_otlp_endpoint(metrics_endpoint, OSIS_SERVICE):
+        return _customize_osis_exporter(
+            metric_exporter,
+            metrics_endpoint,
+            OTLPHttpOTLPMetricExporter,
+            OTEL_EXPORTER_OTLP_METRICS_HEADERS,
+            # pylint: disable=protected-access
+            preferred_temporality=metric_exporter._preferred_temporality,
+            preferred_aggregation=metric_exporter._preferred_aggregation,
+        )
 
     if not metrics_endpoint or not _is_aws_otlp_endpoint(metrics_endpoint, METRICS_SERVICE):
         return metric_exporter
@@ -896,6 +923,48 @@ def _extract_endpoint_and_region_from_otlp_endpoint(endpoint: str):
     region = endpoint.split(".")[1]
 
     return endpoint, region
+
+
+def _customize_osis_exporter(exporter, endpoint: str, otlp_http_exporter_class, signal_headers_env_var: str, **kwargs):
+    """Swap in a SigV4-signing exporter when an Amazon OpenSearch Ingestion (OSIS) pipeline endpoint is used.
+
+    OSIS accepts standard OTLP over HTTP for every signal, so the upstream exporter is reused and only its
+    session is replaced by one that signs for the ``osis`` service. None of the CloudWatch-specific exporter
+    behavior (forced gzip, log group headers, LLO extraction) applies. ``kwargs`` are forwarded to the new
+    exporter, e.g. the metrics temporality and aggregation.
+
+    The exporter is returned unchanged when it is not OTLP/HTTP, when the user configured their own
+    Authorization header for the signal, or when botocore is unavailable.
+    """
+    _logger.info("Detected using Amazon OpenSearch Ingestion OTLP Endpoint.")
+
+    if not isinstance(exporter, otlp_http_exporter_class):
+        _logger.warning(
+            "Improper configuration: Amazon OpenSearch Ingestion only accepts OTLP over HTTP, "
+            "please export/set OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf"
+        )
+        return exporter
+
+    if _is_sigv4_disabled_by_configured_auth(signal_headers_env_var):
+        return exporter
+
+    session = get_aws_session()
+    if not session:
+        _logger.warning("Sigv4 Auth requires botocore to be enabled")
+        return exporter
+
+    # pylint: disable=import-outside-toplevel
+    from amazon.opentelemetry.distro.exporter.otlp.aws.common._aws_http_headers import _OTLP_AWS_HTTP_HEADERS
+    from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
+
+    # The pipeline path is user-defined, so unlike the other AWS endpoints the URL is not lowercased.
+    region = endpoint.lower().split(".")[1]
+    return otlp_http_exporter_class(
+        endpoint=endpoint,
+        headers=dict(_OTLP_AWS_HTTP_HEADERS),
+        session=AwsAuthSession(session=session, aws_region=region, service=OSIS_SERVICE),
+        **kwargs,
+    )
 
 
 def _parse_otel_baggage_keys_env_var() -> set[str]:
