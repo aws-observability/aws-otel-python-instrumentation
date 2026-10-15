@@ -1557,7 +1557,9 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             "OTEL_EXPORTER_OTLP_LOGS_HEADERS",
             "OTEL_EXPORTER_OTLP_METRICS_HEADERS",
             "OTEL_EXPORTER_OTLP_HEADERS",
+            "OTEL_EXPORTER_OTLP_ENDPOINT",
             "AGENT_OBSERVABILITY_ENABLED",
+            "AWS_LAMBDA_FUNCTION_NAME",
         ):
             os.environ.pop(key, None)
 
@@ -1640,6 +1642,56 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
                     self._assert_signs_for_osis(result, exporter_class, endpoint, "us-east-1")
                 finally:
                     self._clear_osis_env()
+
+    def test_customize_exporters_sign_osis_base_endpoint(self):
+        """One base endpoint for a unified OTLP pipeline signs every signal at the path upstream derives."""
+        cases = (
+            ("traces", OTLPSpanExporter, lambda exporter: _customize_span_exporter(exporter, Resource.get_empty())),
+            ("logs", OTLPLogExporter, _customize_logs_exporter),
+            ("metrics", OTLPHttpOTLPMetricExporter, _customize_metric_exporter),
+        )
+        for base_endpoint in (self.OSIS_HOST, f"{self.OSIS_HOST}/"):
+            for signal, exporter_class, customize in cases:
+                with self.subTest(base_endpoint=base_endpoint, signal=signal):
+                    self._clear_osis_env()
+                    os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = base_endpoint
+                    try:
+                        result = customize(exporter_class())
+
+                        self._assert_signs_for_osis(
+                            result, exporter_class, f"{self.OSIS_HOST}/v1/{signal}", "us-east-1"
+                        )
+                    finally:
+                        self._clear_osis_env()
+
+    def test_signal_specific_endpoint_takes_precedence_over_osis_base_endpoint(self):
+        self._clear_osis_env()
+        os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = self.OSIS_HOST
+        os.environ["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"] = "https://xray.us-east-1.amazonaws.com/v1/traces"
+        os.environ["OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"] = "http://localhost:4318/v1/logs"
+        try:
+            traces_result = _customize_span_exporter(OTLPSpanExporter(), Resource.get_empty())
+            self.assertIsInstance(traces_result, OTLPAwsSpanExporter)
+            self.assertEqual(traces_result._session._service, XRAY_SERVICE)
+
+            logs_exporter = OTLPLogExporter()
+            self.assertIs(_customize_logs_exporter(logs_exporter), logs_exporter)
+        finally:
+            self._clear_osis_env()
+
+    def test_osis_base_endpoint_keeps_lambda_udp_default(self):
+        """On Lambda, traces without a signal-specific endpoint still go to the X-Ray daemon over UDP."""
+        self._clear_osis_env()
+        os.environ["AWS_LAMBDA_FUNCTION_NAME"] = "my-function"
+        os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = self.OSIS_HOST
+        try:
+            with patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._logger") as mock_logger:
+                result = _customize_span_exporter(OTLPSpanExporter(), Resource.get_empty())
+
+            self.assertIsInstance(result, OTLPUdpSpanExporter)
+            mock_logger.warning.assert_not_called()
+        finally:
+            self._clear_osis_env()
 
     def test_customize_logs_exporter_osis_does_not_require_log_group_headers(self):
         """CloudWatch Logs header requirements do not apply to OSIS."""

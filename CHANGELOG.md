@@ -13,9 +13,9 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 ## Unreleased
 
 - feat: recognize Amazon OpenSearch Ingestion (OSIS) pipeline endpoints
-  (`https://<pipeline-id>.<region>.osis.amazonaws.com/<path>`) in `OTEL_EXPORTER_OTLP_{TRACES,LOGS,METRICS}_ENDPOINT`
-  and SigV4-sign exports to them with the `osis` service. The upstream OTLP/HTTP exporters are used, so no
-  CloudWatch-specific behavior applies.
+  (`https://<pipeline-id>.<region>.osis.amazonaws.com/<path>`) in `OTEL_EXPORTER_OTLP_{TRACES,LOGS,METRICS}_ENDPOINT`,
+  or in `OTEL_EXPORTER_OTLP_ENDPOINT` for a unified OTLP pipeline, and SigV4-sign OTLP/HTTP exports to them with the
+  `osis` service. The upstream OTLP/HTTP exporters are used, so no CloudWatch-specific behavior applies.
   ([#933](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/933))
 - fix: with `OTEL_AWS_HTTP_OPERATION_PATHS` set, child spans now inherit the overridden operation from their server
   span, so dependency metrics are reported under the same operation as the service metrics instead of the original

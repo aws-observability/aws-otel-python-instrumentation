@@ -561,10 +561,12 @@ def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource, sa
                 "Improper configuration: please export/set "
                 "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http/protobuf and OTEL_TRACES_EXPORTER=otlp"
             )
-    elif traces_endpoint and _is_aws_otlp_endpoint(traces_endpoint, OSIS_SERVICE):
-        span_exporter = _customize_osis_exporter(
-            span_exporter, traces_endpoint, OTLPSpanExporter, OTEL_EXPORTER_OTLP_TRACES_HEADERS
-        )
+    else:
+        osis_endpoint = traces_endpoint or _get_signal_endpoint_from_base_endpoint("v1/traces")
+        if _is_aws_otlp_endpoint(osis_endpoint, OSIS_SERVICE):
+            span_exporter = _customize_osis_exporter(
+                span_exporter, osis_endpoint, OTLPSpanExporter, OTEL_EXPORTER_OTLP_TRACES_HEADERS
+            )
 
     if not _is_application_signals_enabled():
         return span_exporter
@@ -593,8 +595,9 @@ def _customize_log_record_processor(logger_provider: LoggerProvider, log_exporte
 def _customize_logs_exporter(log_exporter: LogRecordExporter) -> LogRecordExporter:
     logs_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT)
 
-    if logs_endpoint and _is_aws_otlp_endpoint(logs_endpoint, OSIS_SERVICE):
-        return _customize_osis_exporter(log_exporter, logs_endpoint, OTLPLogExporter, OTEL_EXPORTER_OTLP_LOGS_HEADERS)
+    osis_endpoint = logs_endpoint or _get_signal_endpoint_from_base_endpoint("v1/logs")
+    if _is_aws_otlp_endpoint(osis_endpoint, OSIS_SERVICE):
+        return _customize_osis_exporter(log_exporter, osis_endpoint, OTLPLogExporter, OTEL_EXPORTER_OTLP_LOGS_HEADERS)
 
     if logs_endpoint and _is_aws_otlp_endpoint(logs_endpoint, LOGS_SERIVCE):
 
@@ -681,10 +684,11 @@ def _customize_metric_exporter(metric_exporter: MetricExporter) -> MetricExporte
     """
     metrics_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_METRICS_ENDPOINT)
 
-    if metrics_endpoint and _is_aws_otlp_endpoint(metrics_endpoint, OSIS_SERVICE):
+    osis_endpoint = metrics_endpoint or _get_signal_endpoint_from_base_endpoint("v1/metrics")
+    if _is_aws_otlp_endpoint(osis_endpoint, OSIS_SERVICE):
         return _customize_osis_exporter(
             metric_exporter,
-            metrics_endpoint,
+            osis_endpoint,
             OTLPHttpOTLPMetricExporter,
             OTEL_EXPORTER_OTLP_METRICS_HEADERS,
             # pylint: disable=protected-access
@@ -925,6 +929,18 @@ def _extract_endpoint_and_region_from_otlp_endpoint(endpoint: str):
     return endpoint, region
 
 
+def _get_signal_endpoint_from_base_endpoint(signal_path: str) -> Optional[str]:
+    """The endpoint upstream OTLP/HTTP exporters derive from ``OTEL_EXPORTER_OTLP_ENDPOINT`` for a signal.
+
+    Only used for OSIS: a single pipeline host serves every signal, so unlike the per-service X-Ray and
+    CloudWatch endpoints, a base endpoint pointing at OSIS unambiguously targets it for each signal.
+    """
+    base_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_ENDPOINT)
+    if not base_endpoint:
+        return None
+    return base_endpoint.rstrip("/") + "/" + signal_path
+
+
 def _customize_osis_exporter(exporter, endpoint: str, otlp_http_exporter_class, signal_headers_env_var: str, **kwargs):
     """Swap in a SigV4-signing exporter when an Amazon OpenSearch Ingestion (OSIS) pipeline endpoint is used.
 
@@ -940,7 +956,7 @@ def _customize_osis_exporter(exporter, endpoint: str, otlp_http_exporter_class, 
 
     if not isinstance(exporter, otlp_http_exporter_class):
         _logger.warning(
-            "Improper configuration: Amazon OpenSearch Ingestion only accepts OTLP over HTTP, "
+            "Improper configuration: SigV4 signing for Amazon OpenSearch Ingestion requires OTLP over HTTP, "
             "please export/set OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf"
         )
         return exporter
