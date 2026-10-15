@@ -41,9 +41,12 @@ runs:
         fi
 
     # CodeBuild runs the job in a container (/.dockerenv exists) next to the Docker daemon, not on it.
+    # Testcontainers 3.x then resolves container addresses through Docker's default "bridge" network,
+    # which fails (KeyError: 'bridge') for containers on a custom network, as our contract tests use.
     # Mapped ports are not reachable on localhost from the job container, only via its default gateway
-    # (the Docker host). Point Testcontainers there (TC_HOST for Python, TESTCONTAINERS_HOST_OVERRIDE for
-    # Node) and drop the in-container marker, which otherwise sends Testcontainers to the "bridge" network.
+    # (the Docker host), so point Testcontainers there and drop the in-container detection.
+    # Testcontainers 3.x detects "in a container" only from /.dockerenv and has no setting to turn it off, so
+    # the file has to go. The job container is discarded after the job, so nothing outlives this change.
     - name: Point Testcontainers at the Docker host
       if: runner.os == 'Linux'
       shell: bash
@@ -52,9 +55,6 @@ runs:
           gateway=$(ip route 2>/dev/null | awk '/^default/ {print $3; exit}')
           if [ -n "$gateway" ]; then
             echo "TC_HOST=$gateway" >> "$GITHUB_ENV"
-            echo "TESTCONTAINERS_HOST_OVERRIDE=$gateway" >> "$GITHUB_ENV"
-            # The machine is discarded after the job, so Ryuk cleanup is unneeded; its image comes from Docker Hub.
-            echo "TESTCONTAINERS_RYUK_DISABLED=true" >> "$GITHUB_ENV"
             sudo rm -f /.dockerenv
           fi
         fi
