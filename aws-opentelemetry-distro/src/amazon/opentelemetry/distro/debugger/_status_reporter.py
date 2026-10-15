@@ -147,6 +147,10 @@ class StatusReporter:
         """
         with self._manager._lock:
             bp_sets_snapshot = list(self._manager._active_functions.values())
+            # Location hashes the manager could not bind (e.g. a line-level breakpoint on a
+            # target with no __code__). Their ERROR is reported immediately by the manager; the
+            # periodic/initial sweep must not promote them to READY (which would mask the error).
+            failed_config_ids = set(getattr(self._manager, "_failed_configs", {}))
 
         with self._lock:
             ready_entries = []
@@ -188,8 +192,9 @@ class StatusReporter:
                                 )
                             )
 
-                    # Report Ready once (only in initial reports, only if never hit)
-                    if state.hit_count == 0 and is_initial_report:
+                    # Report Ready once (only in initial reports, only if never hit, and only if
+                    # the config bound successfully — a failed config keeps its ERROR status).
+                    if state.hit_count == 0 and is_initial_report and state.location_hash not in failed_config_ids:
                         config_key = StatusReporter._get_config_key(
                             "SNAPSHOT", state.location_hash, ConfigurationStatus.READY
                         )
