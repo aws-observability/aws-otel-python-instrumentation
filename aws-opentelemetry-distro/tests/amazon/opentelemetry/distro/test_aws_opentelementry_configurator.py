@@ -19,10 +19,13 @@ from amazon.opentelemetry.distro.aws_lambda_span_processor import AwsLambdaSpanP
 from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter import AwsMetricAttributesSpanExporter
 from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     LAMBDA_SPAN_EXPORT_BATCH_SIZE,
+    LOGS_SERIVCE,
     METRICS_SERVICE,
+    OSIS_SERVICE,
     OTEL_EXPORTER_OTLP_LOGS_ENDPOINT,
     OTEL_EXPORTER_OTLP_LOGS_HEADERS,
     OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
+    XRAY_SERVICE,
     ApplicationSignalsExporterProvider,
     AwsOpenTelemetryConfigurator,
     _create_aws_otlp_exporter,
@@ -1540,6 +1543,228 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             self.assertIsInstance(result, OTLPAwsMetricExporter)
         finally:
             self._clear_metrics_env()
+
+    # --- Amazon OpenSearch Ingestion (OSIS) SigV4 ------------------------------------------
+
+    OSIS_HOST = "https://my-pipeline-abc123.us-east-1.osis.amazonaws.com"
+
+    def _clear_osis_env(self):
+        for key in (
+            "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
+            "OTEL_EXPORTER_OTLP_LOGS_HEADERS",
+            "OTEL_EXPORTER_OTLP_METRICS_HEADERS",
+            "OTEL_EXPORTER_OTLP_HEADERS",
+            "OTEL_EXPORTER_OTLP_ENDPOINT",
+            "AGENT_OBSERVABILITY_ENABLED",
+            "AWS_LAMBDA_FUNCTION_NAME",
+        ):
+            os.environ.pop(key, None)
+
+    def _assert_signs_for_osis(self, exporter, exporter_class, endpoint, region):
+        self.assertIs(type(exporter), exporter_class)
+        self.assertEqual(exporter._endpoint, endpoint)
+        session = exporter._client._transport._session
+        self.assertIsInstance(session, AwsAuthSession)
+        self.assertEqual(session._service, OSIS_SERVICE)
+        self.assertEqual(session._aws_region, region)
+
+    def test_is_aws_otlp_endpoint_osis(self):
+        """Any path on an OSIS pipeline host is recognized, and lookalikes are rejected."""
+        good = [
+            f"{self.OSIS_HOST}/v1/traces",
+            f"{self.OSIS_HOST}/v1/logs",
+            f"{self.OSIS_HOST}/v1/metrics",
+            f"{self.OSIS_HOST}/opentelemetry/v1/traces",
+            f"{self.OSIS_HOST}/My-Custom/Path",
+            self.OSIS_HOST,
+            "https://MY-PIPELINE-ABC123.US-WEST-2.OSIS.AMAZONAWS.COM/v1/traces",
+            "https://my-pipeline-abc123.cn-north-1.osis.amazonaws.com.cn/v1/traces",
+            "https://my-pipeline-abc123.us-gov-west-1.osis.amazonaws.com/v1/traces",
+        ]
+        bad = [
+            # not https
+            "http://my-pipeline-abc123.us-east-1.osis.amazonaws.com/v1/traces",
+            # missing pipeline or region label
+            "https://us-east-1.osis.amazonaws.com/v1/traces",
+            "https://osis.us-east-1.amazonaws.com/v1/traces",
+            # lookalike suffix must not be signed
+            "https://my-pipeline-abc123.us-east-1.osis.amazonaws.com.evil/v1/traces",
+            "https://my-pipeline-abc123.us-east-1.osis.amazon.com/v1/traces",
+            # query strings, fragments and ports are not part of an OSIS ingestion URL
+            f"{self.OSIS_HOST}/v1/traces?param=value",
+            f"{self.OSIS_HOST}/v1/traces#fragment",
+            "https://my-pipeline-abc123.us-east-1.osis.amazonaws.com:443/v1/traces",
+            # other AWS services and non-AWS endpoints
+            "https://xray.us-east-1.amazonaws.com/v1/traces",
+            "http://localhost:4318/v1/traces",
+        ]
+
+        for endpoint in good:
+            with self.subTest(endpoint=endpoint):
+                self.assertTrue(_is_aws_otlp_endpoint(endpoint, OSIS_SERVICE))
+
+        for endpoint in bad:
+            with self.subTest(endpoint=endpoint):
+                self.assertFalse(_is_aws_otlp_endpoint(endpoint, OSIS_SERVICE))
+
+    def test_osis_endpoints_do_not_match_other_services(self):
+        """An OSIS endpoint must never be signed for X-Ray, CloudWatch Logs or CloudWatch Metrics."""
+        for path, service in (
+            ("/v1/traces", XRAY_SERVICE),
+            ("/v1/logs", LOGS_SERIVCE),
+            ("/v1/metrics", METRICS_SERVICE),
+        ):
+            with self.subTest(service=service):
+                self.assertFalse(_is_aws_otlp_endpoint(f"{self.OSIS_HOST}{path}", service))
+
+    def test_customize_exporters_sign_osis_endpoints(self):
+        """Every signal pointed at an OSIS pipeline gets an upstream OTLP/HTTP exporter that signs for osis."""
+        cases = (
+            ("traces", OTLPSpanExporter, _customize_span_exporter),
+            ("logs", OTLPLogExporter, _customize_logs_exporter),
+            ("metrics", OTLPHttpOTLPMetricExporter, _customize_metric_exporter),
+        )
+        for signal, exporter_class, customize in cases:
+            with self.subTest(signal=signal):
+                self._clear_osis_env()
+                # The pipeline path is user-defined, so its case must be preserved.
+                endpoint = f"{self.OSIS_HOST}/Ingest/v1/{signal}"
+                os.environ[f"OTEL_EXPORTER_OTLP_{signal.upper()}_ENDPOINT"] = endpoint
+                try:
+                    if signal == "traces":
+                        result = customize(exporter_class(endpoint=endpoint), Resource.get_empty())
+                    else:
+                        result = customize(exporter_class(endpoint=endpoint))
+
+                    self._assert_signs_for_osis(result, exporter_class, endpoint, "us-east-1")
+                finally:
+                    self._clear_osis_env()
+
+    def test_customize_exporters_sign_osis_base_endpoint(self):
+        """One base endpoint for a unified OTLP pipeline signs every signal at the path upstream derives."""
+        cases = (
+            ("traces", OTLPSpanExporter, lambda exporter: _customize_span_exporter(exporter, Resource.get_empty())),
+            ("logs", OTLPLogExporter, _customize_logs_exporter),
+            ("metrics", OTLPHttpOTLPMetricExporter, _customize_metric_exporter),
+        )
+        for base_endpoint in (self.OSIS_HOST, f"{self.OSIS_HOST}/"):
+            for signal, exporter_class, customize in cases:
+                with self.subTest(base_endpoint=base_endpoint, signal=signal):
+                    self._clear_osis_env()
+                    os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = base_endpoint
+                    try:
+                        result = customize(exporter_class())
+
+                        self._assert_signs_for_osis(
+                            result, exporter_class, f"{self.OSIS_HOST}/v1/{signal}", "us-east-1"
+                        )
+                    finally:
+                        self._clear_osis_env()
+
+    def test_signal_specific_endpoint_takes_precedence_over_osis_base_endpoint(self):
+        self._clear_osis_env()
+        os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = self.OSIS_HOST
+        os.environ["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"] = "https://xray.us-east-1.amazonaws.com/v1/traces"
+        os.environ["OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"] = "http://localhost:4318/v1/logs"
+        try:
+            traces_result = _customize_span_exporter(OTLPSpanExporter(), Resource.get_empty())
+            self.assertIsInstance(traces_result, OTLPAwsSpanExporter)
+            self.assertEqual(traces_result._session._service, XRAY_SERVICE)
+
+            logs_exporter = OTLPLogExporter()
+            self.assertIs(_customize_logs_exporter(logs_exporter), logs_exporter)
+        finally:
+            self._clear_osis_env()
+
+    def test_osis_base_endpoint_keeps_lambda_udp_default(self):
+        """On Lambda, traces without a signal-specific endpoint still go to the X-Ray daemon over UDP."""
+        self._clear_osis_env()
+        os.environ["AWS_LAMBDA_FUNCTION_NAME"] = "my-function"
+        os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = self.OSIS_HOST
+        try:
+            with patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._logger") as mock_logger:
+                result = _customize_span_exporter(OTLPSpanExporter(), Resource.get_empty())
+
+            self.assertIsInstance(result, OTLPUdpSpanExporter)
+            mock_logger.warning.assert_not_called()
+        finally:
+            self._clear_osis_env()
+
+    def test_customize_logs_exporter_osis_does_not_require_log_group_headers(self):
+        """CloudWatch Logs header requirements do not apply to OSIS."""
+        endpoint = f"{self.OSIS_HOST}/v1/logs"
+        self._clear_osis_env()
+        os.environ["OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"] = endpoint
+        try:
+            with patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._logger") as mock_logger:
+                result = _customize_logs_exporter(OTLPLogExporter(endpoint=endpoint))
+
+            self.assertNotIsInstance(result, OTLPAwsLogRecordExporter)
+            self._assert_signs_for_osis(result, OTLPLogExporter, endpoint, "us-east-1")
+            mock_logger.warning.assert_not_called()
+        finally:
+            self._clear_osis_env()
+
+    def test_customize_metric_exporter_osis_preserves_temporality_and_aggregation(self):
+        endpoint = f"{self.OSIS_HOST}/v1/metrics"
+        self._clear_osis_env()
+        os.environ["OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"] = endpoint
+        try:
+            temporality = {Counter: AggregationTemporality.DELTA}
+            aggregation = {Counter: LastValueAggregation()}
+            original = OTLPHttpOTLPMetricExporter(
+                endpoint=endpoint, preferred_temporality=temporality, preferred_aggregation=aggregation
+            )
+
+            result = _customize_metric_exporter(original)
+
+            self._assert_signs_for_osis(result, OTLPHttpOTLPMetricExporter, endpoint, "us-east-1")
+            self.assertEqual(result._preferred_temporality[Counter], AggregationTemporality.DELTA)
+            self.assertIs(result._preferred_aggregation[Counter], aggregation[Counter])
+        finally:
+            self._clear_osis_env()
+
+    def test_customize_exporters_osis_passthrough_cases(self):
+        """gRPC exporters, a signal-specific Authorization header, and missing botocore leave the exporter as is."""
+        endpoint = f"{self.OSIS_HOST}/v1/traces"
+        self._clear_osis_env()
+        os.environ["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"] = endpoint
+        try:
+            grpc_exporter = OTLPGrpcSpanExporter(endpoint="localhost:4317")
+            with self.assertLogs("amazon.opentelemetry.distro.aws_opentelemetry_configurator", level="WARNING") as logs:
+                self.assertIs(_customize_span_exporter(grpc_exporter, Resource.get_empty()), grpc_exporter)
+            self.assertTrue(any("http/protobuf" in message for message in logs.output))
+
+            os.environ["OTEL_EXPORTER_OTLP_TRACES_HEADERS"] = "Authorization=Bearer%20token"
+            bearer_exporter = OTLPSpanExporter(endpoint=endpoint)
+            self.assertIs(_customize_span_exporter(bearer_exporter, Resource.get_empty()), bearer_exporter)
+            os.environ.pop("OTEL_EXPORTER_OTLP_TRACES_HEADERS")
+
+            with patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_aws_session", return_value=None):
+                no_botocore_exporter = OTLPSpanExporter(endpoint=endpoint)
+                self.assertIs(
+                    _customize_span_exporter(no_botocore_exporter, Resource.get_empty()), no_botocore_exporter
+                )
+        finally:
+            self._clear_osis_env()
+
+    def test_export_unsampled_span_for_agent_observability_signs_osis(self):
+        mock_tracer_provider: TracerProvider = MagicMock()
+        endpoint = f"{self.OSIS_HOST}/v1/traces"
+        self._clear_osis_env()
+        os.environ["AGENT_OBSERVABILITY_ENABLED"] = "true"
+        os.environ["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"] = endpoint
+        try:
+            _export_unsampled_span_for_agent_observability(mock_tracer_provider, Resource.get_empty())
+
+            processor = mock_tracer_provider.add_span_processor.call_args_list[0].args[0]
+            self.assertIsInstance(processor, BatchUnsampledSpanProcessor)
+            self._assert_signs_for_osis(processor.span_exporter, OTLPSpanExporter, endpoint, "us-east-1")
+        finally:
+            self._clear_osis_env()
 
     def test_authorization_header_detection_parsing(self):
         """Header-name parsing: case-insensitive, first '=' split, tolerant of encoded values."""
