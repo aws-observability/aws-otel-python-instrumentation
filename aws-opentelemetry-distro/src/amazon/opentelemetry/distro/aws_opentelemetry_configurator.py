@@ -956,7 +956,7 @@ def _customize_osis_exporter(exporter, endpoint: str, otlp_http_exporter_class, 
 
     if not isinstance(exporter, otlp_http_exporter_class):
         _logger.warning(
-            "Improper configuration: SigV4 signing for Amazon OpenSearch Ingestion requires OTLP over HTTP, "
+            "Improper configuration: Amazon OpenSearch Ingestion only accepts OTLP over HTTP, "
             "please export/set OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf"
         )
         return exporter
