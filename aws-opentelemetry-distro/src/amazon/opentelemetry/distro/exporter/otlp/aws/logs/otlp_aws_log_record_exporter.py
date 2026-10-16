@@ -82,6 +82,7 @@ class OTLPAwsLogRecordExporter(OTLPLogExporter):
             client_certificate_file,
             headers,
             timeout,
+            # Upstream defaults to no compression; use gzip only when unset, preserving explicit "none".
             compression=(
                 _resolve_compression(OTEL_EXPORTER_OTLP_LOGS_COMPRESSION)
                 if os.environ.get(OTEL_EXPORTER_OTLP_LOGS_COMPRESSION) or os.environ.get(OTEL_EXPORTER_OTLP_COMPRESSION)

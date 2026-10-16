@@ -25,13 +25,12 @@ class AwsAuthSession(requests.Session):
     A custom requests Session that adds AWS SigV4 authentication to HTTP requests.
 
     This class extends the standard requests.Session to automatically sign requests
-    with AWS Signature Version 4 (SigV4) authentication. It's specifically designed
-    for use with the OpenTelemetry Logs and Traces exporters that send data to AWS OTLP endpoints:
-    X-Ray (traces) and CloudWatch Logs.
+    with AWS Signature Version 4 (SigV4) authentication. It is used by the
+    OpenTelemetry HTTP exporters for logs, metrics, and traces sent to AWS OTLP endpoints.
 
-    The session requires botocore to be installed for signing headers. If botocore
-    is not available, the session will fall back to standard unauthenticated requests
-    and log an error message.
+    Botocore is required for signing. When no botocore session is supplied, one is
+    created using the default AWS credential chain. Credentials are resolved on
+    the first request.
 
     Usage:
         session = AwsAuthSession(aws_region="us-west-2", service="logs")
@@ -39,11 +38,20 @@ class AwsAuthSession(requests.Session):
                                     data=payload, headers=headers)
 
     Args:
-        aws_region (str): The AWS region to use for signing (e.g., "us-east-1")
-        service (str): The AWS service name for signing (e.g., "logs" or "xray")
+        aws_region (str): Optional signing region. Falls back to ``AWS_REGION``,
+            then ``AWS_DEFAULT_REGION``, then the endpoint hostname, then the
+            botocore session's configured region.
+        service (str): Optional signing service (e.g., "logs", "xray", or "osis").
+            Falls back to ``OTEL_EXPORTER_OTLP_SIGV4_SERVICE``.
         session (Session): Optional botocore session; defaults to the AWS credential chain.
         endpoint (str): Optional resolved OTLP endpoint used to infer the region when
-            AWS region environment variables are unset.
+            no explicit region or AWS region environment variable is set. Region
+            labels are detected within recognized AWS domain suffixes, including
+            OSIS pipeline, VPC endpoint, and generic service hostnames.
+
+    Raises:
+        ValueError: If the signing service or region cannot be resolved, or no
+            botocore session is available.
     """
 
     def __init__(

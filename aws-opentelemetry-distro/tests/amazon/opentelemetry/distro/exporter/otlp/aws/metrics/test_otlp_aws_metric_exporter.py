@@ -59,20 +59,6 @@ class TestOTLPAwsMetricExporter(TestCase):
         self.environment.start()
         self.addCleanup(self.environment.stop)
 
-        self._saved = {
-            k: os.environ.get(k) for k in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN")
-        }
-        os.environ["AWS_ACCESS_KEY_ID"] = "AKIAIOSFODNN7EXAMPLE"
-        os.environ["AWS_SECRET_ACCESS_KEY"] = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
-        os.environ.pop("AWS_SESSION_TOKEN", None)
-
-    def tearDown(self):
-        for key, value in self._saved.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
-
     def _exporter(self, endpoint, region, **kwargs):
         return OTLPAwsMetricExporter(aws_region=region, session=Session(), endpoint=endpoint, **kwargs)
 
