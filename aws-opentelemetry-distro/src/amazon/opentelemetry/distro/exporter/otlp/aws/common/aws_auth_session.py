@@ -65,7 +65,11 @@ class AwsAuthSession(requests.Session):
         aws_region = aws_region or os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
         if not aws_region:
             host = urlparse(endpoint or "").hostname or ""
-            match = re.fullmatch(rf"(?:xray|logs|monitoring)\.([a-z0-9-]+)\.{AWS_DNS_SUFFIX_PATTERN}", host)
+            # Locate a region label independently of the service name and its position in the hostname.
+            match = re.fullmatch(
+                rf"(?:[a-z0-9-]+\.)*([a-z]+(?:-[a-z]+)+-\d+)(?:\.[a-z0-9-]+)*\.{AWS_DNS_SUFFIX_PATTERN}",
+                host,
+            )
             aws_region = match.group(1) if match else session.get_config_variable("region")
 
         if not aws_region:

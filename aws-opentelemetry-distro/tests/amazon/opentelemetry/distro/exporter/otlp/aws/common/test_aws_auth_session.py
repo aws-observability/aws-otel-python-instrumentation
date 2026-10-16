@@ -255,6 +255,39 @@ class TestAwsAuthSession(TestCase):
         self.assertEqual(session._aws_region, "us-west-2")
         self.assertIsInstance(session._session, Session)
 
+    def test_should_detect_region_from_aws_endpoint(self):
+        partitions = (
+            ("us-east-1", "amazonaws.com"),
+            ("us-west-2", "amazonaws.com"),
+            ("us-gov-west-1", "amazonaws.com"),
+            ("cn-north-1", "amazonaws.com.cn"),
+            ("eusc-de-east-1", "amazonaws.eu"),
+            ("us-iso-east-1", "c2s.ic.gov"),
+            ("us-isob-east-1", "sc2s.sgov.gov"),
+            ("eu-isoe-west-1", "cloud.adc-e.uk"),
+            ("us-isof-south-1", "csp.hci.ic.gov"),
+        )
+        hostnames = (
+            "xray.{region}.{suffix}",
+            "logs.{region}.{suffix}",
+            "monitoring.{region}.{suffix}",
+            "my-pipeline-abc123.{region}.osis.{suffix}",
+            "us-east-1.{region}.osis.{suffix}",
+            "aps-workspaces.{region}.{suffix}",
+            "custom-service.{region}.{suffix}",
+            "custom-service-fips.{region}.{suffix}",
+            "bucket.s3.{region}.{suffix}",
+            "vpce-id.custom-service.{region}.vpce.{suffix}",
+        )
+        for region, suffix in partitions:
+            for hostname in hostnames:
+                endpoint = f"https://{hostname.format(region=region, suffix=suffix)}/v1/traces"
+                with self.subTest(endpoint=endpoint):
+                    session = AwsAuthSession(service="custom-signing-service", endpoint=endpoint)
+                    self.addCleanup(session.close)
+                    self.assertEqual(session._aws_region, region)
+                    self.assertEqual(session._service, "custom-signing-service")
+
     def test_aws_auth_session_should_use_environment_signing_service_when_arguments_are_omitted(self):
         with patch.dict(os.environ, {OTEL_EXPORTER_OTLP_SIGV4_SERVICE: "logs", "AWS_REGION": "us-east-1"}):
             session = AwsAuthSession()
