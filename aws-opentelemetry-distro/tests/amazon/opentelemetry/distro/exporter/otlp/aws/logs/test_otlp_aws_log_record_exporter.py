@@ -1,7 +1,9 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+import gzip
 import os
 import time
+import zlib
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
@@ -21,13 +23,16 @@ from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_log_record_expo
 from opentelemetry._logs._internal import LogRecord
 from opentelemetry._logs.severity import SeverityNumber
 from opentelemetry.environment_variables import OTEL_LOGS_EXPORTER, OTEL_METRICS_EXPORTER, OTEL_TRACES_EXPORTER
+from opentelemetry.exporter.otlp.proto.common._log_encoder import encode_logs
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.sdk._configuration import _get_exporter_names, _import_exporters
 from opentelemetry.sdk._logs import ReadableLogRecord
 from opentelemetry.sdk._logs.export import LogRecordExportResult
 from opentelemetry.sdk.environment_variables import (
+    OTEL_EXPORTER_OTLP_COMPRESSION,
     OTEL_EXPORTER_OTLP_ENDPOINT,
     OTEL_EXPORTER_OTLP_HEADERS,
+    OTEL_EXPORTER_OTLP_LOGS_COMPRESSION,
     OTEL_EXPORTER_OTLP_LOGS_ENDPOINT,
     OTEL_EXPORTER_OTLP_LOGS_HEADERS,
     OTEL_EXPORTER_OTLP_LOGS_TIMEOUT,
@@ -98,7 +103,7 @@ class TestOTLPAwsLogsExporter(TestCase):
     @patch("requests.Session.request")
     def test_export_success(self, mock_request):
         mock_request.return_value = self.good_response
-        """Tests that the exporter always compresses the serialized logs with gzip before exporting."""
+        """Tests that the exporter defaults to gzip compression before exporting."""
         result = self.exporter.export(self.logs)
 
         mock_request.assert_called_once()
@@ -114,6 +119,107 @@ class TestOTLPAwsLogsExporter(TestCase):
         self.assertIsNotNone(data)
         self.assertTrue(len(data) >= 10)
         self.assertEqual(data[0:2], b"\x1f\x8b")
+
+    @patch("requests.Session.request")
+    def test_should_respect_compression_environment_variables(self, mock_request):
+        mock_request.return_value = self.good_response
+        serialized_logs = encode_logs(self.logs).SerializeToString()
+        # Variables omitted from "environment" are unset.
+        # expected_encoding=None means no Content-Encoding header and an uncompressed payload.
+        cases = (
+            {
+                "environment": {},
+                "expected_encoding": "gzip",
+            },
+            {
+                "environment": {OTEL_EXPORTER_OTLP_LOGS_COMPRESSION: "none"},
+                "expected_encoding": None,
+            },
+            {
+                "environment": {OTEL_EXPORTER_OTLP_COMPRESSION: "none"},
+                "expected_encoding": None,
+            },
+            {
+                "environment": {OTEL_EXPORTER_OTLP_LOGS_COMPRESSION: "gzip"},
+                "expected_encoding": "gzip",
+            },
+            {
+                "environment": {OTEL_EXPORTER_OTLP_COMPRESSION: "gzip"},
+                "expected_encoding": "gzip",
+            },
+            {
+                "environment": {OTEL_EXPORTER_OTLP_LOGS_COMPRESSION: "deflate"},
+                "expected_encoding": "deflate",
+            },
+            {
+                "environment": {OTEL_EXPORTER_OTLP_COMPRESSION: "deflate"},
+                "expected_encoding": "deflate",
+            },
+            {
+                "environment": {
+                    OTEL_EXPORTER_OTLP_LOGS_COMPRESSION: "none",
+                    OTEL_EXPORTER_OTLP_COMPRESSION: "gzip",
+                },
+                "expected_encoding": None,
+            },
+            {
+                "environment": {
+                    OTEL_EXPORTER_OTLP_LOGS_COMPRESSION: "gzip",
+                    OTEL_EXPORTER_OTLP_COMPRESSION: "none",
+                },
+                "expected_encoding": "gzip",
+            },
+            {
+                "environment": {
+                    OTEL_EXPORTER_OTLP_LOGS_COMPRESSION: "deflate",
+                    OTEL_EXPORTER_OTLP_COMPRESSION: "gzip",
+                },
+                "expected_encoding": "deflate",
+            },
+            {
+                "environment": {
+                    OTEL_EXPORTER_OTLP_LOGS_COMPRESSION: "",
+                    OTEL_EXPORTER_OTLP_COMPRESSION: "none",
+                },
+                "expected_encoding": None,
+            },
+            {
+                "environment": {
+                    OTEL_EXPORTER_OTLP_LOGS_COMPRESSION: "",
+                    OTEL_EXPORTER_OTLP_COMPRESSION: "",
+                },
+                "expected_encoding": "gzip",
+            },
+            {
+                "environment": {OTEL_EXPORTER_OTLP_LOGS_COMPRESSION: " GZIP "},
+                "expected_encoding": "gzip",
+            },
+            {
+                "environment": {OTEL_EXPORTER_OTLP_LOGS_COMPRESSION: "unsupported"},
+                "expected_encoding": None,
+            },
+        )
+        for case in cases:
+            with self.subTest(environment=case["environment"], expected_encoding=case["expected_encoding"]):
+                with patch.dict(os.environ, case["environment"]):
+                    exporter = OTLPAwsLogRecordExporter(
+                        session=get_aws_session(), aws_region="us-east-1", endpoint=self._ENDPOINT
+                    )
+                    self.addCleanup(exporter.shutdown)
+                    mock_request.reset_mock()
+                    result = exporter.export(self.logs)
+
+                mock_request.assert_called_once()
+                self.assertEqual(result, LogRecordExportResult.SUCCESS)
+                request = mock_request.call_args.kwargs
+                expected_encoding = case["expected_encoding"]
+                self.assertEqual(request["headers"].get("Content-Encoding"), expected_encoding)
+                data = request["data"]
+                if expected_encoding == "gzip":
+                    data = gzip.decompress(data)
+                elif expected_encoding == "deflate":
+                    data = zlib.decompress(data)
+                self.assertEqual(data, serialized_logs)
 
     @patch("requests.Session.request")
     def test_should_not_export_if_shutdown(self, mock_request):
