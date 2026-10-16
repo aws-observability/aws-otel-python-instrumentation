@@ -1,13 +1,16 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import os
 from typing import Dict, Optional
 
 from botocore.session import Session
 
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
 from opentelemetry.exporter.otlp.proto.http import Compression
+from opentelemetry.exporter.otlp.proto.http._common import _resolve_compression
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
+from opentelemetry.sdk.environment_variables import OTEL_EXPORTER_OTLP_COMPRESSION, OTEL_EXPORTER_OTLP_LOGS_COMPRESSION
 
 
 class OTLPAwsLogRecordExporter(OTLPLogExporter):
@@ -18,7 +21,8 @@ class OTLPAwsLogRecordExporter(OTLPLogExporter):
 
     Differences from upstream OTLPLogExporter:
     1. Requests are SigV4 signed via AwsAuthSession
-    2. Always compresses data with gzip before sending
+    2. Defaults to gzip compression, with OTEL_EXPORTER_OTLP_LOGS_COMPRESSION
+       or OTEL_EXPORTER_OTLP_COMPRESSION overriding the default
     3. Optionally sets the x-aws-log-group / x-aws-log-stream headers
 
     Retry behavior (Retry-After header support, retrying HTTP 429/502/503/504, and interruptible
@@ -58,6 +62,10 @@ class OTLPAwsLogRecordExporter(OTLPLogExporter):
             client_certificate_file,
             headers,
             timeout,
-            compression=Compression.Gzip,
+            compression=(
+                _resolve_compression(OTEL_EXPORTER_OTLP_LOGS_COMPRESSION)
+                if os.environ.get(OTEL_EXPORTER_OTLP_LOGS_COMPRESSION) or os.environ.get(OTEL_EXPORTER_OTLP_COMPRESSION)
+                else Compression.Gzip
+            ),
             session=self._session,
         )
