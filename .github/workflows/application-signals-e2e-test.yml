@@ -29,7 +29,7 @@ jobs:
     runs-on:
       - codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}
       - image:ubuntu-8.0
-      - instance-size:large
+      - instance-size:small
     steps:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@a03048d87541d1d9fcf2ecf528a4a65ba9bd7838 #5.0.0
