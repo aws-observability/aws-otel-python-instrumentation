@@ -20,7 +20,8 @@ permissions:
 
 jobs:
   di-contract-tests:
-    runs-on: ubuntu-latest
+    # Fork PRs run on GitHub-hosted runners; the CodeBuild webhook requires approval for them.
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(format('["codebuild-adot-python-runner-{0}-{1}", "image:ubuntu-8.0", "instance-size:large"]', github.run_id, github.run_attempt)) }}
     strategy:
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
@@ -30,6 +31,9 @@ jobs:
     steps:
       - name: Checkout Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+
+      - name: Set up CodeBuild runner
+        uses: ./.github/actions/codebuild-runner-setup
 
       - name: Build wheel
         uses: ./.github/actions/artifacts_build

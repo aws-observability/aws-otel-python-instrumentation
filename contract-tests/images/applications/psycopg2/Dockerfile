@@ -2,7 +2,7 @@
 # Assumes existence of dist/aws_opentelemetry_distro-<pkg_version>-py3-none-any.whl.
 # Assumes filename of aws_opentelemetry_distro-<pkg_version>-py3-none-any.whl is passed in as "DISTRO" arg.
 ARG PYTHON_VERSION=3.10
-FROM python:${PYTHON_VERSION}
+FROM public.ecr.aws/docker/library/python:${PYTHON_VERSION}
 WORKDIR /psycopg2
 COPY ./dist/$DISTRO /psycopg2
 COPY ./contract-tests/images/applications/psycopg2 /psycopg2

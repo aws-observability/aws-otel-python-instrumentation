@@ -18,7 +18,12 @@ class Psycopg2Test(DatabaseContractTestBase):
     @classmethod
     def set_up_dependency_container(cls) -> None:
         cls.container = (
-            PostgresContainer(user=DATABASE_USER, password=DATABASE_PASSWORD, dbname=DATABASE_NAME)
+            PostgresContainer(
+                image="public.ecr.aws/docker/library/postgres:17",
+                user=DATABASE_USER,
+                password=DATABASE_PASSWORD,
+                dbname=DATABASE_NAME,
+            )
             .with_kwargs(network=NETWORK_NAME)
             .with_name(DATABASE_HOST)
         )
