@@ -42,7 +42,10 @@ runs:
           jq -r --arg name "$WORKFLOW_NAME" '.workflows[] | select(.name == $name) | .id')
         # Pick the latest run on the branch; if head-sha is given, only accept a run built from that
         # exact commit -- this ties the release to the main build of the commit being released.
-        LATEST_RUN=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$WORKFLOW_ID/runs?branch=$TARGET_BRANCH&per_page=100" |
+        # Filter by head_sha server-side too, so an older commit isn't missed when it's more than
+        # 100 runs back on the branch.
+        QUERY="branch=$TARGET_BRANCH&per_page=100${TARGET_HEAD_SHA:+&head_sha=$TARGET_HEAD_SHA}"
+        LATEST_RUN=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$WORKFLOW_ID/runs?$QUERY" |
           jq -c --arg branch "$TARGET_BRANCH" --arg sha "$TARGET_HEAD_SHA" \
             '[.workflow_runs[] | select(.head_branch == $branch and ($sha == "" or .head_sha == $sha))] | sort_by(.created_at) | .[-1]')
 

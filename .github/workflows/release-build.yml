@@ -186,6 +186,8 @@ jobs:
           name: staging-image
           path: staging-image
 
+      # Keep this before the PyPI publishes: an image tag can be overwritten on a re-run, but a PyPI
+      # version is permanent, so a failed promote must abort before anything reaches PyPI.
       - name: Promote validated main-build image to release ECRs
         run: |
           set -euo pipefail
