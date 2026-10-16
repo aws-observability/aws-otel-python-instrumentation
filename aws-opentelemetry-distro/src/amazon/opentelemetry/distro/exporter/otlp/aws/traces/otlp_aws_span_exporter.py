@@ -11,8 +11,8 @@ from amazon.opentelemetry.distro._utils import is_agent_observability_enabled, i
 from amazon.opentelemetry.distro.exporter.otlp.aws.common._aws_http_headers import _OTLP_AWS_HTTP_HEADERS
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
 from amazon.opentelemetry.distro.exporter.otlp.aws.environment_variables import (
-    OTEL_EXPORTER_OTLP_SIGV4_SERVICE,
-    OTEL_EXPORTER_OTLP_TRACES_SIGV4_SERVICE,
+    AWS_EXPORTER_SERVICE,
+    AWS_TRACES_EXPORTER_SERVICE,
 )
 from amazon.opentelemetry.distro.llo_handler import LLOHandler
 from opentelemetry._logs import get_logger_provider
@@ -34,7 +34,7 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
     AwsAuthSession to sign and directly inject SigV4 Authentication to the exported request's headers.
 
     The signing service uses an explicit ``aws_service`` first, then
-    ``OTEL_EXPORTER_OTLP_TRACES_SIGV4_SERVICE``, then ``OTEL_EXPORTER_OTLP_SIGV4_SERVICE``,
+    ``AWS_TRACES_EXPORTER_SERVICE``, then ``AWS_EXPORTER_SERVICE``,
     and defaults to ``xray``.
 
     See: https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-OTLPEndpoint.html
@@ -63,8 +63,8 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
             session=session,
             aws_region=aws_region,
             service=aws_service
-            or os.environ.get(OTEL_EXPORTER_OTLP_TRACES_SIGV4_SERVICE)
-            or os.environ.get(OTEL_EXPORTER_OTLP_SIGV4_SERVICE)
+            or os.environ.get(AWS_TRACES_EXPORTER_SERVICE)
+            or os.environ.get(AWS_EXPORTER_SERVICE)
             or "xray",
             endpoint=endpoint or _resolve_endpoint(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, DEFAULT_TRACES_EXPORT_PATH),
         )

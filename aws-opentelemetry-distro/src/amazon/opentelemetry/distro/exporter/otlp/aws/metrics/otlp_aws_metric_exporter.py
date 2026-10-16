@@ -9,8 +9,8 @@ from botocore.session import Session
 from amazon.opentelemetry.distro.exporter.otlp.aws.common._aws_http_headers import _OTLP_AWS_HTTP_HEADERS
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
 from amazon.opentelemetry.distro.exporter.otlp.aws.environment_variables import (
-    OTEL_EXPORTER_OTLP_METRICS_SIGV4_SERVICE,
-    OTEL_EXPORTER_OTLP_SIGV4_SERVICE,
+    AWS_EXPORTER_SERVICE,
+    AWS_METRICS_EXPORTER_SERVICE,
 )
 from opentelemetry.exporter.otlp.proto.http import Compression
 from opentelemetry.exporter.otlp.proto.http._common import _resolve_endpoint
@@ -26,7 +26,7 @@ class OTLPAwsMetricExporter(OTLPMetricExporter):
     to the CloudWatch Metrics OTLP endpoint https://monitoring.[AWSRegion].amazonaws.com/v1/metrics.
     Utilizes the AwsAuthSession to sign and directly inject SigV4 Authentication to the exported
     request's headers. The signing service uses an explicit ``aws_service`` first, then
-    ``OTEL_EXPORTER_OTLP_METRICS_SIGV4_SERVICE``, then ``OTEL_EXPORTER_OTLP_SIGV4_SERVICE``,
+    ``AWS_METRICS_EXPORTER_SERVICE``, then ``AWS_EXPORTER_SERVICE``,
     and defaults to ``monitoring``.
 
     ``preferred_temporality`` and ``preferred_aggregation`` are forwarded to the upstream exporter
@@ -62,8 +62,8 @@ class OTLPAwsMetricExporter(OTLPMetricExporter):
             session=session,
             aws_region=aws_region,
             service=aws_service
-            or os.environ.get(OTEL_EXPORTER_OTLP_METRICS_SIGV4_SERVICE)
-            or os.environ.get(OTEL_EXPORTER_OTLP_SIGV4_SERVICE)
+            or os.environ.get(AWS_METRICS_EXPORTER_SERVICE)
+            or os.environ.get(AWS_EXPORTER_SERVICE)
             or "monitoring",
             endpoint=endpoint or _resolve_endpoint(OTEL_EXPORTER_OTLP_METRICS_ENDPOINT, DEFAULT_METRICS_EXPORT_PATH),
         )

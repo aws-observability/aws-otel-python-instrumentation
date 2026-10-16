@@ -14,10 +14,10 @@ from requests.structures import CaseInsensitiveDict
 from amazon.opentelemetry.distro._utils import get_aws_session
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
 from amazon.opentelemetry.distro.exporter.otlp.aws.environment_variables import (
-    OTEL_EXPORTER_OTLP_LOGS_SIGV4_SERVICE,
-    OTEL_EXPORTER_OTLP_METRICS_SIGV4_SERVICE,
-    OTEL_EXPORTER_OTLP_SIGV4_SERVICE,
-    OTEL_EXPORTER_OTLP_TRACES_SIGV4_SERVICE,
+    AWS_EXPORTER_SERVICE,
+    AWS_LOGS_EXPORTER_SERVICE,
+    AWS_METRICS_EXPORTER_SERVICE,
+    AWS_TRACES_EXPORTER_SERVICE,
 )
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_log_record_exporter import OTLPAwsLogRecordExporter
 from opentelemetry._logs._internal import LogRecord
@@ -419,37 +419,37 @@ class TestOTLPAwsLogsExporter(TestCase):
         response._content = b""
         test_cases = (
             ({}, None, "logs"),
-            ({OTEL_EXPORTER_OTLP_SIGV4_SERVICE: "shared-service"}, None, "shared-service"),
+            ({AWS_EXPORTER_SERVICE: "shared-service"}, None, "shared-service"),
             (
                 {
-                    OTEL_EXPORTER_OTLP_SIGV4_SERVICE: "shared-service",
-                    OTEL_EXPORTER_OTLP_TRACES_SIGV4_SERVICE: "traces-service",
-                    OTEL_EXPORTER_OTLP_METRICS_SIGV4_SERVICE: "metrics-service",
-                    OTEL_EXPORTER_OTLP_LOGS_SIGV4_SERVICE: "logs-service",
+                    AWS_EXPORTER_SERVICE: "shared-service",
+                    AWS_TRACES_EXPORTER_SERVICE: "traces-service",
+                    AWS_METRICS_EXPORTER_SERVICE: "metrics-service",
+                    AWS_LOGS_EXPORTER_SERVICE: "logs-service",
                 },
                 None,
                 "logs-service",
             ),
             (
-                {OTEL_EXPORTER_OTLP_SIGV4_SERVICE: "shared-service", OTEL_EXPORTER_OTLP_LOGS_SIGV4_SERVICE: ""},
+                {AWS_EXPORTER_SERVICE: "shared-service", AWS_LOGS_EXPORTER_SERVICE: ""},
                 None,
                 "shared-service",
             ),
-            ({OTEL_EXPORTER_OTLP_SIGV4_SERVICE: "", OTEL_EXPORTER_OTLP_LOGS_SIGV4_SERVICE: ""}, None, "logs"),
+            ({AWS_EXPORTER_SERVICE: "", AWS_LOGS_EXPORTER_SERVICE: ""}, None, "logs"),
             (
                 {
-                    OTEL_EXPORTER_OTLP_TRACES_SIGV4_SERVICE: "traces-service",
-                    OTEL_EXPORTER_OTLP_METRICS_SIGV4_SERVICE: "metrics-service",
+                    AWS_TRACES_EXPORTER_SERVICE: "traces-service",
+                    AWS_METRICS_EXPORTER_SERVICE: "metrics-service",
                 },
                 None,
                 "logs",
             ),
             (
                 {
-                    OTEL_EXPORTER_OTLP_SIGV4_SERVICE: "shared-service",
-                    OTEL_EXPORTER_OTLP_TRACES_SIGV4_SERVICE: "traces-service",
-                    OTEL_EXPORTER_OTLP_METRICS_SIGV4_SERVICE: "metrics-service",
-                    OTEL_EXPORTER_OTLP_LOGS_SIGV4_SERVICE: "logs-service",
+                    AWS_EXPORTER_SERVICE: "shared-service",
+                    AWS_TRACES_EXPORTER_SERVICE: "traces-service",
+                    AWS_METRICS_EXPORTER_SERVICE: "metrics-service",
+                    AWS_LOGS_EXPORTER_SERVICE: "logs-service",
                 },
                 "explicit-service",
                 "explicit-service",

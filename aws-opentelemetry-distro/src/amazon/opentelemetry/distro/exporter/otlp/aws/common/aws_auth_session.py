@@ -14,7 +14,7 @@ from botocore.awsrequest import AWSRequest
 from botocore.session import Session
 
 from amazon.opentelemetry.distro._utils import AWS_DNS_SUFFIX_PATTERN, get_aws_session
-from amazon.opentelemetry.distro.exporter.otlp.aws.environment_variables import OTEL_EXPORTER_OTLP_SIGV4_SERVICE
+from amazon.opentelemetry.distro.exporter.otlp.aws.environment_variables import AWS_EXPORTER_SERVICE
 from amazon.opentelemetry.distro.patches._pip_system_certs_patches import apply_pip_system_certs_compatibility_patch
 
 _logger = logging.getLogger(__name__)
@@ -42,7 +42,7 @@ class AwsAuthSession(requests.Session):
             then ``AWS_DEFAULT_REGION``, then the endpoint hostname, then the
             botocore session's configured region.
         service (str): Optional signing service (e.g., "logs", "xray", or "osis").
-            Falls back to ``OTEL_EXPORTER_OTLP_SIGV4_SERVICE``.
+            Falls back to ``AWS_EXPORTER_SERVICE``.
         session (Session): Optional botocore session; defaults to the AWS credential chain.
         endpoint (str): Optional resolved OTLP endpoint used to infer the region when
             no explicit region or AWS region environment variable is set. Region
@@ -61,9 +61,9 @@ class AwsAuthSession(requests.Session):
         session: Optional[Session] = None,
         endpoint: Optional[str] = None,
     ):
-        service = service or os.environ.get(OTEL_EXPORTER_OTLP_SIGV4_SERVICE)
+        service = service or os.environ.get(AWS_EXPORTER_SERVICE)
         if not service:
-            raise ValueError("AwsAuthSession requires a signing service or OTEL_EXPORTER_OTLP_SIGV4_SERVICE.")
+            raise ValueError("AwsAuthSession requires a signing service or AWS_EXPORTER_SERVICE.")
 
         if session is None:
             session = get_aws_session()

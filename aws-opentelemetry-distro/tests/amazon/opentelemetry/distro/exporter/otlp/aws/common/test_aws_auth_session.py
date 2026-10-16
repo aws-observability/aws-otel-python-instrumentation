@@ -10,7 +10,7 @@ from botocore.session import Session
 
 from amazon.opentelemetry.distro._utils import get_aws_session
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
-from amazon.opentelemetry.distro.exporter.otlp.aws.environment_variables import OTEL_EXPORTER_OTLP_SIGV4_SERVICE
+from amazon.opentelemetry.distro.exporter.otlp.aws.environment_variables import AWS_EXPORTER_SERVICE
 
 AWS_OTLP_TRACES_ENDPOINT = "https://xray.us-east-1.amazonaws.com/v1/traces"
 AWS_OTLP_LOGS_ENDPOINT = "https://logs.us-east-1.amazonaws.com/v1/logs"
@@ -289,7 +289,7 @@ class TestAwsAuthSession(TestCase):
                     self.assertEqual(session._service, "custom-signing-service")
 
     def test_aws_auth_session_should_use_environment_signing_service_when_arguments_are_omitted(self):
-        with patch.dict(os.environ, {OTEL_EXPORTER_OTLP_SIGV4_SERVICE: "logs", "AWS_REGION": "us-east-1"}):
+        with patch.dict(os.environ, {AWS_EXPORTER_SERVICE: "logs", "AWS_REGION": "us-east-1"}):
             session = AwsAuthSession()
             self.addCleanup(session.close)
             self.assertEqual(session._service, "logs")

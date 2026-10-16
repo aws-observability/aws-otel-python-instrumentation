@@ -8,8 +8,8 @@ from botocore.session import Session
 
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
 from amazon.opentelemetry.distro.exporter.otlp.aws.environment_variables import (
-    OTEL_EXPORTER_OTLP_LOGS_SIGV4_SERVICE,
-    OTEL_EXPORTER_OTLP_SIGV4_SERVICE,
+    AWS_EXPORTER_SERVICE,
+    AWS_LOGS_EXPORTER_SERVICE,
 )
 from opentelemetry.exporter.otlp.proto.http import Compression
 from opentelemetry.exporter.otlp.proto.http._common import _resolve_compression, _resolve_endpoint
@@ -34,7 +34,7 @@ class OTLPAwsLogRecordExporter(OTLPLogExporter):
     3. Optionally sets the x-aws-log-group / x-aws-log-stream headers
 
     The signing service uses an explicit ``aws_service`` first, then
-    ``OTEL_EXPORTER_OTLP_LOGS_SIGV4_SERVICE``, then ``OTEL_EXPORTER_OTLP_SIGV4_SERVICE``,
+    ``AWS_LOGS_EXPORTER_SERVICE``, then ``AWS_EXPORTER_SERVICE``,
     and defaults to ``logs``.
 
     Retry behavior (Retry-After header support, retrying HTTP 429/502/503/504, and interruptible
@@ -68,8 +68,8 @@ class OTLPAwsLogRecordExporter(OTLPLogExporter):
             session=session,
             aws_region=aws_region,
             service=aws_service
-            or os.environ.get(OTEL_EXPORTER_OTLP_LOGS_SIGV4_SERVICE)
-            or os.environ.get(OTEL_EXPORTER_OTLP_SIGV4_SERVICE)
+            or os.environ.get(AWS_LOGS_EXPORTER_SERVICE)
+            or os.environ.get(AWS_EXPORTER_SERVICE)
             or "logs",
             endpoint=endpoint or _resolve_endpoint(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, DEFAULT_LOGS_EXPORT_PATH),
         )
