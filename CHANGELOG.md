@@ -12,6 +12,11 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- fix: on Lambda, UDP span exports larger than the 65,507 byte datagram limit are split across datagrams instead of
+  being dropped with `Message too long`; a single oversized span has its longest string attributes truncated and is
+  marked with `aws.otel.udp.truncated`.
+  ([#939](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/939))
+
 - fix: honor `OTEL_EXPORTER_OTLP_LOGS_COMPRESSION` and `OTEL_EXPORTER_OTLP_COMPRESSION` in the AWS OTLP logs
   exporter, retaining gzip as the default when neither variable is configured.
   ([#934](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/934))
