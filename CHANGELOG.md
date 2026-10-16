@@ -14,6 +14,7 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 - fix: honor `OTEL_EXPORTER_OTLP_LOGS_COMPRESSION` and `OTEL_EXPORTER_OTLP_COMPRESSION` in the AWS OTLP logs
   exporter, retaining gzip as the default when neither variable is configured.
+  ([#934](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/934))
 - fix: with `OTEL_AWS_HTTP_OPERATION_PATHS` set, child spans now inherit the overridden operation from their server
   span, so dependency metrics are reported under the same operation as the service metrics instead of the original
   span name.
