@@ -1,5 +1,5 @@
 ARG PYTHON_VERSION=3.12
-FROM public.ecr.aws/docker/library/python:${PYTHON_VERSION}
+FROM python:${PYTHON_VERSION}
 WORKDIR /di-flask
 COPY ./dist/$DISTRO /di-flask
 COPY ./contract-tests/images/applications/di-flask /di-flask

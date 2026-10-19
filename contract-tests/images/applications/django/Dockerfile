@@ -2,7 +2,7 @@
 # Assumes existence of dist/aws_opentelemetry_distro-<pkg_version>-py3-none-any.whl.
 # Assumes filename of aws_opentelemetry_distro-<pkg_version>-py3-none-any.whl is passed in as "DISTRO" arg.
 ARG PYTHON_VERSION=3.10
-FROM public.ecr.aws/docker/library/python:${PYTHON_VERSION}
+FROM python:${PYTHON_VERSION}
 WORKDIR /django
 COPY ./dist/$DISTRO /django
 COPY ./contract-tests/images/applications/django /django

@@ -43,6 +43,9 @@ jobs:
 
       - name: Set up CodeBuild runner
         uses: ./.github/actions/codebuild-runner-setup
+        with:
+          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
 
       # This action wrapper by raven-actions provides cross-platform support and caching
       # Catches the same issues as GitHub's web editor: syntax errors, type mismatches,
@@ -299,6 +302,9 @@ jobs:
       matrix:
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     uses: ./.github/workflows/contract-tests.yml
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
     with:
       python-version: ${{ matrix.python-version }}
 
@@ -370,6 +376,9 @@ jobs:
 
       - name: Set up CodeBuild runner
         uses: ./.github/actions/codebuild-runner-setup
+        with:
+          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
       
       - name: Check all jobs succeeded and none missing
         run: |

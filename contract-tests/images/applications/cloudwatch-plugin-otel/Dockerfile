@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 ARG PYTHON_VERSION=3.12
-FROM public.ecr.aws/docker/library/python:${PYTHON_VERSION}
+FROM python:${PYTHON_VERSION}
 
 WORKDIR /cloudwatch-plugin-otel
 
