@@ -1,5 +1,5 @@
 ARG PYTHON_VERSION=3.10
-FROM public.ecr.aws/docker/library/python:${PYTHON_VERSION}
+FROM python:${PYTHON_VERSION}
 WORKDIR /serviceevents-flask
 COPY ./dist/$DISTRO /serviceevents-flask
 COPY ./contract-tests/images/applications/serviceevents-flask /serviceevents-flask

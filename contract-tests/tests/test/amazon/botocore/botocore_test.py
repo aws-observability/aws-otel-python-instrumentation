@@ -111,7 +111,7 @@ class BotocoreTest(ContractTestBase):
             )
         }
         cls._local_stack: LocalStackContainer = (
-            LocalStackContainer(image="public.ecr.aws/localstack/localstack:3.5.0")
+            LocalStackContainer(image="localstack/localstack:3.5.0")
             .with_name("localstack")
             .with_services("s3", "sqs", "dynamodb", "kinesis", "secretsmanager", "iam", "stepfunctions", "sns")
             .with_env("DEFAULT_REGION", "us-west-2")
