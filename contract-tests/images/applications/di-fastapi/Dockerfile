@@ -1,5 +1,5 @@
 ARG PYTHON_VERSION=3.12
-FROM python:${PYTHON_VERSION}
+FROM public.ecr.aws/docker/library/python:${PYTHON_VERSION}
 WORKDIR /di-fastapi
 COPY ./dist/$DISTRO /di-fastapi
 COPY ./contract-tests/images/applications/di-fastapi /di-fastapi

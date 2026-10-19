@@ -34,7 +34,10 @@ permissions:
 jobs:
   download-artifacts:
     environment: Release
-    runs-on: ubuntu-latest
+    runs-on:
+      - codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}
+      - image:ubuntu-8.0
+      - instance-size:large
     outputs:
       aws_regions_json: ${{ steps.set-matrix.outputs.aws_regions_json }}
     steps:
@@ -89,10 +92,17 @@ jobs:
 
   publish-sdk:
     needs: download-artifacts
-    runs-on: ubuntu-latest
+    runs-on:
+      - codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}
+      - image:ubuntu-8.0
+      - instance-size:large
     steps:
       - name: Checkout Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+
+      # Multi-arch (amd64+arm64) build below; register QEMU explicitly instead of relying on the runner image.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 #3.6.0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 #3.11.1
@@ -239,7 +249,10 @@ jobs:
           done
   
   publish-layer-prod:
-    runs-on: ubuntu-latest
+    runs-on:
+      - codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}
+      - image:ubuntu-8.0
+      - instance-size:large
     needs: [download-artifacts, publish-sdk]
     strategy:
       matrix:
@@ -349,7 +362,10 @@ jobs:
           aws s3 rb --force s3://${{ env.BUCKET_NAME }}
 
   generate-lambda-release-note:
-    runs-on: ubuntu-latest
+    runs-on:
+      - codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}
+      - image:ubuntu-8.0
+      - instance-size:large
     needs: publish-layer-prod
     outputs:
       layer-note: ${{ steps.layer-note.outputs.layer-note }}
@@ -416,7 +432,10 @@ jobs:
 
   publish-github:
     needs: generate-lambda-release-note
-    runs-on: ubuntu-latest
+    runs-on:
+      - codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}
+      - image:ubuntu-8.0
+      - instance-size:large
     steps:
       - name: Checkout Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
@@ -483,7 +502,10 @@ jobs:
   # publishing is done, and every step is continue-on-error so a signing failure
   # never fails the release run or affects already-published artifacts.
   sign-public-ecr-image:
-    runs-on: ubuntu-latest
+    runs-on:
+      - codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}
+      - image:ubuntu-8.0
+      - instance-size:large
     needs: publish-github
     steps:
       - name: Configure AWS Credentials for public ECR
