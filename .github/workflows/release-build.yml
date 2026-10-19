@@ -189,23 +189,27 @@ jobs:
           name: staging-image
           path: staging-image
 
-      # Keep this before the PyPI publishes: an image tag can be overwritten on a re-run, but a PyPI
-      # version is permanent, so a failed promote must abort before anything reaches PyPI.
-      - name: Promote validated main-build image to release ECRs
+      # Verify the validated image before anything is published: it must still exist, be pullable with
+      # the release credentials, and contain both linux/amd64 and linux/arm64. Failing here publishes
+      # nothing, so PyPI can't get a version whose image is missing or single-arch.
+      - name: Preflight validated image
+        id: validated_image
         run: |
           set -euo pipefail
 
           # e.g. 637...amazonaws.com/aws-observability/adot-autoinstrumentation-python-staging@sha256:<digest>
-          validated_image="$(cat staging-image/staging-image.txt)"
-          echo "Promoting validated image: $validated_image"
+          ref="$(cat staging-image/staging-image.txt)"
+          echo "Validated image: $ref"
 
-          # Copy that one multi-arch image (all architectures + attestations) into both release
-          # repos under the v<version> tag. imagetools copies the manifest by reference, so no
-          # rebuild happens and the released bits are identical to what main-build validated.
-          docker buildx imagetools create \
-            --tag "${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ env.VERSION }}" \
-            --tag "${{ env.RELEASE_PRIVATE_REPOSITORY }}:v${{ env.VERSION }}" \
-            "$validated_image"
+          raw=$(docker buildx imagetools inspect "$ref" --raw)
+          for arch in amd64 arm64; do
+            if ! echo "$raw" | jq -e --arg a "$arch" \
+              '.manifests[] | select(.platform.os == "linux" and .platform.architecture == $a)' > /dev/null; then
+              echo "ERROR: $ref has no linux/$arch manifest"
+              exit 1
+            fi
+          done
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
       # The step below publishes to TestPyPI in order to catch any issues
       - name: Publish to TestPyPI
@@ -224,6 +228,24 @@ jobs:
           skip-existing: true
           verbose: true
           packages-dir: dist-pypi
+
+      # Promote only after PyPI succeeds, so the image never goes public without its package. The
+      # preflight above already verified the image, and a re-run recovers a transient failure here
+      # (PyPI publishes use skip-existing, and imagetools create overwrites the tags).
+      - name: Promote validated main-build image to release ECRs
+        env:
+          VALIDATED_IMAGE: ${{ steps.validated_image.outputs.ref }}
+        run: |
+          set -euo pipefail
+          echo "Promoting validated image: $VALIDATED_IMAGE"
+
+          # Copy that one multi-arch image (all architectures + attestations) into both release
+          # repos under the v<version> tag. imagetools copies the manifest by reference, so no
+          # rebuild happens and the released bits are identical to what main-build validated.
+          docker buildx imagetools create \
+            --tag "${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ env.VERSION }}" \
+            --tag "${{ env.RELEASE_PRIVATE_REPOSITORY }}:v${{ env.VERSION }}" \
+            "$VALIDATED_IMAGE"
 
       - name: Tag platform images in private ECR
         env:
