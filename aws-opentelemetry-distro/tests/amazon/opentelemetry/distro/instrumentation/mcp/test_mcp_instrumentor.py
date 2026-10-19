@@ -295,7 +295,12 @@ class TestMcpInstrumentor(McpInstrumentorTestBase):
         server_script = str(Path(__file__).parent / "mcpserver.py")
         otlp_port = str(self.otlp_server.server_port)
 
-        async with stdio_client(StdioServerParameters(command=sys.executable, args=[server_script, otlp_port])) as (
+        # Pass the full environment: stdio_client otherwise starts the server with only a few variables, which drops
+        # LD_LIBRARY_PATH that a setup-python interpreter on self-hosted runners (e.g. CodeBuild) needs to start.
+        server_params = StdioServerParameters(
+            command=sys.executable, args=[server_script, otlp_port], env=dict(os.environ)
+        )
+        async with stdio_client(server_params) as (
             read,
             write,
         ):
