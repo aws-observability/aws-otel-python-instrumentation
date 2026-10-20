@@ -19,7 +19,7 @@ class MysqlClientTest(DatabaseContractTestBase):
     def set_up_dependency_container(cls) -> None:
         cls.container = (
             MySqlContainer(
-                image="public.ecr.aws/docker/library/mysql:8.4",
+                image="mysql:8.4",
                 MYSQL_USER=DATABASE_USER,
                 MYSQL_PASSWORD=DATABASE_PASSWORD,
                 MYSQL_DATABASE=DATABASE_NAME,

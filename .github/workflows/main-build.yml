@@ -223,6 +223,9 @@ jobs:
       matrix:
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     uses: ./.github/workflows/contract-tests.yml
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
     with:
       python-version: ${{ matrix.python-version }}
       ref: ${{ inputs.ref || github.sha }}
