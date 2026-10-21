@@ -14,9 +14,13 @@ env:
   AWS_DEFAULT_REGION: us-east-1
   AWS_PUBLIC_ECR_REGION: us-east-1
   AWS_PRIVATE_ECR_REGION: us-west-2
+  AWS_STAGING_ECR_REGION: us-east-1
   RELEASE_PUBLIC_REPOSITORY: public.ecr.aws/aws-observability/adot-autoinstrumentation-python
   RELEASE_PRIVATE_REPOSITORY: 020628701572.dkr.ecr.us-west-2.amazonaws.com/adot-autoinstrumentation-python
   RELEASE_PRIVATE_REGISTRY: 020628701572.dkr.ecr.us-west-2.amazonaws.com
+  # Main build pushes the validated multi-arch image here (a different AWS account); release promotes it.
+  STAGING_ECR_REGISTRY: 637423224110.dkr.ecr.us-east-1.amazonaws.com
+  STAGING_ECR_REPOSITORY: aws-observability/adot-autoinstrumentation-python-staging
   PACKAGE_NAME: aws-opentelemetry-distro
   VERSION: ${{ github.event.inputs.version }}
   AWS_REGIONS: ${{ github.event.inputs.aws_region }}
@@ -34,7 +38,17 @@ permissions:
 jobs:
   download-artifacts:
     environment: Release
-    runs-on: ubuntu-latest
+    runs-on:
+      - codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}
+      - image:ubuntu-8.0
+      - instance-size:large
+    # Selects another workflow run and downloads its artifacts cross-run; both the workflow-run
+    # query and the cross-run artifact download require actions: read. The workflow-level
+    # permissions block is declared, so unlisted scopes default to none -- grant it here at job
+    # level only (the publish jobs don't need it).
+    permissions:
+      actions: read
+      contents: read
     outputs:
       aws_regions_json: ${{ steps.set-matrix.outputs.aws_regions_json }}
     steps:
@@ -47,6 +61,9 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           branch: ${{ github.ref_name }}
+          # Pin to the main build of the exact commit being released (not just "latest on branch"),
+          # so the wheel + image promoted are the ones built from this commit.
+          head-sha: ${{ github.sha }}
 
       - name: Download main build artifacts
         env:
@@ -55,6 +72,21 @@ jobs:
         run: |
           gh run download "$RUN_ID" -n release-artifacts -D dist
           gh run download "$RUN_ID" -n layer.zip -D layer
+          gh run download "$RUN_ID" -n staging-image -D staging-ref
+
+      # Guard against a mis-typed version: the wheel built by the selected run must carry the exact
+      # version we're releasing, before anything is published/tagged.
+      - name: Assert wheel version matches release version
+        run: |
+          set -euo pipefail
+          wheel=$(find dist -maxdepth 1 -name 'aws_opentelemetry_distro-*-py3-none-any.whl' | head -1)
+          if [ -z "$wheel" ]; then echo "ERROR: no wheel found in the downloaded main-build artifacts"; exit 1; fi
+          built=$(basename "$wheel" | sed -E 's#aws_opentelemetry_distro-(.+)-py3-none-any\.whl#\1#')
+          if [ "$built" != "${VERSION}" ]; then
+            echo "ERROR: main-build wheel version ($built) != requested release version (${VERSION})"
+            exit 1
+          fi
+          echo "Wheel version matches requested release version: ${VERSION}"
 
       - name: Upload SDK wheel artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
@@ -74,6 +106,12 @@ jobs:
           name: layer.zip
           path: layer/${{ env.LAYER_ARTIFACT_NAME }}
 
+      - name: Upload staging image reference
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
+        with:
+          name: staging-image
+          path: staging-ref/staging-image.txt
+
       - name: Set up regions matrix
         id: set-matrix
         run: |
@@ -89,13 +127,34 @@ jobs:
 
   publish-sdk:
     needs: download-artifacts
-    runs-on: ubuntu-latest
+    runs-on:
+      - codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}
+      - image:ubuntu-8.0
+      - instance-size:large
     steps:
       - name: Checkout Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
 
+      # Multi-arch (amd64+arm64) build below; register QEMU explicitly instead of relying on the runner image.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 #3.6.0
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 #3.11.1
+
+      # Promotion source: assume the role that main-build uses to push to the staging ECR, so we can
+      # pull the validated image back. NOTE: this needs pull (ecr:BatchGetImage /
+      # GetDownloadUrlForLayer) on the staging repo -- push perms alone are not enough.
+      - name: Configure AWS credentials for staging ECR (image source)
+        uses: aws-actions/configure-aws-credentials@a03048d87541d1d9fcf2ecf528a4a65ba9bd7838 #v5.0.0
+        with:
+          role-to-assume: ${{ secrets.AWS_ASSUME_ROLE_ARN }}
+          aws-region: ${{ env.AWS_STAGING_ECR_REGION }}
+
+      - name: Log in to staging ECR
+        uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 #v3.5.0
+        with:
+          registry: ${{ env.STAGING_ECR_REGISTRY }}
 
       - name: Configure AWS credentials for private ECR
         uses: aws-actions/configure-aws-credentials@a03048d87541d1d9fcf2ecf528a4a65ba9bd7838 #v5.0.0
@@ -131,6 +190,34 @@ jobs:
           name: ${{ env.SOURCE_ARTIFACT_NAME }}
           path: dist-pypi
 
+      - name: Download validated image reference
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
+        with:
+          name: staging-image
+          path: staging-image
+
+      # Verify the validated image before anything is published: it must still exist, be pullable with
+      # the release credentials, and contain both linux/amd64 and linux/arm64. Failing here publishes
+      # nothing, so PyPI can't get a version whose image is missing or single-arch.
+      - name: Preflight validated image
+        id: validated_image
+        run: |
+          set -euo pipefail
+
+          # e.g. 637...amazonaws.com/aws-observability/adot-autoinstrumentation-python-staging@sha256:<digest>
+          ref="$(cat staging-image/staging-image.txt)"
+          echo "Validated image: $ref"
+
+          raw=$(docker buildx imagetools inspect "$ref" --raw)
+          for arch in amd64 arm64; do
+            if ! echo "$raw" | jq -e --arg a "$arch" \
+              '.manifests[] | select(.platform.os == "linux" and .platform.architecture == $a)' > /dev/null; then
+              echo "ERROR: $ref has no linux/$arch manifest"
+              exit 1
+            fi
+          done
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
       # The step below publishes to TestPyPI in order to catch any issues
       - name: Publish to TestPyPI
         uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e #v1.13.0
@@ -149,16 +236,23 @@ jobs:
           verbose: true
           packages-dir: dist-pypi
 
-      - name: Build and push image
-        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 #v6.18.0
-        with:
-          push: true
-          context: .
-          file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
-          tags: |
-            ${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ env.VERSION }}
-            ${{ env.RELEASE_PRIVATE_REPOSITORY }}:v${{ env.VERSION }}
+      # Promote only after PyPI succeeds, so the image never goes public without its package. The
+      # preflight above already verified the image, and a re-run recovers a transient failure here
+      # (PyPI publishes use skip-existing, and imagetools create overwrites the tags).
+      - name: Promote validated main-build image to release ECRs
+        env:
+          VALIDATED_IMAGE: ${{ steps.validated_image.outputs.ref }}
+        run: |
+          set -euo pipefail
+          echo "Promoting validated image: $VALIDATED_IMAGE"
+
+          # Copy that one multi-arch image (all architectures + attestations) into both release
+          # repos under the v<version> tag. imagetools copies the manifest by reference, so no
+          # rebuild happens and the released bits are identical to what main-build validated.
+          docker buildx imagetools create \
+            --tag "${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ env.VERSION }}" \
+            --tag "${{ env.RELEASE_PRIVATE_REPOSITORY }}:v${{ env.VERSION }}" \
+            "$VALIDATED_IMAGE"
 
       - name: Tag platform images in private ECR
         env:
@@ -239,7 +333,10 @@ jobs:
           done
   
   publish-layer-prod:
-    runs-on: ubuntu-latest
+    runs-on:
+      - codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}
+      - image:ubuntu-8.0
+      - instance-size:large
     needs: [download-artifacts, publish-sdk]
     strategy:
       matrix:
@@ -349,7 +446,10 @@ jobs:
           aws s3 rb --force s3://${{ env.BUCKET_NAME }}
 
   generate-lambda-release-note:
-    runs-on: ubuntu-latest
+    runs-on:
+      - codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}
+      - image:ubuntu-8.0
+      - instance-size:large
     needs: publish-layer-prod
     outputs:
       layer-note: ${{ steps.layer-note.outputs.layer-note }}
@@ -416,7 +516,10 @@ jobs:
 
   publish-github:
     needs: generate-lambda-release-note
-    runs-on: ubuntu-latest
+    runs-on:
+      - codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}
+      - image:ubuntu-8.0
+      - instance-size:large
     steps:
       - name: Checkout Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
@@ -483,7 +586,10 @@ jobs:
   # publishing is done, and every step is continue-on-error so a signing failure
   # never fails the release run or affects already-published artifacts.
   sign-public-ecr-image:
-    runs-on: ubuntu-latest
+    runs-on:
+      - codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}
+      - image:ubuntu-8.0
+      - instance-size:large
     needs: publish-github
     steps:
       - name: Configure AWS Credentials for public ECR

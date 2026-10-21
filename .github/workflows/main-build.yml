@@ -29,7 +29,10 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on:
+      - codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}
+      - image:ubuntu-8.0
+      - instance-size:large
     outputs:
       aws_default_region: ${{ steps.python_output.outputs.awsDefaultRegion}}
       python_image_tag: ${{ steps.python_output.outputs.python_image_tag}}
@@ -82,6 +85,18 @@ jobs:
           cd ./dist
           cp aws_opentelemetry_distro-${{ steps.python_output.outputs.ADOT_PYTHON_VERSION}}-py3-none-any.whl $staging_wheel
 
+      # The Lambda layer's tox runs every supported Python and skips missing interpreters; GitHub-hosted
+      # images preinstall them, CodeBuild's do not, so set them up explicitly (same versions as pr-build).
+      - name: Set up Python versions for the Lambda layer tests
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c #v6.0.0
+        with:
+          python-version: |
+            3.10
+            3.11
+            3.12
+            3.13
+            3.14
+
       - name: Build and Publish Lambda Staging Layer
         uses: ./.github/actions/lambda_artifacts_build
         with:
@@ -116,6 +131,27 @@ jobs:
             dist/aws_opentelemetry_distro-${{ steps.python_output.outputs.ADOT_PYTHON_VERSION }}-py3-none-any.whl
             dist/aws_opentelemetry_distro-${{ steps.python_output.outputs.ADOT_PYTHON_VERSION }}.tar.gz
 
+      # Record the exact multi-arch image digest so release-build promotes precisely the image this
+      # run built, pushed, scanned, and E2E-tested. A digest is immutable, so (unlike a tag) a later
+      # rerun cannot repoint it -- release ships exactly what was validated here.
+      - name: Record staging image digest for release promotion
+        run: |
+          set -euo pipefail
+          # printf forces buildx to render the template; some buildx versions ignore a bare
+          # {{.Manifest.Digest}} and print the full inspect output instead.
+          DIGEST=$(docker buildx imagetools inspect "${{ steps.python_output.outputs.stagingImage }}" --format '{{printf "%s" .Manifest.Digest}}')
+          if ! [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "ERROR: invalid staging image digest: $DIGEST"
+            exit 1
+          fi
+          echo "${{ env.STAGING_ECR_REGISTRY }}/${{ env.STAGING_ECR_REPOSITORY }}@${DIGEST}" | tee staging-image.txt
+
+      - name: Upload staging image reference
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
+        with:
+          name: staging-image
+          path: staging-image.txt
+
       - name: Upload distro wheel
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
         with:
@@ -124,7 +160,10 @@ jobs:
           retention-days: 1
 
   build-cloudwatch-plugin-otel:
-    runs-on: ubuntu-latest
+    runs-on:
+      - codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}
+      - image:ubuntu-8.0
+      - instance-size:large
     outputs:
       version: ${{ steps.plugin_build.outputs.version }}
     steps:
@@ -144,7 +183,10 @@ jobs:
           path: plugin-dist/cloudwatch_plugin_otel-*
 
   unit-tests:
-    runs-on: ubuntu-latest
+    runs-on:
+      - codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}
+      - image:ubuntu-8.0
+      - instance-size:large
     needs: build
     strategy:
       fail-fast: false # ensures the entire test matrix is run, even if one permutation fails
@@ -181,6 +223,9 @@ jobs:
       matrix:
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     uses: ./.github/workflows/contract-tests.yml
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
     with:
       python-version: ${{ matrix.python-version }}
       ref: ${{ inputs.ref || github.sha }}
@@ -200,7 +245,10 @@ jobs:
   publish-main-build-status:
     name: "Publish Main Build Status"
     needs: [ build, build-cloudwatch-plugin-otel, unit-tests, contract-tests, application-signals-e2e-test ]
-    runs-on: ubuntu-latest
+    runs-on:
+      - codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}
+      - image:ubuntu-8.0
+      - instance-size:small
     if: always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/v'))
     steps:
       - name: Configure AWS Credentials for emitting metrics

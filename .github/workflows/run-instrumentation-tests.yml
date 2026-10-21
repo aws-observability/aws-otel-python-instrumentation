@@ -10,7 +10,10 @@ permissions:
 
 jobs:
   run-tests:
-    runs-on: ubuntu-latest
+    runs-on:
+      - codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}
+      - image:ubuntu-8.0
+      - instance-size:large
     strategy:
       fail-fast: false
       matrix:
@@ -41,7 +44,10 @@ jobs:
           tox -r -e ${{ matrix.python-version }}-${{ matrix.tox-env }}-${{ matrix.version }} -- -v
 
   contract-tests:
-    runs-on: ubuntu-latest
+    runs-on:
+      - codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}
+      - image:ubuntu-8.0
+      - instance-size:large
     strategy:
       fail-fast: false
       matrix:
@@ -49,6 +55,12 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
+
+      - name: Set up CodeBuild runner
+        uses: ./.github/actions/codebuild-runner-setup
+        with:
+          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build distro wheel
         uses: ./.github/actions/artifacts_build
