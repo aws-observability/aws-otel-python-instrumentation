@@ -4,3 +4,5 @@ llama-index-llms-anthropic==0.8.0
 llama-index-llms-azure-openai==0.4.0
 llama-index-llms-bedrock-converse==0.8.0
 llama-index-llms-vertex==0.6.0
+# anthropic 2.0 made MessageParam a Union, which llama-index-llms-anthropic still instantiates.
+anthropic<2
