@@ -12,6 +12,10 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- fix: the CrewAI instrumentor now skips instrumentation, with a warning, when the installed crewai is outside its
+  supported range (`>= 1.10.0, < 2`). Under auto-instrumentation the range was not enforced, so `Crew.kickoff()`
+  raised `AttributeError` on crewai 0.177.0-1.9.x.
+  ([#PR_NUMBER](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/PR_NUMBER))
 - fix: `AwsAuthSession` no longer caches a `None` credential result, so a single failed credential lookup (for
   example an IMDS timeout, which botocore reports as `None` rather than raising) no longer leaves every later OTLP
   export unsigned for the life of the process.

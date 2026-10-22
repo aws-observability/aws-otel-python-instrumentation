@@ -29,6 +29,7 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
     OPERATION_INVOKE_WORKFLOW,
 )
 from amazon.opentelemetry.distro.instrumentation.crewai import CrewAIInstrumentor
+from opentelemetry.instrumentation.dependencies import DependencyConflict
 from opentelemetry.instrumentation.threading import ThreadingInstrumentor
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -1580,3 +1581,26 @@ class TestCrewAIInstrumentor(TestCase):
         return ChatCompletionMessageToolCall(
             id=call_id, type="function", function=Function(name=name, arguments=arguments)
         )
+
+
+class TestCrewAIInstrumentorVersionGate(TestCase):
+    """Auto-instrumentation calls instrument(skip_dep_check=True), so _instrument must enforce the range itself."""
+
+    def tearDown(self):
+        CrewAIInstrumentor().uninstrument()
+
+    def test_out_of_range_version_does_not_wrap_emit(self):
+        conflict = DependencyConflict("crewai >= 1.10.0, < 2", "crewai 1.5.0")
+        instrumentor = CrewAIInstrumentor()
+        with patch.object(CrewAIInstrumentor, "_check_dependency_conflicts", return_value=conflict):
+            with self.assertLogs("amazon.opentelemetry.distro.instrumentation.crewai", level="WARNING") as logs:
+                instrumentor.instrument(skip_dep_check=True)
+
+        self.assertFalse(hasattr(crewai_event_bus.emit, "__wrapped__"))
+        self.assertIsNone(instrumentor._handler)
+        self.assertIn("crewai 1.5.0", logs.output[0])
+
+    def test_in_range_version_wraps_emit(self):
+        CrewAIInstrumentor().instrument(skip_dep_check=True)
+
+        self.assertTrue(hasattr(crewai_event_bus.emit, "__wrapped__"))
