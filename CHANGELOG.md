@@ -12,6 +12,10 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- fix: on Lambda, UDP span exports larger than the 65,507 byte datagram limit are split across datagrams instead of
+  being dropped with `Message too long`; a single oversized span has its longest string attributes truncated and is
+  marked with `aws.otel.udp.truncated`.
+  ([#939](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/939))
 - fix: `AwsAuthSession` no longer caches a `None` credential result, so a single failed credential lookup (for
   example an IMDS timeout, which botocore reports as `None` rather than raising) no longer leaves every later OTLP
   export unsigned for the life of the process.

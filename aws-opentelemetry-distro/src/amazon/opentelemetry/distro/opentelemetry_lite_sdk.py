@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # pylint: disable=too-many-public-methods,no-self-use,import-outside-toplevel,broad-exception-caught,too-many-locals
 import base64
+import copy
 import logging
 import os
 import random
@@ -12,6 +13,13 @@ from time import time_ns
 from typing import Iterator, List, Optional, Sequence
 from urllib.parse import urlparse
 
+from amazon.opentelemetry.distro._udp_span_payload import (
+    TRUNCATED_ATTRIBUTE_KEY,
+    build_payloads,
+    mapping_string_values,
+    max_payload_size,
+    truncate_to_fit,
+)
 from opentelemetry import context as context_api
 from opentelemetry import trace as trace_api
 from opentelemetry import version as otel_version
@@ -675,10 +683,22 @@ class UdpSpanExporter:
             if self._app_signals_enabled:
                 for span in spans:
                     self._inject_app_signals_attributes(span)
-            otlp_data = _encode_export_trace_request(list(spans))
             prefix = "T1S" if spans[0].get_span_context().trace_flags.sampled else "T1U"
-            self._udp_exporter.send_otlp(otlp_data, prefix=prefix)
-            return True
+            max_size = max_payload_size(len(_PROTOCOL_HEADER) + len(prefix))
+            success = True
+            # Split by encoded size: all spans of an invocation are flushed together and may exceed one datagram
+            for count, otlp_data in build_payloads(
+                list(spans), _encode_export_trace_request, max_size, lambda span: _truncate_span(span, max_size)
+            ):
+                if otlp_data is None:
+                    success = False
+                    continue
+                try:
+                    self._udp_exporter.send_otlp(otlp_data, prefix=prefix)
+                except Exception:
+                    logger.error("Failed to export %d span(s)", count, exc_info=True)
+                    success = False
+            return success
         except Exception:
             logger.error("Failed to export %d span(s)", len(spans), exc_info=True)
             return False
@@ -703,6 +723,32 @@ class UdpSpanExporter:
 
     def shutdown(self):
         self._udp_exporter.shutdown()
+
+
+def _truncate_span(span, max_size):
+    """Encode a copy of span with its longest string attributes truncated to fit in max_size.
+
+    Works on the lite span's plain attribute dicts and the lite encoder, so it does not import protobuf.
+    """
+    truncated = copy.copy(span)
+    truncated._attributes = dict(span.attributes)
+    truncated._events = [
+        Event(event.name, dict(event.attributes) if event.attributes else event.attributes, event.timestamp)
+        for event in span.events
+    ]
+
+    def collect():
+        values = mapping_string_values(0, "", truncated._attributes)
+        for event_index, event in enumerate(truncated._events):
+            if event.attributes:
+                values += mapping_string_values(0, f"events[{event_index}].", event.attributes)
+        return values
+
+    def set_markers(paths_by_span):
+        if 0 in paths_by_span:
+            truncated._attributes[TRUNCATED_ATTRIBUTE_KEY] = tuple(paths_by_span[0])
+
+    return truncate_to_fit(collect, lambda: _encode_export_trace_request([truncated]), set_markers, max_size, 1)
 
 
 class BatchingSpanProcessor(SpanProcessor):
