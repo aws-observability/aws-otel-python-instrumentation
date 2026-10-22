@@ -4,8 +4,5 @@ llama-index-llms-anthropic==0.8.0
 llama-index-llms-azure-openai==0.4.0
 llama-index-llms-bedrock-converse==0.8.0
 llama-index-llms-vertex==0.6.0
-# Cap anthropic below 2.0.0: SDK v2 makes `anthropic.types.MessageParam` a Union (one type per role), so calling it
-# raises TypeError, and llama-index-llms-anthropic still calls `MessageParam(...)` in `messages_to_anthropic_messages`.
-# Lift this cap once llama-index-llms-anthropic supports anthropic>=2.
-# See https://platform.claude.com/docs/en/api/migration-2026-10-21#python
+# anthropic 2.x turned MessageParam into a Union, which llama-index-llms-anthropic still instantiates.
 anthropic<2
