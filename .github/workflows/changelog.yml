@@ -1,0 +1,63 @@
+name: Changelog Check
+# Separate from the PR build so adding or removing the "skip changelog" label re-runs only this check,
+# not the full build.
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - labeled
+      - unlabeled
+    branches:
+      - main
+      - "release/v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  USER: ${{ github.event.pull_request.user.login }}
+  LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+
+jobs:
+  check-changelog:
+    # Fork PRs run on GitHub-hosted runners; the CodeBuild webhook requires approval for them.
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(format('["codebuild-adot-python-runner-{0}-{1}", "image:ubuntu-8.0", "instance-size:small"]', github.run_id, github.run_attempt)) }}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Check CHANGELOG
+        run: |
+          # Check if PR is from workflows bot or dependabot
+          if [[ "${{ env.USER }}" == "aws-application-signals-bot" ]]; then
+            echo "Skipping check: PR from aws-application-signals-bot"
+            exit 0
+          fi
+          
+          if [[ "${{ env.USER }}" == "dependabot[bot]" ]]; then
+            echo "Skipping check: PR from dependabot"
+            exit 0
+          fi
+          
+          # Check for skip changelog label
+          if echo '${{ env.LABELS }}' | jq -r '.[]' | grep -q "skip changelog"; then
+            echo "Skipping check: skip changelog label found"
+            exit 0
+          fi
+          
+          # Fetch base branch and check for CHANGELOG modifications
+          git fetch origin ${{ github.base_ref }}
+          if git diff --name-only origin/${{ github.base_ref }}..HEAD | grep -q "CHANGELOG.md"; then
+            echo "CHANGELOG.md entry found - check passed"
+            exit 0
+          fi
+          
+          echo "It looks like you didn't add an entry to CHANGELOG.md. If this change affects the SDK behavior, please update CHANGELOG.md and link this PR in your entry. If this PR does not need a CHANGELOG entry, you can add the 'Skip Changelog' label to this PR."
+          exit 1
