@@ -12,6 +12,10 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- fix: `AwsAuthSession` no longer caches a `None` credential result, so a single failed credential lookup (for
+  example an IMDS timeout, which botocore reports as `None` rather than raising) no longer leaves every later OTLP
+  export unsigned for the life of the process.
+  ([#941](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/941))
 - fix: honor `OTEL_EXPORTER_OTLP_LOGS_COMPRESSION` and `OTEL_EXPORTER_OTLP_COMPRESSION` in the AWS OTLP logs
   exporter, retaining gzip as the default when neither variable is configured.
   ([#934](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/934))
