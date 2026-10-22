@@ -294,12 +294,10 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             input_token_details.get("cache_read"),
             input_token_details.get("cached_tokens"),
         )
-        
-        ttl_cache_creations = sum(
-            input_token_details.get(key) or 0
-            for key in ("ephemeral_5m_input_tokens", "ephemeral_1h_input_tokens")
-        ) or None
-
+        ttl_cache_creations = (
+            sum(input_token_details.get(key) or 0 for key in ("ephemeral_5m_input_tokens", "ephemeral_1h_input_tokens"))
+            or None
+        )
         cache_creation_input_tokens = first_not_none(
             usage.get("cache_creation_input_tokens"),
             usage.get("cache_creation_tokens"),
@@ -622,7 +620,9 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             return
         OpenTelemetryCallbackHandler._set_span_attribute(span, LANGGRAPH_STEP_SPAN_ATTR, metadata.get("langgraph_step"))
         OpenTelemetryCallbackHandler._set_span_attribute(span, LANGGRAPH_NODE_SPAN_ATTR, metadata.get("langgraph_node"))
-        OpenTelemetryCallbackHandler._set_span_attribute(span, LANGGRAPH_CHECKPOINT_NS_SPAN_ATTR, metadata.get("langgraph_checkpoint_ns"))
+        OpenTelemetryCallbackHandler._set_span_attribute(
+            span, LANGGRAPH_CHECKPOINT_NS_SPAN_ATTR, metadata.get("langgraph_checkpoint_ns")
+        )
 
     def _set_llm_request_span_attributes(  # pylint: disable=too-many-locals
         self,
