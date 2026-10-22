@@ -146,6 +146,30 @@ class TestAwsAuthSession(TestCase):
         self.assertIn("Failed to load AWS Credentials", log_ctx.output[0])
 
     @patch("requests.Session.request", return_value=requests.Response())
+    def test_credentials_retry_after_none_result(self, mock_request):
+        """A ``None`` result from ``get_credentials()`` must NOT latch the resolved
+        flag either. botocore's IMDS provider returns ``None`` instead of raising when
+        the metadata service times out, so a single failed lookup would otherwise leave
+        every later export unsigned (HTTP 403) for the life of the process.
+        """
+        with patch(
+            "botocore.session.Session.get_credentials",
+            side_effect=[None, mock_credentials, mock_credentials],
+        ) as mock_get_credentials:
+            session = AwsAuthSession("us-east-1", "xray", get_aws_session())
+
+            session.request("POST", AWS_OTLP_TRACES_ENDPOINT, data="", headers={})
+            self.assertNotIn(AUTHORIZATION_HEADER, mock_request.call_args.kwargs["headers"])
+
+            session.request("POST", AWS_OTLP_TRACES_ENDPOINT, data="", headers={})
+            self.assertIn(AUTHORIZATION_HEADER, mock_request.call_args.kwargs["headers"])
+
+            # Once resolved, the cached credentials are reused.
+            session.request("POST", AWS_OTLP_TRACES_ENDPOINT, data="", headers={})
+            self.assertIn(AUTHORIZATION_HEADER, mock_request.call_args.kwargs["headers"])
+            self.assertEqual(mock_get_credentials.call_count, 2)
+
+    @patch("requests.Session.request", return_value=requests.Response())
     @patch("botocore.session.Session.get_credentials", return_value=mock_credentials)
     @patch(
         "amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session"
