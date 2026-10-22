@@ -133,41 +133,41 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
                     _logger.exception("Exception while exporting logs: %s", exception)
                 detach(token)
 
-    def _estimate_log_size(self, log: ReadableLogRecord, depth: int = 3) -> int:  # pylint: disable=too-many-branches
+    def _estimate_log_size(  # pylint: disable=too-many-branches
+        self, log: ReadableLogRecord, depth: Optional[int] = None
+    ) -> int:
         """
         Estimates the size in bytes of a log by calculating the size of its body and its attributes
         and adding a buffer amount to account for other log metadata information.
 
         Features:
-        - Processes complex log structures up to the specified depth limit
+        - Processes complex log structures, optionally up to the specified depth limit
         - Includes cycle detection to prevent processing the same content more than once
         - Returns truncated calculation if depth limit is exceeded
 
-        We set depth to 3 as this is the minimum required depth to estimate our consolidated Gen AI log events:
+        There is no depth limit by default, since Gen AI log event content can be nested arbitrarily deep.
+        For example, LLOHandler builds the following body from a gen_ai.user.message span event,
+        where the message content is 5 levels deep:
 
         Example structure:
         {
-            "output": {
-                "messages": [
-                    {
-                        "content": "Hello, World!",
-                        "role": "assistant"
-                    }
-                ]
-            },
             "input": {
                 "messages": [
                     {
-                        "content": "Say Hello, World!",
+                        "content": {
+                            "content": "Say Hello, World!"
+                        },
                         "role": "user"
                     }
                 ]
             }
         }
 
+        The calculation already stops once the size reaches _MAX_LOG_REQUEST_BYTE_SIZE.
+
         Args:
             log: The Log object to calculate size for
-            depth: Maximum depth to traverse in nested structures (default: 3)
+            depth: Maximum depth to traverse in nested structures (default: None, no limit)
 
         Returns:
             int: The estimated size of the log object in bytes
@@ -210,7 +210,7 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
                 # next_val must be Sequence["AnyValue"] or Mapping[str, "AnyValue"]
                 # See: https://github.com/open-telemetry/opentelemetry-python/blob/\
                 # 9426d6da834cfb4df7daedd4426bba0aa83165b5/opentelemetry-api/src/opentelemetry/util/types.py#L20
-                if current_depth <= depth:
+                if depth is None or current_depth <= depth:
                     obj_id = id(
                         next_val
                     )  # Guaranteed to be unique, see: https://www.w3schools.com/python/ref_func_id.asp
