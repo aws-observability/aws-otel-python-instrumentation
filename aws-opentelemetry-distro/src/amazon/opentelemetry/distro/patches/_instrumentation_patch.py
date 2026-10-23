@@ -37,5 +37,5 @@ def apply_instrumentation_patches() -> None:  # pylint: disable=too-many-branche
         # Delay import to only occur if patches is safe to apply (e.g. the instrumented library is installed).
         from amazon.opentelemetry.distro.patches._starlette_patches import _apply_starlette_instrumentation_patches
 
-        # Patch to exclude http receive/send ASGI event spans from Bedrock AgentCore
+        # Exclude ASGI receive/send event spans to reduce trace noise for all Starlette applications.
         _apply_starlette_instrumentation_patches()
