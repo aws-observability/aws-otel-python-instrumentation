@@ -49,6 +49,25 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
         self.assertEqual(dict_size - self.processor._BASE_LOG_BUFFER_BYTE_SIZE, expected_dict_size)
         self.assertEqual(array_size - self.processor._BASE_LOG_BUFFER_BYTE_SIZE, expected_array_size)
 
+    def test_process_log_data_gen_ai_content_nested_beyond_three_levels(self):
+        """Tests that the processor counts Gen AI message content nested more than three levels deep"""
+        content = "X" * 400
+        log_bodies = [
+            # Gen AI log event built by LLOHandler from a gen_ai.user.message span event
+            {"input": {"messages": [{"role": "user", "content": {"content": content}}]}},
+            # Bedrock Converse gen_ai.assistant.message log event with reasoning content
+            {"content": [{"reasoningContent": {"reasoningText": {"text": content}}}]},
+        ]
+        expected_sizes = [
+            len("input") + len("messages") + len("role") + len("user") + len("content") * 2 + len(content),
+            len("content") + len("reasoningContent") + len("reasoningText") + len("text") + len(content),
+        ]
+
+        for index, log_body in enumerate(log_bodies):
+            log = self.generate_test_log_data(log_body=log_body, count=1)
+            actual_size = self.processor._estimate_log_size(log[0])
+            self.assertEqual(actual_size - self.processor._BASE_LOG_BUFFER_BYTE_SIZE, expected_sizes[index])
+
     def test_process_log_data_with_attributes(self):
         """Tests that the processor correctly handles both body and attributes"""
         log_body = "test_body"
@@ -236,6 +255,30 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
             batch = call[0][0]
             expected_size = expected_sizes[index]
             self.assertEqual(len(batch), expected_size)
+
+    @patch(
+        "amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor.attach",
+        return_value=MagicMock(),
+    )
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor.detach")
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor.set_value")
+    def test_export_splits_gen_ai_logs_with_deeply_nested_content(self, _, __, ___):
+        """Should split Gen AI logs into sub-batches by the size of content nested more than three levels deep"""
+        content = "X" * (self.processor._MAX_LOG_REQUEST_BYTE_SIZE // 2)
+        log_body = {"input": {"messages": [{"role": "user", "content": {"content": content}}]}}
+        test_logs = self.generate_test_log_data(log_body=log_body, count=3)
+
+        for log in test_logs:
+            self.processor._batch_processor._queue.appendleft(log)
+
+        self.processor._export(batch_strategy=BatchExportStrategy.EXPORT_ALL)
+
+        self.assertEqual(len(self.processor._batch_processor._queue), 0)
+        self.assertEqual(self.mock_exporter.export.call_count, len(test_logs))
+
+        for call in self.mock_exporter.export.call_args_list:
+            batch = call[0][0]
+            self.assertEqual(len(batch), 1)
 
     def test_force_flush_returns_false_when_shutdown(self):
         """Tests that force_flush returns False when processor is shutdown"""
