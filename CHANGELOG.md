@@ -12,6 +12,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- fix: suppress ASGI event spans independently of agent observability
+  ([#950](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/950))
 - fix: on Lambda, UDP span exports larger than the 65,507 byte datagram limit are split across datagrams instead of
   being dropped with `Message too long`; a single oversized span has its longest string attributes truncated and is
   marked with `aws.otel.udp.truncated`.
