@@ -12,6 +12,10 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- fix: require `certifi >= 2026.10.18` so the Lambda layer no longer bundles the eMudhra (emSign) ECC Root CA - G3,
+  distrusted after its intermediates were compromised
+  ([GHSA-6q48-6c7w-9gw2](https://github.com/certifi/python-certifi/security/advisories/GHSA-6q48-6c7w-9gw2)).
+  ([#TBD](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/TBD))
 - fix: on Lambda, UDP span exports larger than the 65,507 byte datagram limit are split across datagrams instead of
   being dropped with `Message too long`; a single oversized span has its longest string attributes truncated and is
   marked with `aws.otel.udp.truncated`.
