@@ -16,6 +16,9 @@ from opentelemetry.trace import SpanKind
 class TestStarlettePatch(TestCase):
     """Test the Starlette instrumentation patches."""
 
+    def setUp(self):
+        self.addCleanup(setattr, OpenTelemetryMiddleware, "__init__", OpenTelemetryMiddleware.__init__)
+
     def test_apply_starlette_instrumentation_patches_excludes_asgi_event_spans(self):
         _apply_starlette_instrumentation_patches()
         exporter = InMemorySpanExporter()
