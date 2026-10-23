@@ -20,7 +20,10 @@ if sys.version_info < (3, 10) or sys.version_info >= (3, 14):
 
 from crewai import LLM, Agent, Crew, Task
 from crewai.events import crewai_event_bus
+from crewai.events.types.agent_events import AgentExecutionCompletedEvent, AgentExecutionStartedEvent
+from crewai.events.types.crew_events import CrewKickoffCompletedEvent, CrewKickoffStartedEvent
 from crewai.events.types.llm_events import LLMCallCompletedEvent, LLMCallStartedEvent, LLMCallType
+from crewai.events.types.tool_usage_events import ToolUsageFinishedEvent, ToolUsageStartedEvent
 from crewai.llms.base_llm import BaseLLM, llm_call_context
 from crewai.tools import tool
 
@@ -29,6 +32,8 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
     OPERATION_INVOKE_WORKFLOW,
 )
 from amazon.opentelemetry.distro.instrumentation.crewai import CrewAIInstrumentor
+from amazon.opentelemetry.distro.instrumentation.crewai._event_handler import _EventBusEmitWrapper
+from opentelemetry.instrumentation.dependencies import DependencyConflict
 from opentelemetry.instrumentation.threading import ThreadingInstrumentor
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -243,6 +248,28 @@ class TestCrewAIInstrumentor(TestCase):
         self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_MAX_TOKENS], 100)
         self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_STOP_SEQUENCES], ("STOP",))
         self.assertIs(chat_span.attributes[GEN_AI_REQUEST_STREAM], False)
+
+    def test_llm_events_from_non_base_llm_source(self):
+        # customer code can emit LLM events itself; such sources have no get_token_usage_summary
+        source = object()
+        start_event = LLMCallStartedEvent(call_id="c1", messages=[{"role": "user", "content": "Hello"}])
+        crewai_event_bus.emit(source, start_event)
+        crewai_event_bus.emit(
+            source,
+            LLMCallCompletedEvent(
+                call_id="c1",
+                response="Hello",
+                call_type=LLMCallType.LLM_CALL,
+                started_event_id=start_event.event_id,
+            ),
+        )
+
+        chat_span = self._find_span("chat")
+        self.assertIsNotNone(chat_span)
+        self.assertIn(GEN_AI_INPUT_MESSAGES, chat_span.attributes)
+        self.assertNotIn(GEN_AI_USAGE_INPUT_TOKENS, chat_span.attributes)
+        self.assertNotIn(GEN_AI_USAGE_OUTPUT_TOKENS, chat_span.attributes)
+        self._assert_spans_all_ended()
 
     def test_llm_call_uses_effective_request_attributes_from_started_event(self):
         if "temperature" not in LLMCallStartedEvent.model_fields:
@@ -574,6 +601,48 @@ class TestCrewAIInstrumentor(TestCase):
         self._assert_span_parent(self._find_span("execute_tool tool_a"), agent_span)
         self._assert_span_parent(self._find_span("execute_tool tool_b"), agent_span)
         self._assert_spans_all_ended()
+
+    def test_handler_failures_do_not_fail_kickoff(self):
+        @tool
+        def tool_a(value: str) -> str:
+            """Tool A."""
+            return f"A: {value}"
+
+        handlers = self.instrumentor._handler._event_type_handlers
+        success_path_events = [
+            CrewKickoffStartedEvent,
+            CrewKickoffCompletedEvent,
+            AgentExecutionStartedEvent,
+            AgentExecutionCompletedEvent,
+            LLMCallStartedEvent,
+            LLMCallCompletedEvent,
+            ToolUsageStartedEvent,
+            ToolUsageFinishedEvent,
+        ]
+        for event_type in success_path_events + ["_maybe_end_pending_llm_span_for_tool_call"]:
+            with self.subTest(handler=getattr(event_type, "__name__", event_type)):
+                llm = LLM(model="openai/gpt-4", is_litellm=True)
+                llm.supports_function_calling = lambda: True
+                agent = Agent(role="Fragile", goal="Use tools", backstory="Agent.", llm=llm, tools=[tool_a])
+                task = Task(description="Use tools.", expected_output="Results.", agent=agent)
+                crew = Crew(name="FragileCrew", agents=[agent], tasks=[task])
+                failing_handler = MagicMock(side_effect=RuntimeError("handler bug"))
+
+                if isinstance(event_type, str):
+                    patcher = patch.object(self.instrumentor._handler, event_type, failing_handler)
+                else:
+                    patcher = patch.dict(handlers, {event_type: failing_handler})
+                with patcher, patch(
+                    "litellm.completion",
+                    side_effect=[
+                        self._mock_response(tool_calls=[self._mock_tool_call("c1", "tool_a", '{"value": "1"}')]),
+                        self._mock_response("Final Answer: Done!"),
+                    ],
+                ):
+                    result = crew.kickoff()
+
+                self.assertTrue(failing_handler.called)
+                self.assertIn("Done!", result.raw)
 
     def test_async_task_parenting(self):
         llm_a = LLM(model="openai/gpt-4", is_litellm=True)
@@ -1580,3 +1649,45 @@ class TestCrewAIInstrumentor(TestCase):
         return ChatCompletionMessageToolCall(
             id=call_id, type="function", function=Function(name=name, arguments=arguments)
         )
+
+
+class TestCrewAIInstrumentorVersionGate(TestCase):
+    """Auto-instrumentation calls instrument(skip_dep_check=True), so _instrument must enforce the range itself."""
+
+    def tearDown(self):
+        CrewAIInstrumentor().uninstrument()
+
+    def test_out_of_range_version_does_not_wrap_emit(self):
+        conflict = DependencyConflict("crewai >= 1.10.0, < 2", "crewai 1.5.0")
+        instrumentor = CrewAIInstrumentor()
+        with patch.object(CrewAIInstrumentor, "_check_dependency_conflicts", return_value=conflict):
+            with self.assertLogs("amazon.opentelemetry.distro.instrumentation.crewai", level="WARNING") as logs:
+                instrumentor.instrument(skip_dep_check=True)
+
+        self.assertFalse(hasattr(crewai_event_bus.emit, "__wrapped__"))
+        self.assertIsNone(instrumentor._handler)
+        self.assertIn("crewai 1.5.0", logs.output[0])
+
+    def test_in_range_version_wraps_emit(self):
+        CrewAIInstrumentor().instrument(skip_dep_check=True)
+
+        self.assertTrue(hasattr(crewai_event_bus.emit, "__wrapped__"))
+
+
+class TestEventBusEmitWrapperFailOpen(TestCase):
+    """The emit wrapper bypasses CrewAI's handler isolation, so it must contain handler failures itself."""
+
+    def test_handler_failures_still_emit_and_return_result(self):
+        event_handler = MagicMock()
+        event_handler._maybe_end_pending_llm_span_for_tool_call.side_effect = RuntimeError("pre-emit bug")
+        event_handler._handle_event.side_effect = RuntimeError("post-emit bug")
+        wrapped = MagicMock(return_value="emit-result")
+        event = MagicMock(spec=ToolUsageStartedEvent)
+        source = object()
+
+        result = _EventBusEmitWrapper(event_handler)(wrapped, None, (source, event), {})
+
+        self.assertEqual(result, "emit-result")
+        wrapped.assert_called_once_with(source, event)
+        event_handler._maybe_end_pending_llm_span_for_tool_call.assert_called_once_with(source, event)
+        event_handler._handle_event.assert_called_once_with(source, event)

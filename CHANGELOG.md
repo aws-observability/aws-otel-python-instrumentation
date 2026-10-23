@@ -12,6 +12,15 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- fix: the CrewAI instrumentor now skips instrumentation, with a warning, when the installed crewai is outside its
+  supported range (`>= 1.10.0, < 2`). Under auto-instrumentation the range was not enforced, so `Crew.kickoff()`
+  raised `AttributeError` on crewai 0.177.0-1.9.x.
+  ([#953](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/953))
+- fix: CrewAI instrumentation errors no longer fail the customer's call. The `crewai_event_bus.emit` wrapper now
+  catches and debug-logs exceptions from the ADOT event handler, so the event is still emitted and `kickoff()`
+  returns normally; only telemetry for that event is lost. LLM events emitted from a source other than a CrewAI
+  `BaseLLM` now produce a chat span without token usage instead of raising `AttributeError`.
+  ([#953](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/953))
 - fix: require `certifi >= 2026.10.18` so the Lambda layer no longer bundles the eMudhra (emSign) ECC Root CA - G3,
   distrusted after its intermediates were compromised
   ([GHSA-6q48-6c7w-9gw2](https://github.com/certifi/python-certifi/security/advisories/GHSA-6q48-6c7w-9gw2)).
