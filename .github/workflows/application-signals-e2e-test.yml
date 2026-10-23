@@ -54,6 +54,7 @@ jobs:
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
     secrets: inherit
     with:
+      runs-on: '["codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}", "image:ubuntu-8.0", "instance-size:large"]'
       aws-region: us-east-1
       caller-workflow-name: 'main-build'
       python-version: '3.10'
@@ -65,6 +66,7 @@ jobs:
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
     secrets: inherit
     with:
+      runs-on: '["codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}", "image:ubuntu-8.0", "instance-size:large"]'
       aws-region: us-east-1
       caller-workflow-name: 'main-build'
       python-version: '3.11'
@@ -76,6 +78,7 @@ jobs:
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
     secrets: inherit
     with:
+      runs-on: '["codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}", "image:ubuntu-8.0", "instance-size:large"]'
       aws-region: us-east-1
       caller-workflow-name: 'main-build'
       python-version: '3.12'
@@ -87,6 +90,7 @@ jobs:
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-adaptive-sampling-test.yml@main
     secrets: inherit
     with:
+      runs-on: '["codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}", "image:ubuntu-8.0", "instance-size:large"]'
       caller-workflow-name: 'main-build'
       staging-wheel-name: ${{ inputs.staging-wheel-name }}
 
@@ -95,6 +99,7 @@ jobs:
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
     secrets: inherit
     with:
+      runs-on: '["codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}", "image:ubuntu-8.0", "instance-size:large"]'
       aws-region: us-east-1
       caller-workflow-name: 'main-build'
       python-version: '3.13'
@@ -106,6 +111,7 @@ jobs:
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
     secrets: inherit
     with:
+      runs-on: '["codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}", "image:ubuntu-8.0", "instance-size:large"]'
       aws-region: us-east-1
       caller-workflow-name: 'main-build'
       python-version: '3.14'
@@ -121,6 +127,7 @@ jobs:
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-adot-di-test.yml@main
     secrets: inherit
     with:
+      runs-on: '["codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}", "image:ubuntu-8.0", "instance-size:large"]'
       aws-region: us-east-1
       caller-workflow-name: 'main-build'
       python-version: ${{ matrix.python-version }}
@@ -134,6 +141,7 @@ jobs:
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-service-events-test.yml@main
     secrets: inherit
     with:
+      runs-on: '["codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}", "image:ubuntu-8.0", "instance-size:large"]'
       aws-region: us-east-1
       test-cluster-name: 'e2e-python-adot-test'
       adot-image-name: ${{ inputs.adot-image-name }}
@@ -146,6 +154,7 @@ jobs:
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/eks-setup-app-signals.yml@main
     secrets: inherit
     with:
+      runs-on: '["codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}", "image:ubuntu-8.0", "instance-size:large"]'
       test-cluster-name: 'e2e-python-adot-test'
       aws-region: us-east-1
 
@@ -154,6 +163,7 @@ jobs:
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-shared-cluster-test.yml@main
     secrets: inherit
     with:
+      runs-on: '["codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}", "image:ubuntu-8.0", "instance-size:large"]'
       aws-region: us-east-1
       test-cluster-name: 'e2e-python-adot-test'
       adot-image-name: ${{ inputs.adot-image-name }}
@@ -165,6 +175,7 @@ jobs:
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-shared-cluster-test.yml@main
     secrets: inherit
     with:
+      runs-on: '["codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}", "image:ubuntu-8.0", "instance-size:large"]'
       aws-region: us-east-1
       test-cluster-name: 'e2e-python-adot-test'
       adot-image-name: ${{ inputs.adot-image-name }}
@@ -176,6 +187,7 @@ jobs:
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-shared-cluster-test.yml@main
     secrets: inherit
     with:
+      runs-on: '["codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}", "image:ubuntu-8.0", "instance-size:large"]'
       aws-region: us-east-1
       test-cluster-name: 'e2e-python-adot-test'
       adot-image-name: ${{ inputs.adot-image-name }}
@@ -187,6 +199,7 @@ jobs:
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-shared-cluster-test.yml@main
     secrets: inherit
     with:
+      runs-on: '["codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}", "image:ubuntu-8.0", "instance-size:large"]'
       aws-region: us-east-1
       test-cluster-name: 'e2e-python-adot-test'
       adot-image-name: ${{ inputs.adot-image-name }}
@@ -198,6 +211,7 @@ jobs:
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-shared-cluster-test.yml@main
     secrets: inherit
     with:
+      runs-on: '["codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}", "image:ubuntu-8.0", "instance-size:large"]'
       aws-region: us-east-1
       test-cluster-name: 'e2e-python-adot-test'
       adot-image-name: ${{ inputs.adot-image-name }}
@@ -213,6 +227,7 @@ jobs:
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/eks-cleanup-app-signals.yml@main
     secrets: inherit
     with:
+      runs-on: '["codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}", "image:ubuntu-8.0", "instance-size:large"]'
       test-cluster-name: 'e2e-python-adot-test'
       aws-region: us-east-1
 
@@ -226,6 +241,7 @@ jobs:
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-asg-test.yml@main
     secrets: inherit
     with:
+      runs-on: '["codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}", "image:ubuntu-8.0", "instance-size:large"]'
       aws-region: us-east-1
       caller-workflow-name: 'main-build'
       python-version: '3.10'
@@ -240,6 +256,7 @@ jobs:
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-k8s-test.yml@main
     secrets: inherit
     with:
+      runs-on: '["codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}", "image:ubuntu-8.0", "instance-size:large"]'
       aws-region: us-east-1
       adot-image-name: ${{ inputs.adot-image-name }}
       caller-workflow-name: 'main-build'
@@ -250,6 +267,7 @@ jobs:
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ecs-test.yml@main
     secrets: inherit
     with:
+      runs-on: '["codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}", "image:ubuntu-8.0", "instance-size:large"]'
       aws-region: us-east-1
       adot-image-name: ${{ inputs.adot-image-name }}
       caller-workflow-name: 'main-build'
@@ -265,6 +283,7 @@ jobs:
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
     secrets: inherit
     with:
+      runs-on: '["codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}", "image:ubuntu-8.0", "instance-size:large"]'
       aws-region: us-east-1
       caller-workflow-name: 'main-build'
       python-version: '3.10'
@@ -281,6 +300,7 @@ jobs:
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-lambda-test.yml@main
     secrets: inherit
     with:
+      runs-on: '["codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}", "image:ubuntu-8.0", "instance-size:large"]'
       aws-region: us-east-1
       python-version: ${{ matrix.python-version }}
       caller-workflow-name: 'main-build'
@@ -294,6 +314,7 @@ jobs:
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-lambda-lite-sdk-test.yml@main
     secrets: inherit
     with:
+      runs-on: '["codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}", "image:ubuntu-8.0", "instance-size:large"]'
       aws-region: us-east-1
       python-version: ${{ matrix.python-version }}
       caller-workflow-name: 'main-build'
@@ -305,6 +326,7 @@ jobs:
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-adot-sigv4-test.yml@main
     secrets: inherit
     with:
+      runs-on: '["codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}", "image:ubuntu-8.0", "instance-size:large"]'
       caller-workflow-name: 'main-build'
       staging-wheel-name: ${{ inputs.staging-wheel-name }}
   
@@ -314,6 +336,7 @@ jobs:
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-genai-v1-test.yml@main
     secrets: inherit
     with:
+      runs-on: '["codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}", "image:ubuntu-8.0", "instance-size:large"]'
       caller-workflow-name: 'main-build'
       staging-wheel-name: ${{ inputs.staging-wheel-name }}
 
@@ -323,6 +346,7 @@ jobs:
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-genai-v2-test.yml@main
     secrets: inherit
     with:
+      runs-on: '["codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}", "image:ubuntu-8.0", "instance-size:large"]'
       caller-workflow-name: 'main-build'
       staging-wheel-name: ${{ inputs.staging-wheel-name }}
 
@@ -331,6 +355,7 @@ jobs:
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-service-events-test.yml@main
     secrets: inherit
     with:
+      runs-on: '["codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}", "image:ubuntu-8.0", "instance-size:large"]'
       caller-workflow-name: 'main-build'
       staging-wheel-name: ${{ inputs.staging-wheel-name }}
 
@@ -350,4 +375,5 @@ jobs:
   validate-all-tests-are-accounted-for:
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/validate-e2e-tests-are-accounted-for.yml@main
     with:
+      runs-on: '["codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}", "image:ubuntu-8.0", "instance-size:large"]'
       exclusions: 'python-eks-test.yml,eks-setup-app-signals.yml,eks-cleanup-app-signals.yml'
