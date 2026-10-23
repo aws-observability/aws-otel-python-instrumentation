@@ -21,6 +21,14 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   returns normally; only telemetry for that event is lost. LLM events emitted from a source other than a CrewAI
   `BaseLLM` now produce a chat span without token usage instead of raising `AttributeError`.
   ([#953](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/953))
+- fix: require `certifi >= 2026.10.18` so the Lambda layer no longer bundles the eMudhra (emSign) ECC Root CA - G3,
+  distrusted after its intermediates were compromised
+  ([GHSA-6q48-6c7w-9gw2](https://github.com/certifi/python-certifi/security/advisories/GHSA-6q48-6c7w-9gw2)).
+  ([#949](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/949))
+- fix: on Lambda, UDP span exports larger than the 65,507 byte datagram limit are split across datagrams instead of
+  being dropped with `Message too long`; a single oversized span has its longest string attributes truncated and is
+  marked with `aws.otel.udp.truncated`.
+  ([#939](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/939))
 - fix: `AwsAuthSession` no longer caches a `None` credential result, so a single failed credential lookup (for
   example an IMDS timeout, which botocore reports as `None` rather than raising) no longer leaves every later OTLP
   export unsigned for the life of the process.
