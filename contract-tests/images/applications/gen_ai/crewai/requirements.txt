@@ -1,3 +1,7 @@
-crewai[bedrock]>=1.10.0
+crewai[bedrock]>=1.10.0,<1.15.29
+# Cap below 1.15.29 (2026-10-23): with it, the llm='bedrock' subtests of test_crewai_single_agent and
+# test_crewai_multi_agent export no spans for the store_agent_output tool's S3 call (AssertionError: 0 != 1 / 0 != 2).
+# The OpenAI subtests are unaffected. 1.15.28 passes. Lift this cap once a newer crewai release passes the
+# bedrock subtests. Upstream: crewAIInc/crewAI.
 starlette
 uvicorn
