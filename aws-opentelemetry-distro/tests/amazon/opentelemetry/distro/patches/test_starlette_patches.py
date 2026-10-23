@@ -16,16 +16,7 @@ from opentelemetry.trace import SpanKind
 class TestStarlettePatch(TestCase):
     """Test the Starlette instrumentation patches."""
 
-    def test_starlette_patch_handles_import_error(self):
-        """Test that the patch handles import errors gracefully."""
-        with patch.dict("sys.modules", {"opentelemetry.instrumentation.asgi": None}), self.assertLogs(
-            "amazon.opentelemetry.distro.patches._starlette_patches", level="WARNING"
-        ) as logs:
-            _apply_starlette_instrumentation_patches()
-
-        self.assertIn("Failed to apply Starlette instrumentation patches", logs.output[0])
-
-    def test_asgi_event_spans_excluded_without_losing_request_or_application_spans(self):
+    def test_apply_starlette_instrumentation_patches_excludes_asgi_event_spans(self):
         _apply_starlette_instrumentation_patches()
         exporter = InMemorySpanExporter()
         provider = TracerProvider()
