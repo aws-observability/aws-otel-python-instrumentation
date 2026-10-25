@@ -42,7 +42,23 @@ runs:
         # to ensure they are not silently skipped from testing
         ENVS=$(tox list -q | grep "^${PY_VERSION}-test-" | sed 's/ .*//' | tr '\n' ',' | sed 's/,$//' || true)
         echo "Running tox envs: $ENVS"
-        tox --parallel auto --parallel-live -e "$ENVS" -- -v
+        set -o pipefail
+        if tox --parallel auto --parallel-live -e "$ENVS" -- -v 2>&1 | tee tox-output.log; then
+          exit 0
+        fi
+        # pip does not retry a download that is cut off mid-body ("Connection broken: IncompleteRead"), and with
+        # ~10 envs installing in parallel one truncated PyPI response fails the whole job. Retry the failed envs
+        # once, but only when the log shows a pip network error, so real test failures are never retried.
+        sed 's/\x1b\[[0-9;]*m//g' tox-output.log > tox-output.clean.log
+        if ! grep -qE "Could not install packages due to an OSError: .*(Connection broken|IncompleteRead|ReadTimeoutError|Connection reset)" tox-output.clean.log; then
+          exit 1
+        fi
+        FAILED_ENVS=$(sed -nE 's/^ +([^ :]+): FAIL code .*/\1/p' tox-output.clean.log | sort -u | paste -sd, -)
+        if [ -z "$FAILED_ENVS" ]; then
+          exit 1
+        fi
+        echo "::warning::pip network error during tox run; retrying failed envs once: $FAILED_ENVS"
+        tox --parallel auto --parallel-live -e "$FAILED_ENVS" -- -v
 
     - name: Combine and check coverage
       shell: bash
