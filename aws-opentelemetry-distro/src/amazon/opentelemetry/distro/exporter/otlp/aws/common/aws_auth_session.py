@@ -120,9 +120,12 @@ class AwsAuthSession(requests.Session):
 
         On a transient credential resolution failure (e.g., IMDS timeout), the
         ``_credentials_resolved`` flag is left ``False`` so the next ``request()`` call
-        will retry. Only a successful resolution latches the flag, matching the
-        original "retry every request" behavior for the failure path while keeping
-        the SSL-context-construction cost amortized to once on the success path.
+        will retry. A failure can surface as an exception or as ``None``: botocore's
+        instance metadata provider returns ``None`` rather than raising when the
+        metadata service times out. Only a successful resolution that yields
+        credentials latches the flag, matching the original "retry every request"
+        behavior for the failure path while keeping the SSL-context-construction cost
+        amortized to once on the success path.
 
         Note: the read of ``_credentials_resolved`` outside the lock is safe because
         Python's GIL makes attribute reads/writes atomic. On free-threaded Python
@@ -155,10 +158,14 @@ class AwsAuthSession(requests.Session):
                 self._credentials_error_logged = True
                 return
 
-            # Successful resolution (may still be None if no provider is configured).
             # Clear the error-logged flag so request() can surface a None result.
             self._credentials_error_logged = False
-            self._credentials_resolved = True
+
+            # A None result is indistinguishable from a transient lookup failure (botocore
+            # swallows IMDS timeouts and returns None), so only latch once credentials were
+            # found. Otherwise one failed lookup would leave every later export unsigned.
+            if self._credentials is not None:
+                self._credentials_resolved = True
 
     def request(self, method, url, *args, data=None, headers=None, **kwargs):
         self._ensure_initialized()
