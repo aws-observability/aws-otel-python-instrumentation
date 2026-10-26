@@ -165,13 +165,18 @@ class MockBedrockHandler(BaseHTTPRequestHandler):
     # pylint: disable=invalid-name
     def do_POST(self):
         global _bedrock_call_count  # pylint: disable=global-statement
-        _bedrock_call_count += 1
 
         body = {}
         content_length = int(self.headers.get("Content-Length", 0))
         if content_length:
             body = json.loads(self.rfile.read(content_length))
 
+        if self.path.endswith("/count-tokens"):
+            # Token-counting preflights must not advance the mocked conversation.
+            self._send_json_response({"inputTokens": 10})
+            return
+
+        _bedrock_call_count += 1
         tools = self._extract_tools(body)
 
         if _bedrock_call_count % 2 == 1 and tools:
@@ -196,6 +201,9 @@ class MockBedrockHandler(BaseHTTPRequestHandler):
             "usage": {"inputTokens": 10, "outputTokens": 20, "totalTokens": 30},
             "metrics": {"latencyMs": 1},
         }
+        self._send_json_response(response)
+
+    def _send_json_response(self, response: Dict[str, Any]) -> None:
         response_body = json.dumps(response).encode()
 
         self.send_response(200)
