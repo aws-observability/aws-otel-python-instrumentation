@@ -267,6 +267,7 @@ class TestCrewAIInstrumentor(TestCase):
         chat_span = self._find_span("chat")
         self.assertIsNotNone(chat_span)
         self.assertIn(GEN_AI_INPUT_MESSAGES, chat_span.attributes)
+        # don't assume token counts from external source
         self.assertNotIn(GEN_AI_USAGE_INPUT_TOKENS, chat_span.attributes)
         self.assertNotIn(GEN_AI_USAGE_OUTPUT_TOKENS, chat_span.attributes)
         self._assert_spans_all_ended()
@@ -621,6 +622,7 @@ class TestCrewAIInstrumentor(TestCase):
         ]
         for event_type in success_path_events + ["_maybe_end_pending_llm_span_for_tool_call"]:
             with self.subTest(handler=getattr(event_type, "__name__", event_type)):
+                self.span_exporter.clear()
                 llm = LLM(model="openai/gpt-4", is_litellm=True)
                 llm.supports_function_calling = lambda: True
                 agent = Agent(role="Fragile", goal="Use tools", backstory="Agent.", llm=llm, tools=[tool_a])
