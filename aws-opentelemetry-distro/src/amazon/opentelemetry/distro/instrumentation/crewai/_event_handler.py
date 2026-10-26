@@ -65,6 +65,9 @@ if TYPE_CHECKING:
         AgentExecutionCompletedEvent,
         AgentExecutionErrorEvent,
         AgentExecutionStartedEvent,
+        LiteAgentExecutionStartedEvent,
+        LiteAgentExecutionCompletedEvent,
+        LiteAgentExecutionErrorEvent
     )
     from crewai.events.types.crew_events import (
         CrewKickoffCompletedEvent,
@@ -121,6 +124,9 @@ class OpenTelemetryEventHandler:
             AgentExecutionCompletedEvent,
             AgentExecutionErrorEvent,
             AgentExecutionStartedEvent,
+            LiteAgentExecutionStartedEvent,
+            LiteAgentExecutionCompletedEvent,
+            LiteAgentExecutionErrorEvent
         )
         from crewai.events.types.crew_events import (
             CrewKickoffCompletedEvent,
@@ -153,6 +159,9 @@ class OpenTelemetryEventHandler:
             LLMCallStartedEvent: self._on_llm_start,
             LLMCallCompletedEvent: self._on_llm_completed,
             LLMCallFailedEvent: self._on_llm_failed,
+            LiteAgentExecutionStartedEvent: self._on_lite_agent_started,
+            LiteAgentExecutionCompletedEvent: self._on_lite_agent_completed,
+            LiteAgentExecutionErrorEvent: self._on_lite_agent_error,
         }
 
     @skip_instrumentation_if_suppressed
@@ -282,6 +291,66 @@ class OpenTelemetryEventHandler:
         task_or_agent_id = self._get_task_or_agent_id(event)
         self._end_span(
             task_or_agent_id if self._event_id_to_span.get(task_or_agent_id) else event.started_event_id,
+            error=getattr(event, "error", None),
+        )
+
+    def _on_lite_agent_started(  # pylint: disable=too-many-branches
+            self, source: "BaseAgent", event: "LiteAgentExecutionStartedEvent"  # pylint: disable=unused-argument
+        ) -> None:
+            agent = source
+            agent_role = getattr(agent, "role", None) if agent else None
+            span_name = (
+                f"{GenAiOperationNameValues.INVOKE_AGENT.value} {agent_role}"
+                if agent_role
+                else GenAiOperationNameValues.INVOKE_AGENT.value
+            )
+            attributes: Dict[str, Any] = {
+                GEN_AI_OPERATION_NAME: GenAiOperationNameValues.INVOKE_AGENT.value,
+            }
+            if agent:
+                if agent_role:
+                    attributes[GEN_AI_AGENT_NAME] = agent_role
+                if hasattr(agent, "id"):
+                    attributes[GEN_AI_AGENT_ID] = str(agent.id)
+                goal = getattr(agent, "goal", None)
+                if goal:
+                    attributes[GEN_AI_AGENT_DESCRIPTION] = goal
+    
+                llm = getattr(agent, "llm", None)
+                provider, model = self._extract_provider_and_model(llm)
+                if provider:
+                    attributes[GEN_AI_PROVIDER_NAME] = provider
+                if model:
+                    attributes[GEN_AI_REQUEST_MODEL] = model
+                if llm:
+                    self._set_llm_request_span_attributes(attributes, llm)
+    
+            task_prompt = getattr(event, "task_prompt", None)
+            if task_prompt:
+                attributes[GEN_AI_INPUT_MESSAGES] = serialize_to_json_string(
+                    [{"role": "user", "parts": content_to_parts(task_prompt)}]
+                )
+    
+            self._start_span(span_name, event.event_id, attributes, self._get_parent_event_id(event))
+    
+    def _on_lite_agent_completed(
+        self, source: "BaseAgent", event: "LiteAgentExecutionCompletedEvent"  # pylint: disable=unused-argument
+    ) -> None:
+        attrs: Dict[str, Any] = {}
+        output = getattr(event, "output", None)
+        if output:
+            attrs[GEN_AI_OUTPUT_MESSAGES] = serialize_to_json_string(
+                [{"role": "assistant", "parts": content_to_parts(output), "finish_reason": "stop"}]
+            )
+        self._end_spans_for_root_event(
+            event.started_event_id,
+        )
+
+    def _on_lite_agent_error(
+        self, source: "BaseAgent", event: "LiteAgentExecutionErrorEvent"
+    ) -> None:  # pylint: disable=unused-argument
+        self._end_span(
+            event.started_event_id,
             error=getattr(event, "error", None),
         )
 
