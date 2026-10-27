@@ -333,8 +333,10 @@ class OpenTelemetryEventHandler:
                     [self._to_input_message(m) for m in messages if isinstance(m, dict)]
                 )
     
-            self._start_span(span_name, event.event_id, attributes, self._get_parent_event_id(event))
-    
+            self._start_span(
+                span_name, event.event_id, attributes, self._get_parent_event_id(event), root_event_id=event.event_id
+            )
+
     def _on_lite_agent_completed(
         self, source: "BaseAgent", event: "LiteAgentExecutionCompletedEvent"  # pylint: disable=unused-argument
     ) -> None:

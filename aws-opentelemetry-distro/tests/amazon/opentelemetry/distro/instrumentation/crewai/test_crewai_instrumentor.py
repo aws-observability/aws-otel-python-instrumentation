@@ -20,7 +20,13 @@ if sys.version_info < (3, 10) or sys.version_info >= (3, 14):
 
 from crewai import LLM, Agent, Crew, Task
 from crewai.events import crewai_event_bus
+from crewai.events.types.agent_events import (
+    LiteAgentExecutionCompletedEvent,
+    LiteAgentExecutionErrorEvent,
+    LiteAgentExecutionStartedEvent,
+)
 from crewai.events.types.llm_events import LLMCallCompletedEvent, LLMCallStartedEvent, LLMCallType
+from crewai.flow.flow import Flow, start
 from crewai.llms.base_llm import BaseLLM, llm_call_context
 from crewai.tools import tool
 
@@ -29,6 +35,7 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
     OPERATION_INVOKE_WORKFLOW,
 )
 from amazon.opentelemetry.distro.instrumentation.crewai import CrewAIInstrumentor
+from opentelemetry import trace
 from opentelemetry.instrumentation.threading import ThreadingInstrumentor
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -70,6 +77,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GenAiProviderNameValues,
 )
 from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
+from opentelemetry.trace import SpanKind, StatusCode
 
 
 # https://pypi.org/project/crewai/
@@ -573,6 +581,639 @@ class TestCrewAIInstrumentor(TestCase):
         agent_span = self._find_span("invoke_agent Multi")
         self._assert_span_parent(self._find_span("execute_tool tool_a"), agent_span)
         self._assert_span_parent(self._find_span("execute_tool tool_b"), agent_span)
+        self._assert_spans_all_ended()
+
+    def test_lite_agent_events(self):
+        # the event bus pairs each completed/error event with its started event via started_event_id
+        agent = Agent(
+            role="Researcher",
+            goal="Answer questions",
+            backstory="Agent.",
+            llm=LLM(model="openai/gpt-4", is_litellm=True),
+        )
+        agent_info = {"id": str(agent.id), "role": agent.role, "goal": agent.goal}
+        cases = [
+            (LiteAgentExecutionCompletedEvent(agent_info=agent_info, output="Done!"), StatusCode.OK),
+            (LiteAgentExecutionErrorEvent(agent_info=agent_info, error="agent failed"), StatusCode.ERROR),
+        ]
+        for end_event, expected_status in cases:
+            with self.subTest(end_event=type(end_event).__name__):
+                self.span_exporter.clear()
+                crewai_event_bus.emit(
+                    agent, LiteAgentExecutionStartedEvent(agent_info=agent_info, tools=None, messages="Hello")
+                )
+                crewai_event_bus.emit(agent, end_event)
+
+                agent_span = self._find_span("invoke_agent Researcher")
+                self.assertIsNotNone(agent_span)
+                self.assertEqual(agent_span.status.status_code, expected_status)
+                self.assertEqual(agent_span.attributes[GEN_AI_AGENT_NAME], "Researcher")
+                self.assertEqual(agent_span.attributes[GEN_AI_AGENT_DESCRIPTION], "Answer questions")
+                self.assertEqual(
+                    json.loads(agent_span.attributes[GEN_AI_INPUT_MESSAGES]),
+                    [{"role": "user", "parts": [{"type": "text", "content": "Hello"}]}],
+                )
+                if expected_status == StatusCode.OK:
+                    self.assertIn("Done!", agent_span.attributes[GEN_AI_OUTPUT_MESSAGES])
+                else:
+                    self.assertEqual(agent_span.attributes[ERROR_TYPE], "agent failed")
+                    self.assertNotIn(GEN_AI_OUTPUT_MESSAGES, agent_span.attributes)
+                self._assert_spans_all_ended()
+
+    def test_lite_agent_kickoff(self):
+        # Agent.kickoff() without a Crew emits LiteAgentExecution* events instead of AgentExecution* events
+        @tool
+        def tool_a(value: str) -> str:
+            """Tool A."""
+            return f"A: {value}"
+
+        llm = LLM(model="openai/gpt-4", is_litellm=True)
+        llm.supports_function_calling = lambda: True
+        agent = Agent(role="Researcher", goal="Answer questions", backstory="Agent.", llm=llm, tools=[tool_a])
+
+        with patch(
+            "litellm.completion",
+            side_effect=[
+                self._mock_response(tool_calls=[self._mock_tool_call("c1", "tool_a", '{"value": "1"}')]),
+                self._mock_response("Final Answer: Done!"),
+            ],
+        ):
+            with self.tracer_provider.get_tracer("test").start_as_current_span("POST /chat", kind=SpanKind.SERVER):
+                result = agent.kickoff("What is A of 1?")
+
+        self.assertIn("Done!", result.raw)
+        server_span = self._find_span("POST /chat")
+        agent_span = self._find_span("invoke_agent Researcher")
+        tool_span = self._find_span("execute_tool tool_a")
+        chat_spans = [s for s in self.span_exporter.get_finished_spans() if s.name == "chat gpt-4"]
+        self.assertIsNotNone(agent_span)
+        self.assertEqual(len(chat_spans), 2)
+        self._assert_trace_spans(
+            server_span,
+            ["POST /chat", "invoke_agent Researcher", "chat gpt-4", "execute_tool tool_a", "chat gpt-4"],
+        )
+        self._assert_span_parent(agent_span, server_span)
+        self._assert_span_parent(tool_span, agent_span)
+        for chat_span in chat_spans:
+            self._assert_span_parent(chat_span, agent_span)
+
+        self.assertEqual(agent_span.status.status_code, StatusCode.OK)
+        self.assertEqual(agent_span.attributes[GEN_AI_OPERATION_NAME], "invoke_agent")
+        self.assertEqual(agent_span.attributes[GEN_AI_AGENT_NAME], "Researcher")
+        self.assertEqual(agent_span.attributes[GEN_AI_AGENT_ID], str(agent.id))
+        self.assertEqual(agent_span.attributes[GEN_AI_AGENT_DESCRIPTION], "Answer questions")
+        self.assertEqual(agent_span.attributes[GEN_AI_REQUEST_MODEL], "gpt-4")
+        self.assertEqual(
+            json.loads(agent_span.attributes[GEN_AI_INPUT_MESSAGES]),
+            [{"role": "user", "parts": [{"type": "text", "content": "What is A of 1?"}]}],
+        )
+        output_messages = json.loads(agent_span.attributes[GEN_AI_OUTPUT_MESSAGES])
+        self.assertEqual(output_messages[0]["role"], "assistant")
+        self.assertIn("Done!", output_messages[0]["parts"][0]["content"])
+        self._assert_spans_all_ended()
+
+    def test_lite_agent_kickoff_with_message_list(self):
+        llm = LLM(model="openai/gpt-4", is_litellm=True)
+        llm.supports_function_calling = lambda: True
+        agent = Agent(role="Researcher", goal="Answer questions", backstory="Agent.", llm=llm)
+
+        with patch("litellm.completion", return_value=self._mock_response("Final Answer: Done!")):
+            agent.kickoff([{"role": "user", "content": "Hi"}, {"role": "assistant", "content": "Hello"}])
+
+        agent_span = self._find_span("invoke_agent Researcher")
+        self.assertIsNotNone(agent_span)
+        self.assertEqual(
+            json.loads(agent_span.attributes[GEN_AI_INPUT_MESSAGES]),
+            [
+                {"role": "user", "parts": [{"type": "text", "content": "Hi"}]},
+                {"role": "assistant", "parts": [{"type": "text", "content": "Hello"}]},
+            ],
+        )
+        self._assert_spans_all_ended()
+
+    def test_lite_agent_no_tools(self):
+        # mirrors test_single_agent_no_tools
+        llm = LLM(model="openai/gpt-4", is_litellm=True)
+        llm.supports_function_calling = lambda: True
+        agent = Agent(role="Simple", goal="Say hi", backstory="Simple agent.", llm=llm, tools=[])
+
+        with patch("litellm.completion", return_value=self._mock_response("Final Answer: Hello!")):
+            agent.kickoff("Say hi.")
+
+        agent_span = self._find_span("invoke_agent Simple")
+        chat_span = self._find_span("chat gpt-4")
+        self.assertIsNotNone(agent_span)
+        self.assertIsNotNone(chat_span)
+        self._assert_span_parent(chat_span, agent_span)
+        self._assert_spans_all_ended()
+
+    def test_lite_agent_multiple_tool_calls(self):
+        # mirrors test_single_agent_multiple_tool_calls
+        @tool
+        def tool_a(value: str) -> str:
+            """Tool A."""
+            return f"A: {value}"
+
+        @tool
+        def tool_b(value: str) -> str:
+            """Tool B."""
+            return f"B: {value}"
+
+        llm = LLM(model="openai/gpt-4", is_litellm=True)
+        llm.supports_function_calling = lambda: True
+        agent = Agent(role="Multi", goal="Use tools", backstory="Agent.", llm=llm, tools=[tool_a, tool_b])
+
+        with patch(
+            "litellm.completion",
+            side_effect=[
+                self._mock_response(tool_calls=[self._mock_tool_call("c1", "tool_a", '{"value": "1"}')]),
+                self._mock_response(tool_calls=[self._mock_tool_call("c2", "tool_b", '{"value": "2"}')]),
+                self._mock_response("Final Answer: Done!"),
+            ],
+        ):
+            agent.kickoff("Use tools.")
+
+        agent_span = self._find_span("invoke_agent Multi")
+        self.assertIsNotNone(self._find_span("execute_tool tool_a"))
+        self.assertIsNotNone(self._find_span("execute_tool tool_b"))
+        self._assert_span_parent(self._find_span("execute_tool tool_a"), agent_span)
+        self._assert_span_parent(self._find_span("execute_tool tool_b"), agent_span)
+        self._assert_spans_all_ended()
+
+    def test_lite_agent_parallel_tool_calls(self):
+        # mirrors test_multiple_tool_calls
+        @tool
+        def tool_a(value: str) -> str:
+            """Tool A."""
+            return f"A: {value}"
+
+        @tool
+        def tool_b(value: str) -> str:
+            """Tool B."""
+            return f"B: {value}"
+
+        llm = LLM(model="openai/gpt-4", is_litellm=True)
+        llm.supports_function_calling = lambda: True
+        agent = Agent(role="Parallel", goal="Use tools", backstory="Agent.", llm=llm, tools=[tool_a, tool_b])
+
+        with patch(
+            "litellm.completion",
+            side_effect=[
+                self._mock_response(
+                    tool_calls=[
+                        self._mock_tool_call("c1", "tool_a", '{"value": "1"}'),
+                        self._mock_tool_call("c2", "tool_b", '{"value": "2"}'),
+                    ]
+                ),
+                self._mock_response("Final Answer: Done!"),
+            ],
+        ):
+            agent.kickoff("Use both tools.")
+
+        agent_span = self._find_span("invoke_agent Parallel")
+        self._assert_span_parent(self._find_span("execute_tool tool_a"), agent_span)
+        self._assert_span_parent(self._find_span("execute_tool tool_b"), agent_span)
+        chat_spans = [span for span in self.span_exporter.get_finished_spans() if span.name == "chat gpt-4"]
+        self.assertEqual(len(chat_spans), 2)
+        self.assertTrue(all(span.parent.span_id == agent_span.context.span_id for span in chat_spans))
+        self._assert_spans_all_ended()
+
+    def test_lite_agent_llm_call_failure(self):
+        # mirrors test_llm_call_failure
+        llm = LLM(model="openai/gpt-4", is_litellm=True)
+        llm.supports_function_calling = lambda: True
+        agent = Agent(role="Failing", goal="Fail", backstory="Will fail.", llm=llm)
+
+        with patch("litellm.completion", side_effect=RuntimeError("Service unavailable")):
+            with self.tracer_provider.get_tracer("test").start_as_current_span("POST /chat", kind=SpanKind.SERVER):
+                with self.assertRaises(RuntimeError):
+                    agent.kickoff("Fail.")
+
+        server_span = self._find_span("POST /chat")
+        agent_span = self._find_span("invoke_agent Failing")
+        self.assertIsNotNone(agent_span)
+        self._assert_span_parent(agent_span, server_span)
+        self.assertEqual(agent_span.status.status_code, StatusCode.ERROR)
+        self.assertIn("Service unavailable", agent_span.attributes[ERROR_TYPE])
+        chat_span = self._find_span("chat gpt-4")
+        self.assertIsNotNone(chat_span, "the in-flight chat span must still be ended and exported")
+        self.assertEqual(chat_span.status.status_code, StatusCode.ERROR)
+        self._assert_span_parent(chat_span, agent_span)
+        for span in self.span_exporter.get_finished_spans():
+            self.assertEqual(span.context.trace_id, server_span.context.trace_id, f"{span.name} left the trace")
+        self._assert_spans_all_ended()
+
+    def test_lite_agent_tool_execution_error(self):
+        # mirrors test_tool_execution_error
+        @tool
+        def bad_tool(value: str) -> str:
+            """A tool that fails."""
+            raise ValueError(f"Tool failed: {value}")
+
+        llm = LLM(model="openai/gpt-4", is_litellm=True)
+        llm.supports_function_calling = lambda: True
+        agent = Agent(role="ToolErr", goal="Handle errors", backstory="Agent.", llm=llm, tools=[bad_tool])
+
+        with patch(
+            "litellm.completion",
+            side_effect=[
+                self._mock_response(tool_calls=[self._mock_tool_call("c1", "bad_tool", '{"value": "x"}')]),
+                self._mock_response("Final Answer: Handled error."),
+            ],
+        ):
+            agent.kickoff("Use bad tool.")
+
+        agent_span = self._find_span("invoke_agent ToolErr")
+        self.assertIsNotNone(agent_span)
+        # the agent recovered from the tool error, so the agent span itself is OK
+        self.assertEqual(agent_span.status.status_code, StatusCode.OK)
+        self._assert_spans_all_ended()
+
+    def test_lite_agent_kickoff_async(self):
+        # mirrors test_async_crew_kickoff
+        @tool
+        def async_tool(name: str) -> str:
+            """Async tool."""
+            return f"Hello, {name}!"
+
+        llm = LLM(model="openai/gpt-4", is_litellm=True)
+        llm.supports_function_calling = lambda: True
+        agent = Agent(role="AsyncAgent", goal="Greet", backstory="Async.", llm=llm, tools=[async_tool])
+
+        responses = iter(
+            [
+                self._mock_response(tool_calls=[self._mock_tool_call("c1", "async_tool", '{"name":"World"}')]),
+                self._mock_response("Final Answer: Hi!"),
+            ]
+        )
+
+        async def mock_acompletion(*args, **kwargs):
+            return next(responses)
+
+        def mock_completion(*args, **kwargs):
+            return next(responses)
+
+        async def run():
+            # crewai routes kickoff_async through either litellm.acompletion or sync
+            # litellm.completion depending on the executor, so patch both. The SERVER-parent assertion below relies
+            # on the active context reaching the agent's events; if crewai moves this onto a thread without context
+            # propagation, that assertion fails first.
+            with patch("litellm.acompletion", side_effect=mock_acompletion), patch(
+                "litellm.completion", side_effect=mock_completion
+            ):
+                with self.tracer_provider.get_tracer("test").start_as_current_span("POST /chat", kind=SpanKind.SERVER):
+                    return await agent.kickoff_async("Greet.")
+
+        asyncio.run(run())
+
+        server_span = self._find_span("POST /chat")
+        agent_span = self._find_span("invoke_agent AsyncAgent")
+        tool_span = self._find_span("execute_tool async_tool")
+        self.assertIsNotNone(agent_span)
+        self.assertIsNotNone(tool_span)
+        self._assert_span_parent(agent_span, server_span)
+        self._assert_span_parent(tool_span, agent_span)
+        self._assert_spans_all_ended()
+
+    def test_lite_agent_multiple_sequential_kickoffs(self):
+        # mirrors test_multiple_sequential_crew_kickoffs
+        @tool
+        def seq_tool(v: str) -> str:
+            """Sequential tool."""
+            return f"seq:{v}"
+
+        llm = LLM(model="openai/gpt-4", is_litellm=True)
+        llm.supports_function_calling = lambda: True
+        agent = Agent(role="Seq", goal="Run twice", backstory="Agent.", llm=llm, tools=[seq_tool])
+
+        with patch(
+            "litellm.completion",
+            side_effect=[
+                self._mock_response(tool_calls=[self._mock_tool_call("c1", "seq_tool", '{"v":"1"}')]),
+                self._mock_response("Final Answer: Run 1"),
+                self._mock_response(tool_calls=[self._mock_tool_call("c2", "seq_tool", '{"v":"2"}')]),
+                self._mock_response("Final Answer: Run 2"),
+            ],
+        ):
+            agent.kickoff("Run 1.")
+            agent.kickoff("Run 2.")
+
+        spans = self.span_exporter.get_finished_spans()
+        agent_spans = [s for s in spans if s.name == "invoke_agent Seq"]
+        self.assertEqual(len(agent_spans), 2)
+        tool_spans = [s for s in spans if s.name == "execute_tool seq_tool"]
+        self.assertEqual(len(tool_spans), 2)
+        # each top-level kickoff is its own run, so its own trace
+        self.assertNotEqual(agent_spans[0].context.trace_id, agent_spans[1].context.trace_id)
+        # each kickoff's tool span belongs to that kickoff's agent span
+        self.assertCountEqual([s.parent.span_id for s in tool_spans], [s.context.span_id for s in agent_spans])
+        self._assert_spans_all_ended()
+
+    def test_lite_agent_kickoff_inside_crew_tool(self):
+        inner_llm = LLM(model="openai/gpt-4", is_litellm=True)
+        inner_llm.supports_function_calling = lambda: True
+        inner_agent = Agent(role="Inner", goal="Answer sub-questions", backstory="Agent.", llm=inner_llm)
+
+        @tool
+        def ask_inner(question: str) -> str:
+            """Ask the inner agent a question."""
+            return inner_agent.kickoff(question).raw
+
+        outer_llm = LLM(model="openai/gpt-4", is_litellm=True)
+        outer_llm.supports_function_calling = lambda: True
+        outer_agent = Agent(role="Outer", goal="Delegate", backstory="Agent.", llm=outer_llm, tools=[ask_inner])
+        task = Task(description="Answer using ask_inner.", expected_output="An answer.", agent=outer_agent)
+        crew = Crew(name="OuterCrew", agents=[outer_agent], tasks=[task])
+
+        with patch(
+            "litellm.completion",
+            side_effect=[
+                self._mock_response(tool_calls=[self._mock_tool_call("c1", "ask_inner", '{"question": "sub?"}')]),
+                self._mock_response("Final Answer: inner done"),
+                self._mock_response("Final Answer: outer done"),
+            ],
+        ):
+            crew.kickoff()
+
+        tool_span = self._find_span("execute_tool ask_inner")
+        inner_agent_span = self._find_span("invoke_agent Inner")
+        self.assertIsNotNone(inner_agent_span)
+        self._assert_span_parent(inner_agent_span, tool_span)
+        # the inner agent must end when its own kickoff ends, not when the outer crew does
+        self.assertLessEqual(inner_agent_span.end_time, tool_span.end_time)
+        self._assert_trace_spans(
+            self._find_span("invoke_workflow OuterCrew"),
+            [
+                "invoke_workflow OuterCrew",
+                "invoke_agent Outer",
+                "chat gpt-4",
+                "execute_tool ask_inner",
+                "invoke_agent Inner",
+                "chat gpt-4",
+                "chat gpt-4",
+            ],
+        )
+        self._assert_spans_all_ended()
+
+    def test_lite_agent_unknown_parent_joins_current_context(self):
+        # CrewAI can hand us a parent_event_id we never mapped (e.g. a stale scope entry); the LiteAgent span is a
+        # root, so it must join the active context instead of starting a detached trace
+        agent = Agent(
+            role="Researcher",
+            goal="Answer questions",
+            backstory="Agent.",
+            llm=LLM(model="openai/gpt-4", is_litellm=True),
+        )
+        agent_info = {"id": str(agent.id), "role": agent.role, "goal": agent.goal}
+        start_event = LiteAgentExecutionStartedEvent(
+            agent_info=agent_info, tools=None, messages="Hello", parent_event_id="unknown-parent-event-id"
+        )
+        end_event = LiteAgentExecutionCompletedEvent(
+            agent_info=agent_info, output="Done!", started_event_id=start_event.event_id
+        )
+        # call the handler directly, since the event bus would overwrite parent_event_id from its own scope stack
+        with self.tracer_provider.get_tracer("test").start_as_current_span("POST /chat", kind=SpanKind.SERVER):
+            self.instrumentor._handler._handle_event(agent, start_event)
+            self.instrumentor._handler._handle_event(agent, end_event)
+
+        self._assert_span_parent(self._find_span("invoke_agent Researcher"), self._find_span("POST /chat"))
+        self._assert_spans_all_ended()
+
+    def test_lite_agent_concurrent_kickoffs_have_isolated_traces(self):
+        # mirrors test_concurrent_crew_trace_map
+        both_calls_in_flight = threading.Barrier(2, timeout=10)
+
+        def concurrent_response(*args, **kwargs):
+            both_calls_in_flight.wait()
+            return self._mock_response("Final Answer: Done")
+
+        def make_agent(role):
+            llm = LLM(model="openai/gpt-4", is_litellm=True)
+            llm.supports_function_calling = lambda: True
+            return Agent(role=role, goal="Answer", backstory="Agent.", llm=llm)
+
+        test_tracer = self.tracer_provider.get_tracer("test")
+        errors = []
+
+        def kickoff_in_request(request_name, agent):
+            try:
+                with test_tracer.start_as_current_span(request_name, kind=SpanKind.SERVER):
+                    agent.kickoff("Go.")
+            except Exception as error:  # pylint: disable=broad-except
+                errors.append(error)
+
+        with patch("litellm.completion", side_effect=concurrent_response):
+            threads = [
+                threading.Thread(target=kickoff_in_request, args=("request_a", make_agent("AgentA"))),
+                threading.Thread(target=kickoff_in_request, args=("request_b", make_agent("AgentB"))),
+            ]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=20)
+
+        self.assertEqual(errors, [])
+        self._assert_trace_spans(self._find_span("request_a"), ["request_a", "invoke_agent AgentA", "chat gpt-4"])
+        self._assert_trace_spans(self._find_span("request_b"), ["request_b", "invoke_agent AgentB", "chat gpt-4"])
+        self._assert_spans_all_ended()
+
+    def test_lite_agent_concurrent_kickoffs_same_instance(self):
+        # mirrors test_concurrent_crew_same_instance_isolation
+        both_calls_in_flight = threading.Barrier(2, timeout=10)
+
+        def concurrent_response(*args, **kwargs):
+            both_calls_in_flight.wait()
+            return self._mock_response("Final Answer: Done")
+
+        llm = LLM(model="openai/gpt-4", is_litellm=True)
+        llm.supports_function_calling = lambda: True
+        agent = Agent(role="Shared", goal="Answer", backstory="Agent.", llm=llm)
+        test_tracer = self.tracer_provider.get_tracer("test")
+        errors = []
+
+        def kickoff_in_request(request_name):
+            try:
+                with test_tracer.start_as_current_span(request_name, kind=SpanKind.SERVER):
+                    agent.kickoff("Go.")
+            except Exception as error:  # pylint: disable=broad-except
+                errors.append(error)
+
+        with patch("litellm.completion", side_effect=concurrent_response):
+            threads = [threading.Thread(target=kickoff_in_request, args=(name,)) for name in ("request_a", "request_b")]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=20)
+
+        self.assertEqual(errors, [])
+        for request_name in ("request_a", "request_b"):
+            request_span = self._find_span(request_name)
+            self._assert_trace_spans(request_span, [request_name, "invoke_agent Shared", "chat gpt-4"])
+            agent_span = next(
+                s
+                for s in self.span_exporter.get_finished_spans()
+                if s.name == "invoke_agent Shared" and s.context.trace_id == request_span.context.trace_id
+            )
+            self._assert_span_parent(agent_span, request_span)
+        self._assert_spans_all_ended()
+
+    def test_lite_agent_restores_context_after_kickoff(self):
+        llm = LLM(model="openai/gpt-4", is_litellm=True)
+        llm.supports_function_calling = lambda: True
+        agent = Agent(role="Researcher", goal="Answer questions", backstory="Agent.", llm=llm)
+        test_tracer = self.tracer_provider.get_tracer("test")
+
+        for name, completion in (
+            ("success", {"return_value": self._mock_response("Final Answer: Done!")}),
+            ("failure", {"side_effect": RuntimeError("LLM down")}),
+        ):
+            with self.subTest(kickoff=name):
+                with patch("litellm.completion", **completion):
+                    with test_tracer.start_as_current_span("POST /chat", kind=SpanKind.SERVER) as server_span:
+                        try:
+                            agent.kickoff("What is A of 1?")
+                        except RuntimeError:
+                            pass
+                        self.assertIs(trace.get_current_span(), server_span)
+                self._assert_spans_all_ended()
+
+    def test_lite_agent_kickoff_inside_flow(self):
+        # Agent.kickoff() inside a Flow step: Flow scope events are unhandled, so the agent's CrewAI parent is unknown
+        llm = LLM(model="openai/gpt-4", is_litellm=True)
+        llm.supports_function_calling = lambda: True
+        agent = Agent(role="FlowAgent", goal="Answer", backstory="Agent.", llm=llm)
+
+        class AgentFlow(Flow):
+            @start()
+            def run_agent(self):
+                return agent.kickoff("Go.")
+
+        with patch("litellm.completion", return_value=self._mock_response("Final Answer: Done")):
+            with self.tracer_provider.get_tracer("test").start_as_current_span("POST /chat", kind=SpanKind.SERVER):
+                AgentFlow().kickoff()
+
+        server_span = self._find_span("POST /chat")
+        agent_span = self._find_span("invoke_agent FlowAgent")
+        self.assertIsNotNone(agent_span)
+        self._assert_span_parent(agent_span, server_span)
+        self._assert_trace_spans(server_span, ["POST /chat", "invoke_agent FlowAgent", "chat gpt-4"])
+        self._assert_spans_all_ended()
+
+    @unittest.expectedFailure
+    def test_llm_call_inside_flow_joins_request_trace(self):
+        # known gap (CR-09): a direct LLM.call() inside a Flow step still starts a detached trace, because its
+        # parent is an unhandled Flow scope event and _start_span uses an empty Context() for unknown parents
+        llm = LLM(model="openai/gpt-4", is_litellm=True)
+
+        class LLMFlow(Flow):
+            @start()
+            def call_llm(self):
+                return llm.call("Hello")
+
+        with patch("litellm.completion", return_value=self._mock_response("Hi")):
+            with self.tracer_provider.get_tracer("test").start_as_current_span("POST /chat", kind=SpanKind.SERVER):
+                LLMFlow().kickoff()
+
+        self._assert_trace_spans(self._find_span("POST /chat"), ["POST /chat", "chat gpt-4"])
+
+    def test_lite_agent_events_with_missing_source_data(self):
+        # the source may lack role/llm (e.g. customer code emitting events, or the deprecated LiteAgent class)
+        source = object()
+        start_event = LiteAgentExecutionStartedEvent(agent_info={}, tools=None, messages="")
+        crewai_event_bus.emit(source, start_event)
+        crewai_event_bus.emit(source, LiteAgentExecutionCompletedEvent(agent_info={}, output=""))
+
+        agent_span = self._find_span("invoke_agent")
+        self.assertIsNotNone(agent_span)
+        self.assertEqual(agent_span.name, "invoke_agent")
+        for attribute in (
+            GEN_AI_AGENT_NAME,
+            GEN_AI_PROVIDER_NAME,
+            GEN_AI_REQUEST_MODEL,
+            GEN_AI_INPUT_MESSAGES,
+            GEN_AI_OUTPUT_MESSAGES,
+        ):
+            self.assertNotIn(attribute, agent_span.attributes)
+        self._assert_spans_all_ended()
+
+    def test_lite_agent_kickoff_inside_lite_agent_tool(self):
+        inner_llm = LLM(model="openai/gpt-4", is_litellm=True)
+        inner_llm.supports_function_calling = lambda: True
+        inner_agent = Agent(role="Inner", goal="Answer sub-questions", backstory="Agent.", llm=inner_llm)
+
+        @tool
+        def ask_inner(question: str) -> str:
+            """Ask the inner agent a question."""
+            return inner_agent.kickoff(question).raw
+
+        outer_llm = LLM(model="openai/gpt-4", is_litellm=True)
+        outer_llm.supports_function_calling = lambda: True
+        outer_agent = Agent(role="Outer", goal="Delegate", backstory="Agent.", llm=outer_llm, tools=[ask_inner])
+
+        with patch(
+            "litellm.completion",
+            side_effect=[
+                self._mock_response(tool_calls=[self._mock_tool_call("c1", "ask_inner", '{"question": "sub?"}')]),
+                self._mock_response("Final Answer: inner done"),
+                self._mock_response("Final Answer: outer done"),
+            ],
+        ):
+            outer_agent.kickoff("Answer using ask_inner.")
+
+        outer_agent_span = self._find_span("invoke_agent Outer")
+        tool_span = self._find_span("execute_tool ask_inner")
+        inner_agent_span = self._find_span("invoke_agent Inner")
+        self.assertIsNotNone(inner_agent_span)
+        self._assert_span_parent(tool_span, outer_agent_span)
+        self._assert_span_parent(inner_agent_span, tool_span)
+        self.assertLessEqual(inner_agent_span.end_time, tool_span.end_time)
+        self._assert_spans_all_ended()
+
+    def test_lite_agent_uninstrument(self):
+        llm = LLM(model="openai/gpt-4", is_litellm=True)
+        llm.supports_function_calling = lambda: True
+        agent = Agent(role="Researcher", goal="Answer questions", backstory="Agent.", llm=llm)
+
+        self.instrumentor.uninstrument()
+        try:
+            with patch("litellm.completion", return_value=self._mock_response("Final Answer: Done!")):
+                agent.kickoff("Hi.")
+            self.assertEqual(self.span_exporter.get_finished_spans(), ())
+        finally:
+            self.instrumentor.instrument(tracer_provider=self.tracer_provider)
+
+    def test_lite_agent_multimodal_input(self):
+        # mirrors the input half of test_multimodal_input_and_output_messages
+        try:
+            LiteAgentExecutionStartedEvent(
+                agent_info={}, tools=None, messages=[{"role": "user", "content": [{"type": "text", "text": "x"}]}]
+            )
+        except ValueError:
+            self.skipTest("this crewai version only accepts string content in LiteAgent kickoff messages")
+        llm = LLM(model="openai/gpt-4", is_litellm=True)
+        llm.supports_function_calling = lambda: True
+        agent = Agent(role="Researcher", goal="Answer questions", backstory="Agent.", llm=llm)
+        content = [
+            {"type": "text", "text": "describe"},
+            {"type": "image_url", "image_url": {"url": "https://example.com/cat.png"}},
+        ]
+
+        with patch("litellm.completion", return_value=self._mock_response("Final Answer: A cat.")):
+            agent.kickoff([{"role": "user", "content": content}])
+
+        agent_span = self._find_span("invoke_agent Researcher")
+        self.assertEqual(
+            json.loads(agent_span.attributes[GEN_AI_INPUT_MESSAGES]),
+            [
+                {
+                    "role": "user",
+                    "parts": [
+                        {"type": "text", "content": "describe"},
+                        {"type": "uri", "modality": "image", "uri": "https://example.com/cat.png"},
+                    ],
+                }
+            ],
+        )
         self._assert_spans_all_ended()
 
     def test_async_task_parenting(self):
