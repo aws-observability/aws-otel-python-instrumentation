@@ -325,10 +325,12 @@ class OpenTelemetryEventHandler:
                 if llm:
                     self._set_llm_request_span_attributes(attributes, llm)
     
-            task_prompt = getattr(event, "task_prompt", None)
-            if task_prompt:
+            messages = getattr(event, "messages", None)
+            if messages:
+                if isinstance(messages, str):
+                    messages = [{"role": "user", "content": messages}]
                 attributes[GEN_AI_INPUT_MESSAGES] = serialize_to_json_string(
-                    [{"role": "user", "parts": content_to_parts(task_prompt)}]
+                    [self._to_input_message(m) for m in messages if isinstance(m, dict)]
                 )
     
             self._start_span(span_name, event.event_id, attributes, self._get_parent_event_id(event))
@@ -336,23 +338,21 @@ class OpenTelemetryEventHandler:
     def _on_lite_agent_completed(
         self, source: "BaseAgent", event: "LiteAgentExecutionCompletedEvent"  # pylint: disable=unused-argument
     ) -> None:
-        attrs: Dict[str, Any] = {}
         output = getattr(event, "output", None)
-        if output:
-            attrs[GEN_AI_OUTPUT_MESSAGES] = serialize_to_json_string(
-                [{"role": "assistant", "parts": content_to_parts(output), "finish_reason": "stop"}]
+        agent_entry = self._event_id_to_span.get(event.started_event_id)
+        if output and agent_entry:
+            agent_entry.span.set_attribute(
+                GEN_AI_OUTPUT_MESSAGES,
+                serialize_to_json_string(
+                     [{"role": "assistant", "parts": content_to_parts(output), "finish_reason": "stop"}]
+                ),
             )
-        self._end_spans_for_root_event(
-            event.started_event_id,
-        )
+        self._end_spans_for_root_event(event.started_event_id)
 
     def _on_lite_agent_error(
         self, source: "BaseAgent", event: "LiteAgentExecutionErrorEvent"
     ) -> None:  # pylint: disable=unused-argument
-        self._end_span(
-            event.started_event_id,
-            error=getattr(event, "error", None),
-        )
+        self._end_spans_for_root_event(event.started_event_id, error=getattr(event, "error", None))
 
     def _on_tool_start(self, source: "ToolUsage", event: "ToolUsageStartedEvent") -> None:
         tool_name = event.tool_name
