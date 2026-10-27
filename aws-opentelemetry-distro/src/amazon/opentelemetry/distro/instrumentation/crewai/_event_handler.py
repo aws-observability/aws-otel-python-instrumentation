@@ -65,9 +65,9 @@ if TYPE_CHECKING:
         AgentExecutionCompletedEvent,
         AgentExecutionErrorEvent,
         AgentExecutionStartedEvent,
-        LiteAgentExecutionStartedEvent,
         LiteAgentExecutionCompletedEvent,
         LiteAgentExecutionErrorEvent,
+        LiteAgentExecutionStartedEvent,
     )
     from crewai.events.types.crew_events import (
         CrewKickoffCompletedEvent,
@@ -124,9 +124,9 @@ class OpenTelemetryEventHandler:
             AgentExecutionCompletedEvent,
             AgentExecutionErrorEvent,
             AgentExecutionStartedEvent,
-            LiteAgentExecutionStartedEvent,
             LiteAgentExecutionCompletedEvent,
             LiteAgentExecutionErrorEvent,
+            LiteAgentExecutionStartedEvent,
         )
         from crewai.events.types.crew_events import (
             CrewKickoffCompletedEvent,
