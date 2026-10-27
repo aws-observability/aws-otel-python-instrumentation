@@ -12,6 +12,10 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- feat: add CrewAI LiteAgent support. The CrewAI instrumentor now handles the `LiteAgentExecution*` events emitted
+  by standalone `Agent.kickoff()` / `kickoff_async()`, so these runs produce an `invoke_agent` span and their LLM
+  and tool spans stay in the caller's trace instead of each starting a new trace.
+  ([#955](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/955))
 - fix: require `certifi >= 2026.10.18` so the Lambda layer no longer bundles the eMudhra (emSign) ECC Root CA - G3,
   distrusted after its intermediates were compromised
   ([GHSA-6q48-6c7w-9gw2](https://github.com/certifi/python-certifi/security/advisories/GHSA-6q48-6c7w-9gw2)).
