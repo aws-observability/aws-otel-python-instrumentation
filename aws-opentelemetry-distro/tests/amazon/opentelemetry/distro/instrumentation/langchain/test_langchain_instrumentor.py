@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import asyncio
+import importlib.metadata
 import json
 import sys
 import unittest
@@ -26,6 +27,12 @@ except ImportError:
         from langchain_classic.agents import AgentType, initialize_agent
     except ImportError:
         initialize_agent = None
+
+try:
+    LANGGRAPH_VERSION = Version(importlib.metadata.version("langgraph"))
+except importlib.metadata.PackageNotFoundError:
+    LANGGRAPH_VERSION = None
+
 import langchain_core
 from langchain_core.language_models.fake import FakeListLLM
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
@@ -2055,11 +2062,36 @@ class TestLangChainInstrumentor(TestCase):
         chat_spans = [s for s in spans if "chat" in s.name]
         self.assertGreater(len(chat_spans), 0)
 
-        # Only create_agent runs on LangGraph; the legacy AgentExecutor emits no langgraph metadata
-        if create_agent:
-            self.assertEqual(chat_spans[0].attributes["langgraph.node"], "model")
-            # LangGraph formats checkpoint_ns as "<node>:<task id>"
-            self.assertTrue(chat_spans[0].attributes["langgraph.checkpoint_ns"].startswith("model:"))
+    # langgraph only adds langgraph_checkpoint_ns to task metadata since 0.2.23:
+    # https://github.com/langchain-ai/langgraph/commit/01bb6cbd4dcaa48474664d163dfc21c1c196a730 (#1751)
+    @unittest.skipIf(
+        LANGGRAPH_VERSION is None or LANGGRAPH_VERSION < Version("0.2.23"),
+        "langgraph < 0.2.23 (or not installed) does not emit langgraph_checkpoint_ns metadata",
+    )
+    def test_langgraph_checkpoint_ns_on_node_spans(self):
+        from langgraph.graph import END, START, MessagesState, StateGraph
+
+        llm = self.FakeChatModel(messages=iter([AIMessage(content="Done.")]))
+
+        def respond(state, config):
+            return {"messages": [llm.invoke(state["messages"], config)]}
+
+        graph_builder = StateGraph(MessagesState)
+        graph_builder.add_node("respond", respond)
+        graph_builder.add_edge(START, "respond")
+        graph_builder.add_edge("respond", END)
+        graph = graph_builder.compile(name="CheckpointNsGraph")
+
+        graph.invoke({"messages": [HumanMessage(content="Hello")]})
+
+        spans = self.span_exporter.get_finished_spans()
+        chat_spans = [
+            span for span in spans if span.attributes.get(GEN_AI_OPERATION_NAME) == GenAiOperationNameValues.CHAT.value
+        ]
+        self.assertEqual(len(chat_spans), 1)
+        self.assertEqual(chat_spans[0].attributes["langgraph.node"], "respond")
+        # LangGraph formats checkpoint_ns as "<node>:<task id>"
+        self.assertTrue(chat_spans[0].attributes["langgraph.checkpoint_ns"].startswith("respond:"))
 
     def test_token_usage_provider_key_variants(self):
         from langchain_aws import ChatBedrock, ChatBedrockConverse
