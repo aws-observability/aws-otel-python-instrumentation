@@ -67,7 +67,7 @@ if TYPE_CHECKING:
         AgentExecutionStartedEvent,
         LiteAgentExecutionStartedEvent,
         LiteAgentExecutionCompletedEvent,
-        LiteAgentExecutionErrorEvent
+        LiteAgentExecutionErrorEvent,
     )
     from crewai.events.types.crew_events import (
         CrewKickoffCompletedEvent,
@@ -126,7 +126,7 @@ class OpenTelemetryEventHandler:
             AgentExecutionStartedEvent,
             LiteAgentExecutionStartedEvent,
             LiteAgentExecutionCompletedEvent,
-            LiteAgentExecutionErrorEvent
+            LiteAgentExecutionErrorEvent,
         )
         from crewai.events.types.crew_events import (
             CrewKickoffCompletedEvent,
@@ -295,47 +295,47 @@ class OpenTelemetryEventHandler:
         )
 
     def _on_lite_agent_started(  # pylint: disable=too-many-branches
-            self, source: "BaseAgent", event: "LiteAgentExecutionStartedEvent"  # pylint: disable=unused-argument
-        ) -> None:
-            agent = source
-            agent_role = getattr(agent, "role", None) if agent else None
-            span_name = (
-                f"{GenAiOperationNameValues.INVOKE_AGENT.value} {agent_role}"
-                if agent_role
-                else GenAiOperationNameValues.INVOKE_AGENT.value
+        self, source: "BaseAgent", event: "LiteAgentExecutionStartedEvent"  # pylint: disable=unused-argument
+    ) -> None:
+        agent = source
+        agent_role = getattr(agent, "role", None) if agent else None
+        span_name = (
+            f"{GenAiOperationNameValues.INVOKE_AGENT.value} {agent_role}"
+            if agent_role
+            else GenAiOperationNameValues.INVOKE_AGENT.value
+        )
+        attributes: Dict[str, Any] = {
+            GEN_AI_OPERATION_NAME: GenAiOperationNameValues.INVOKE_AGENT.value,
+        }
+        if agent:
+            if agent_role:
+                attributes[GEN_AI_AGENT_NAME] = agent_role
+            if hasattr(agent, "id"):
+                attributes[GEN_AI_AGENT_ID] = str(agent.id)
+            goal = getattr(agent, "goal", None)
+            if goal:
+                attributes[GEN_AI_AGENT_DESCRIPTION] = goal
+
+            llm = getattr(agent, "llm", None)
+            provider, model = self._extract_provider_and_model(llm)
+            if provider:
+                attributes[GEN_AI_PROVIDER_NAME] = provider
+            if model:
+                attributes[GEN_AI_REQUEST_MODEL] = model
+            if llm:
+                self._set_llm_request_span_attributes(attributes, llm)
+
+        messages = getattr(event, "messages", None)
+        if messages:
+            if isinstance(messages, str):
+                messages = [{"role": "user", "content": messages}]
+            attributes[GEN_AI_INPUT_MESSAGES] = serialize_to_json_string(
+                [self._to_input_message(m) for m in messages if isinstance(m, dict)]
             )
-            attributes: Dict[str, Any] = {
-                GEN_AI_OPERATION_NAME: GenAiOperationNameValues.INVOKE_AGENT.value,
-            }
-            if agent:
-                if agent_role:
-                    attributes[GEN_AI_AGENT_NAME] = agent_role
-                if hasattr(agent, "id"):
-                    attributes[GEN_AI_AGENT_ID] = str(agent.id)
-                goal = getattr(agent, "goal", None)
-                if goal:
-                    attributes[GEN_AI_AGENT_DESCRIPTION] = goal
-    
-                llm = getattr(agent, "llm", None)
-                provider, model = self._extract_provider_and_model(llm)
-                if provider:
-                    attributes[GEN_AI_PROVIDER_NAME] = provider
-                if model:
-                    attributes[GEN_AI_REQUEST_MODEL] = model
-                if llm:
-                    self._set_llm_request_span_attributes(attributes, llm)
-    
-            messages = getattr(event, "messages", None)
-            if messages:
-                if isinstance(messages, str):
-                    messages = [{"role": "user", "content": messages}]
-                attributes[GEN_AI_INPUT_MESSAGES] = serialize_to_json_string(
-                    [self._to_input_message(m) for m in messages if isinstance(m, dict)]
-                )
-    
-            self._start_span(
-                span_name, event.event_id, attributes, self._get_parent_event_id(event), root_event_id=event.event_id
-            )
+
+        self._start_span(
+            span_name, event.event_id, attributes, self._get_parent_event_id(event), root_event_id=event.event_id
+        )
 
     def _on_lite_agent_completed(
         self, source: "BaseAgent", event: "LiteAgentExecutionCompletedEvent"  # pylint: disable=unused-argument
@@ -346,7 +346,7 @@ class OpenTelemetryEventHandler:
             agent_entry.span.set_attribute(
                 GEN_AI_OUTPUT_MESSAGES,
                 serialize_to_json_string(
-                     [{"role": "assistant", "parts": content_to_parts(output), "finish_reason": "stop"}]
+                    [{"role": "assistant", "parts": content_to_parts(output), "finish_reason": "stop"}]
                 ),
             )
         self._end_spans_for_root_event(event.started_event_id)
