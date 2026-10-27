@@ -305,7 +305,6 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             input_token_details.get("cache_creation"),
             input_token_details.get("cache_write_tokens"),
         )
-
         reasoning_output_tokens = first_not_none(
             usage.get("reasoning_tokens"),
             output_token_details.get("reasoning"),

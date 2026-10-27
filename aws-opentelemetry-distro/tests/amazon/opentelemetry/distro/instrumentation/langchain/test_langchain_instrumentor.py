@@ -7,6 +7,7 @@ import sys
 import unittest
 from unittest import TestCase
 from unittest.mock import patch
+from uuid import uuid4
 
 from conftest import call_mock_llm, validate_otel_genai_schema
 
@@ -35,6 +36,7 @@ from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 from langchain_core.tools import StructuredTool, tool
 
 from amazon.opentelemetry.distro.instrumentation.langchain import LangChainInstrumentor
+from amazon.opentelemetry.distro.instrumentation.langchain.callback_handler import OpenTelemetryCallbackHandler
 from amazon.opentelemetry.distro.instrumentation.langchain.wrapper import PregelWrapper
 from opentelemetry import context
 from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY
@@ -63,6 +65,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_RESPONSE_MODEL,
     GEN_AI_SYSTEM_INSTRUCTIONS,
     GEN_AI_TOOL_CALL_ARGUMENTS,
+    GEN_AI_TOOL_CALL_ID,
     GEN_AI_TOOL_CALL_RESULT,
     GEN_AI_TOOL_DESCRIPTION,
     GEN_AI_TOOL_NAME,
@@ -1108,6 +1111,22 @@ class TestLangChainInstrumentor(TestCase):
         self.assertIsNotNone(span.attributes.get(GEN_AI_TOOL_CALL_ARGUMENTS))
         self.assertEqual(span.attributes[GEN_AI_TOOL_CALL_RESULT], result)
 
+    def test_tool_span_records_tool_call_id(self):
+        # Drive the handler directly: langchain-core < 1.1.2 does not forward tool_call_id to on_tool_start
+        handler = OpenTelemetryCallbackHandler(self.tracer_provider.get_tracer(__name__))
+        run_id = uuid4()
+        handler.on_tool_start(
+            {"name": "add_numbers", "description": "Add two numbers"},
+            "{'a': 1, 'b': 2}",
+            run_id=run_id,
+            tool_call_id="call_abc123",
+        )
+        handler.on_tool_end("3", run_id=run_id)
+
+        spans = self.span_exporter.get_finished_spans()
+        self.assertEqual(len(spans), 1)
+        self.assertEqual(spans[0].attributes[GEN_AI_TOOL_CALL_ID], "call_abc123")
+
     def test_internal_chains_suppressed(self):
         chain_factories = [
             ("RunnableLambda", lambda llm: RunnableLambda(lambda x: x) | llm),
@@ -1976,6 +1995,34 @@ class TestLangChainInstrumentor(TestCase):
         chat_spans = [s for s in spans if "chat" in s.name]
         self.assertGreater(len(chat_spans), 0)
 
+    def test_langgraph_checkpoint_ns_on_node_spans(self):
+        try:
+            from langgraph.graph import END, START, MessagesState, StateGraph
+        except ImportError:
+            self.skipTest("langgraph is not available")
+
+        llm = self.FakeChatModel(messages=iter([AIMessage(content="Done.")]))
+
+        def respond(state, config):
+            return {"messages": [llm.invoke(state["messages"], config)]}
+
+        graph_builder = StateGraph(MessagesState)
+        graph_builder.add_node("respond", respond)
+        graph_builder.add_edge(START, "respond")
+        graph_builder.add_edge("respond", END)
+        graph = graph_builder.compile(name="CheckpointNsGraph")
+
+        graph.invoke({"messages": [HumanMessage(content="Hello")]})
+
+        spans = self.span_exporter.get_finished_spans()
+        chat_spans = [
+            span for span in spans if span.attributes.get(GEN_AI_OPERATION_NAME) == GenAiOperationNameValues.CHAT.value
+        ]
+        self.assertEqual(len(chat_spans), 1)
+        self.assertEqual(chat_spans[0].attributes["langgraph.node"], "respond")
+        # LangGraph formats checkpoint_ns as "<node>:<task id>"
+        self.assertTrue(chat_spans[0].attributes["langgraph.checkpoint_ns"].startswith("respond:"))
+
     def test_token_usage_provider_key_variants(self):
         from langchain_aws import ChatBedrock, ChatBedrockConverse
         from langchain_openai import ChatOpenAI
@@ -2059,6 +2106,31 @@ class TestLangChainInstrumentor(TestCase):
                 {
                     GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS: 7,
                     GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS: 8,
+                },
+            ),
+            # Anthropic prompt caching with TTLs: cache writes are split into ephemeral_5m/1h buckets and
+            # the generic cache_creation key is reported as 0
+            (
+                ChatBedrockConverse,
+                {"model": "test", "region_name": "us-east-1"},
+                result_with_usage_metadata(
+                    {
+                        "input_tokens": 55,
+                        "output_tokens": 66,
+                        "total_tokens": 121,
+                        "input_token_details": {
+                            "cache_read": 7,
+                            "cache_creation": 0,
+                            "ephemeral_5m_input_tokens": 9,
+                            "ephemeral_1h_input_tokens": 10,
+                        },
+                    }
+                ),
+                55,
+                66,
+                {
+                    GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS: 7,
+                    GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS: 19,
                 },
             ),
         ]

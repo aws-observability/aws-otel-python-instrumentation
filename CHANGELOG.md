@@ -12,6 +12,12 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- fix(langchain): set `gen_ai.tool.call.id` on `execute_tool` spans from LangChain's `tool_call_id` (requires
+  `langchain-core >= 1.1.2`, the first release that passes it to tool callbacks), add a
+  `langgraph.checkpoint_ns` span attribute, and report Anthropic TTL cache writes
+  (`ephemeral_5m_input_tokens`/`ephemeral_1h_input_tokens`) as `gen_ai.usage.cache_creation.input_tokens` instead
+  of 0.
+  ([#945](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/945))
 - fix: require `certifi >= 2026.10.18` so the Lambda layer no longer bundles the eMudhra (emSign) ECC Root CA - G3,
   distrusted after its intermediates were compromised
   ([GHSA-6q48-6c7w-9gw2](https://github.com/certifi/python-certifi/security/advisories/GHSA-6q48-6c7w-9gw2)).
