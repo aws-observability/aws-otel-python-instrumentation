@@ -7,10 +7,18 @@ from typing import Dict, Optional
 from botocore.session import Session
 
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
+from amazon.opentelemetry.distro.exporter.otlp.aws.environment_variables import (
+    AWS_EXPORTER_SERVICE,
+    AWS_LOGS_EXPORTER_SERVICE,
+)
 from opentelemetry.exporter.otlp.proto.http import Compression
-from opentelemetry.exporter.otlp.proto.http._common import _resolve_compression
-from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
-from opentelemetry.sdk.environment_variables import OTEL_EXPORTER_OTLP_COMPRESSION, OTEL_EXPORTER_OTLP_LOGS_COMPRESSION
+from opentelemetry.exporter.otlp.proto.http._common import _resolve_compression, _resolve_endpoint
+from opentelemetry.exporter.otlp.proto.http._log_exporter import DEFAULT_LOGS_EXPORT_PATH, OTLPLogExporter
+from opentelemetry.sdk.environment_variables import (
+    OTEL_EXPORTER_OTLP_COMPRESSION,
+    OTEL_EXPORTER_OTLP_LOGS_COMPRESSION,
+    OTEL_EXPORTER_OTLP_LOGS_ENDPOINT,
+)
 
 
 class OTLPAwsLogRecordExporter(OTLPLogExporter):
@@ -25,6 +33,10 @@ class OTLPAwsLogRecordExporter(OTLPLogExporter):
        or OTEL_EXPORTER_OTLP_COMPRESSION overriding the default
     3. Optionally sets the x-aws-log-group / x-aws-log-stream headers
 
+    The signing service uses an explicit ``aws_service`` first, then
+    ``AWS_LOGS_EXPORTER_SERVICE``, then ``AWS_EXPORTER_SERVICE``,
+    and defaults to ``logs``.
+
     Retry behavior (Retry-After header support, retrying HTTP 429/502/503/504, and interruptible
     backoff on shutdown) is provided by the upstream OTLP HTTP client.
 
@@ -33,8 +45,9 @@ class OTLPAwsLogRecordExporter(OTLPLogExporter):
 
     def __init__(
         self,
-        aws_region: str,
-        session: Session,
+        aws_region: Optional[str] = None,
+        aws_service: Optional[str] = None,
+        session: Optional[Session] = None,
         log_group: Optional[str] = None,
         log_stream: Optional[str] = None,
         endpoint: Optional[str] = None,
@@ -44,8 +57,6 @@ class OTLPAwsLogRecordExporter(OTLPLogExporter):
         headers: Optional[Dict[str, str]] = None,
         timeout: Optional[int] = None,
     ):
-        self._aws_region = aws_region
-
         if log_group and log_stream:
             log_headers = {"x-aws-log-group": log_group, "x-aws-log-stream": log_stream}
             if headers:
@@ -53,7 +64,16 @@ class OTLPAwsLogRecordExporter(OTLPLogExporter):
             else:
                 headers = log_headers
 
-        self._session = AwsAuthSession(session=session, aws_region=self._aws_region, service="logs")
+        self._session = AwsAuthSession(
+            session=session,
+            aws_region=aws_region,
+            service=aws_service
+            or os.environ.get(AWS_LOGS_EXPORTER_SERVICE)
+            or os.environ.get(AWS_EXPORTER_SERVICE)
+            or "logs",
+            endpoint=endpoint or _resolve_endpoint(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, DEFAULT_LOGS_EXPORT_PATH),
+        )
+        self._aws_region = self._session._aws_region  # pylint: disable=protected-access
         OTLPLogExporter.__init__(
             self,
             endpoint,
@@ -62,6 +82,7 @@ class OTLPAwsLogRecordExporter(OTLPLogExporter):
             client_certificate_file,
             headers,
             timeout,
+            # Upstream defaults to no compression; use gzip only when unset, preserving explicit "none".
             compression=(
                 _resolve_compression(OTEL_EXPORTER_OTLP_LOGS_COMPRESSION)
                 if os.environ.get(OTEL_EXPORTER_OTLP_LOGS_COMPRESSION) or os.environ.get(OTEL_EXPORTER_OTLP_COMPRESSION)
