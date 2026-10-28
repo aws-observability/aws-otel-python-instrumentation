@@ -517,10 +517,10 @@ class OpenTelemetryEventHandler:
 
         span_entry = self._event_id_to_span.get(started_event_id)
         previous = span_entry.initial_token_usage if span_entry else (0, 0)
-        usage = self._get_cumulative_token_usage(llm) or previous
-        if (input_tokens := usage[0] - previous[0]) > 0:
+        prompt_tokens, completion_tokens = self._get_cumulative_token_usage(llm) or previous
+        if (input_tokens := prompt_tokens - previous[0]) > 0:
             attrs[GEN_AI_USAGE_INPUT_TOKENS] = input_tokens
-        if (output_tokens := usage[1] - previous[1]) > 0:
+        if (output_tokens := completion_tokens - previous[1]) > 0:
             attrs[GEN_AI_USAGE_OUTPUT_TOKENS] = output_tokens
 
         self._end_span(started_event_id, attrs)
