@@ -15,6 +15,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 - fix: count Gen AI log content nested more than three levels deep when splitting CloudWatch Logs OTLP export
   batches by size, so batches of Gen AI logs no longer exceed the 1 MB request limit and get rejected.
   ([#944](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/944))
+- fix: suppress ASGI event spans independently of agent observability
+  ([#950](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/950))
 - fix: require `certifi >= 2026.10.18` so the Lambda layer no longer bundles the eMudhra (emSign) ECC Root CA - G3,
   distrusted after its intermediates were compromised
   ([GHSA-6q48-6c7w-9gw2](https://github.com/certifi/python-certifi/security/advisories/GHSA-6q48-6c7w-9gw2)).
