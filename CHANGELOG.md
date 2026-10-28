@@ -12,9 +12,12 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
-- fix: the CrewAI instrumentor now skips instrumentation, with a warning, when the installed crewai is outside its
-  supported range (`>= 1.10.0, < 2`). Under auto-instrumentation the range was not enforced, so `Crew.kickoff()`
-  raised `AttributeError` on crewai 0.177.0-1.9.x.
+- fix: auto-instrumentation now enforces the supported framework versions of the AWS GenAI instrumentors
+  (`aws_crewai`, `aws_langchain`, `aws_llama-index`, `aws_mcp`, `aws_openai_agents`). Previously each
+  instrumentor's declared range was skipped under `opentelemetry-instrument`, operator injection and the Lambda
+  layer, so unsupported versions were instrumented anyway: for example, every `Crew.kickoff()` raised
+  `AttributeError` on crewai 0.177.0-1.9.x, and MCP 2.x was only partially instrumented. An instrumentor whose
+  framework is outside its supported range is now skipped, with the version conflict logged.
   ([#953](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/953))
 - fix: CrewAI instrumentation errors no longer fail the customer's call. The `crewai_event_bus.emit` wrapper now
   catches and debug-logs exceptions from the ADOT event handler, so the event is still emitted and `kickoff()`
