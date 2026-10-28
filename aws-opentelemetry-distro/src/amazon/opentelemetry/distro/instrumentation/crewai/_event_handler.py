@@ -484,7 +484,9 @@ class OpenTelemetryEventHandler:
         )
         self._end_span(started_event_id, error=getattr(event, "error", None))
 
-    def _maybe_end_pending_llm_span_for_tool_call(self, source: Any, event: "ToolUsageStartedEvent") -> None:
+    def _maybe_end_pending_llm_span_for_tool_call(  # pylint: disable=too-many-locals
+        self, source: Any, event: "ToolUsageStartedEvent"
+    ) -> None:
         # Some CrewAI tool-call paths transition directly to ToolUsageStartedEvent
         # without a matching LLMCallCompletedEvent. Finalize the pending LLM span
         # with the tool call and token usage before the tool span starts.
