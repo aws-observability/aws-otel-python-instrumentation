@@ -12,6 +12,9 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- fix(langchain): preserve the active agent context across synchronous LangGraph stream yields so manual
+  spans remain children of the graph's agent span while the consumer retains its original context.
+  ([#956](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/956))
 - fix: suppress ASGI event spans independently of agent observability
   ([#950](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/950))
 - fix: require `certifi >= 2026.10.18` so the Lambda layer no longer bundles the eMudhra (emSign) ECC Root CA - G3,
