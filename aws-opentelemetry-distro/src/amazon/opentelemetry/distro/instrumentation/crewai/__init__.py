@@ -1,6 +1,5 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-import logging
 from typing import Any, Collection
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import try_unwrap, try_wrap
@@ -11,8 +10,6 @@ from amazon.opentelemetry.distro.instrumentation.crewai._event_handler import (
 from amazon.opentelemetry.distro.version import __version__
 from opentelemetry import trace
 from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
-
-_logger = logging.getLogger(__name__)
 
 
 class CrewAIInstrumentor(BaseInstrumentor):
@@ -32,13 +29,6 @@ class CrewAIInstrumentor(BaseInstrumentor):
         return ("crewai >= 1.10.0, < 2",)
 
     def _instrument(self, **kwargs: Any) -> None:  # pylint: disable=no-self-use
-        # Auto-instrumentation loads instrumentors with skip_dep_check=True, so the declared range is not enforced
-        # before we get here. Older crewai events lack fields the handler reads, which would fail Crew.kickoff().
-        conflict = self._check_dependency_conflicts()
-        if conflict:
-            _logger.warning("Skipping CrewAI instrumentation: %s", conflict)
-            return
-
         tracer_provider = kwargs.get("tracer_provider") or trace.get_tracer_provider()
         tracer = trace.get_tracer(__name__, __version__, tracer_provider=tracer_provider)
         self._handler = OpenTelemetryEventHandler(tracer)

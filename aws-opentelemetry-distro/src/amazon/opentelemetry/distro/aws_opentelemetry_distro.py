@@ -268,6 +268,14 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
         """
         if is_agent_observability_enabled() and self._should_skip_instrumentor(entry_point):
             return
+        if entry_point.name in _THIRDPARTY_TO_AWS_NATIVE.values():
+            # OTel's auto-loader passes skip_dep_check=True because it has already checked this distribution's
+            # `instruments` extras. The AWS GenAI instrumentors declare their framework ranges in each
+            # instrumentor's instrumentation_dependencies(), not in those extras, so that earlier check does not
+            # cover them and they still need their own dependency check. With raise_exception_on_conflict, a
+            # conflict raises DependencyConflictError, which the auto-loader catches to skip the instrumentor
+            # without failing application startup.
+            kwargs.update(skip_dep_check=False, raise_exception_on_conflict=True)
         super().load_instrumentor(entry_point, **kwargs)
 
     @staticmethod
