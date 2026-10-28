@@ -24,6 +24,15 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   returns normally; only telemetry for that event is lost. LLM events emitted from a source other than a CrewAI
   `BaseLLM` now produce a chat span without token usage instead of raising `AttributeError`.
   ([#953](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/953))
+- fix(langchain): preserve the active agent context across LangGraph stream yields so child
+  spans remain children of the graph's agent span while the consumer retains its original context.
+  ([#957](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/957))
+- fix(langchain): set `gen_ai.tool.call.id` on `execute_tool` spans from LangChain's `tool_call_id` (requires
+  `langchain-core >= 1.1.2`, the first release that passes it to tool callbacks), add a
+  `langgraph.checkpoint_ns` span attribute, and report Anthropic TTL cache writes
+  (`ephemeral_5m_input_tokens`/`ephemeral_1h_input_tokens`) as `gen_ai.usage.cache_creation.input_tokens` instead
+  of 0.
+  ([#945](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/945))
 - fix: suppress ASGI event spans independently of agent observability
   ([#950](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/950))
 - fix: require `certifi >= 2026.10.18` so the Lambda layer no longer bundles the eMudhra (emSign) ECC Root CA - G3,
