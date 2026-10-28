@@ -12,7 +12,7 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
-- fix(langchain): preserve the active agent context across synchronous LangGraph stream yields so manual
+- fix(langchain): preserve the active agent context across LangGraph stream yields so child
   spans remain children of the graph's agent span while the consumer retains its original context.
   ([#956](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/956))
 - fix: suppress ASGI event spans independently of agent observability
