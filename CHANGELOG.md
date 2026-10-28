@@ -15,6 +15,12 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 - fix: count Gen AI log content nested more than three levels deep when splitting CloudWatch Logs OTLP export
   batches by size, so batches of Gen AI logs no longer exceed the 1 MB request limit and get rejected.
   ([#944](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/944))
+- fix(langchain): set `gen_ai.tool.call.id` on `execute_tool` spans from LangChain's `tool_call_id` (requires
+  `langchain-core >= 1.1.2`, the first release that passes it to tool callbacks), add a
+  `langgraph.checkpoint_ns` span attribute, and report Anthropic TTL cache writes
+  (`ephemeral_5m_input_tokens`/`ephemeral_1h_input_tokens`) as `gen_ai.usage.cache_creation.input_tokens` instead
+  of 0.
+  ([#945](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/945))
 - fix: suppress ASGI event spans independently of agent observability
   ([#950](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/950))
 - fix: require `certifi >= 2026.10.18` so the Lambda layer no longer bundles the eMudhra (emSign) ECC Root CA - G3,
@@ -36,6 +42,9 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   span, so dependency metrics are reported under the same operation as the service metrics instead of the original
   span name.
   ([#931](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/931))
+- feat: register ``otlp/sigv4`` exporter entry points for logs, metrics, and traces,
+  with optional shared and signal-specific signing service overrides,
+  environment-configured signing regions, and botocore sessions.
 - revert: remove the `aws_sigv4` OTLP credential-provider entry point and session factory introduced in #794.
   ([#926](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/926))
 - chore: update OpenTelemetry dependencies to 1.45.1/0.66b1. The CloudWatch Logs OTLP exporter now relies on the

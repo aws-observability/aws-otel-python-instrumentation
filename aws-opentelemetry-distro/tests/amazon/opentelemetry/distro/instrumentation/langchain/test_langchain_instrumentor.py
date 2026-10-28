@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import asyncio
+import importlib.metadata
 import json
 import sys
 import unittest
@@ -9,6 +10,7 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from conftest import call_mock_llm, validate_otel_genai_schema
+from packaging.version import Version
 
 if sys.version_info < (3, 10):
     raise unittest.SkipTest("langchain requires >=3.10")
@@ -25,6 +27,13 @@ except ImportError:
         from langchain_classic.agents import AgentType, initialize_agent
     except ImportError:
         initialize_agent = None
+
+try:
+    LANGGRAPH_VERSION = Version(importlib.metadata.version("langgraph"))
+except importlib.metadata.PackageNotFoundError:
+    LANGGRAPH_VERSION = None
+
+import langchain_core
 from langchain_core.language_models.fake import FakeListLLM
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -63,6 +72,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_RESPONSE_MODEL,
     GEN_AI_SYSTEM_INSTRUCTIONS,
     GEN_AI_TOOL_CALL_ARGUMENTS,
+    GEN_AI_TOOL_CALL_ID,
     GEN_AI_TOOL_CALL_RESULT,
     GEN_AI_TOOL_DESCRIPTION,
     GEN_AI_TOOL_NAME,
@@ -1108,6 +1118,82 @@ class TestLangChainInstrumentor(TestCase):
         self.assertIsNotNone(span.attributes.get(GEN_AI_TOOL_CALL_ARGUMENTS))
         self.assertEqual(span.attributes[GEN_AI_TOOL_CALL_RESULT], result)
 
+    # langchain-core only forwards tool_call_id to on_tool_start since 1.1.2:
+    # https://github.com/langchain-ai/langchain/commit/6affec92ce4ccc563e03bcd23d7fe9d8547a85f2 (#34235)
+    @unittest.skipIf(
+        Version(langchain_core.__version__) < Version("1.1.2"),
+        "langchain-core < 1.1.2 does not pass tool_call_id to tool callbacks",
+    )
+    def test_tool_span_records_tool_call_id_from_model_tool_call(self):
+        try:
+            from langchain_aws import ChatBedrockConverse
+        except ImportError:
+            self.skipTest("langchain-aws is not available")
+        if not create_agent:
+            self.skipTest("langchain create_agent is not available")
+
+        @tool
+        def add_numbers(a: int, b: int) -> int:
+            """Add two numbers."""
+            return a + b
+
+        def invoke_agent(client):
+            llm = ChatBedrockConverse(model="anthropic.claude-fable-5", client=client)
+            agent = create_agent(llm, tools=[add_numbers], name="ToolCallIdAgent")
+            agent.invoke({"messages": [HumanMessage(content="Add 1 and 2.")]})
+
+        call_mock_llm(
+            "bedrock",
+            invoke_llm_callback=invoke_agent,
+            responses=[
+                {
+                    "output": {
+                        "message": {
+                            "role": "assistant",
+                            "content": [
+                                {
+                                    "toolUse": {
+                                        "toolUseId": "tooluse_abc123",
+                                        "name": "add_numbers",
+                                        "input": {"a": 1, "b": 2},
+                                    }
+                                }
+                            ],
+                        }
+                    },
+                    "stopReason": "tool_use",
+                    "usage": {"inputTokens": 10, "outputTokens": 5, "totalTokens": 15},
+                    "metrics": {"latencyMs": 1},
+                },
+                {
+                    "output": {"message": {"role": "assistant", "content": [{"text": "3"}]}},
+                    "stopReason": "end_turn",
+                    "usage": {"inputTokens": 10, "outputTokens": 1, "totalTokens": 11},
+                    "metrics": {"latencyMs": 1},
+                },
+            ],
+        )
+
+        spans = self.span_exporter.get_finished_spans()
+        tool_spans = [
+            span
+            for span in spans
+            if span.attributes.get(GEN_AI_OPERATION_NAME) == GenAiOperationNameValues.EXECUTE_TOOL.value
+        ]
+        self.assertEqual(len(tool_spans), 1)
+        self.assertEqual(tool_spans[0].attributes[GEN_AI_TOOL_CALL_ID], "tooluse_abc123")
+
+        # The execute_tool span must correlate with the tool_call part the model emitted on the chat span
+        model_tool_call_ids = [
+            part["id"]
+            for span in spans
+            if span.attributes.get(GEN_AI_OPERATION_NAME) == GenAiOperationNameValues.CHAT.value
+            for message in json.loads(span.attributes[GEN_AI_OUTPUT_MESSAGES])
+            for part in message["parts"]
+            if part["type"] == "tool_call"
+        ]
+        self.assertEqual(model_tool_call_ids, ["tooluse_abc123"])
+
     def test_internal_chains_suppressed(self):
         chain_factories = [
             ("RunnableLambda", lambda llm: RunnableLambda(lambda x: x) | llm),
@@ -1976,6 +2062,37 @@ class TestLangChainInstrumentor(TestCase):
         chat_spans = [s for s in spans if "chat" in s.name]
         self.assertGreater(len(chat_spans), 0)
 
+    # langgraph only adds langgraph_checkpoint_ns to task metadata since 0.2.23:
+    # https://github.com/langchain-ai/langgraph/commit/01bb6cbd4dcaa48474664d163dfc21c1c196a730 (#1751)
+    @unittest.skipIf(
+        LANGGRAPH_VERSION is None or LANGGRAPH_VERSION < Version("0.2.23"),
+        "langgraph < 0.2.23 (or not installed) does not emit langgraph_checkpoint_ns metadata",
+    )
+    def test_langgraph_checkpoint_ns_on_node_spans(self):
+        from langgraph.graph import END, START, MessagesState, StateGraph
+
+        llm = self.FakeChatModel(messages=iter([AIMessage(content="Done.")]))
+
+        def respond(state, config):
+            return {"messages": [llm.invoke(state["messages"], config)]}
+
+        graph_builder = StateGraph(MessagesState)
+        graph_builder.add_node("respond", respond)
+        graph_builder.add_edge(START, "respond")
+        graph_builder.add_edge("respond", END)
+        graph = graph_builder.compile(name="CheckpointNsGraph")
+
+        graph.invoke({"messages": [HumanMessage(content="Hello")]})
+
+        spans = self.span_exporter.get_finished_spans()
+        chat_spans = [
+            span for span in spans if span.attributes.get(GEN_AI_OPERATION_NAME) == GenAiOperationNameValues.CHAT.value
+        ]
+        self.assertEqual(len(chat_spans), 1)
+        self.assertEqual(chat_spans[0].attributes["langgraph.node"], "respond")
+        # LangGraph formats checkpoint_ns as "<node>:<task id>"
+        self.assertTrue(chat_spans[0].attributes["langgraph.checkpoint_ns"].startswith("respond:"))
+
     def test_token_usage_provider_key_variants(self):
         from langchain_aws import ChatBedrock, ChatBedrockConverse
         from langchain_openai import ChatOpenAI
@@ -2059,6 +2176,31 @@ class TestLangChainInstrumentor(TestCase):
                 {
                     GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS: 7,
                     GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS: 8,
+                },
+            ),
+            # Anthropic prompt caching with TTLs: cache writes are split into ephemeral_5m/1h buckets and
+            # the generic cache_creation key is reported as 0
+            (
+                ChatBedrockConverse,
+                {"model": "test", "region_name": "us-east-1"},
+                result_with_usage_metadata(
+                    {
+                        "input_tokens": 55,
+                        "output_tokens": 66,
+                        "total_tokens": 121,
+                        "input_token_details": {
+                            "cache_read": 7,
+                            "cache_creation": 0,
+                            "ephemeral_5m_input_tokens": 9,
+                            "ephemeral_1h_input_tokens": 10,
+                        },
+                    }
+                ),
+                55,
+                66,
+                {
+                    GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS: 7,
+                    GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS: 19,
                 },
             ),
         ]
