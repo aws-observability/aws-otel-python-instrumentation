@@ -62,20 +62,23 @@ class PregelWrapper:
     @classmethod
     def _iterate_with_graph_context(cls, iterator: Iterator[Any], graph_name: str) -> Iterator[Any]:
         """Advance a sync iterator without exposing the Pregel context to its consumer."""
+        graph_context = context.set_value(cls._CONTEXT_KEY, graph_name)
         try:
             while True:
-                token = context.attach(context.set_value(cls._CONTEXT_KEY, graph_name))
+                token = context.attach(graph_context)
                 try:
                     item = next(iterator)
                 except StopIteration as exception:
                     return exception.value
                 finally:
+                    # Retain the agent span attached by callbacks for the next iteration.
+                    graph_context = context.get_current()
                     context.detach(token)
                 yield item
         except GeneratorExit:
             close = getattr(iterator, "close", None)
             if callable(close):
-                token = context.attach(context.set_value(cls._CONTEXT_KEY, graph_name))
+                token = context.attach(graph_context)
                 try:
                     close()
                 finally:
@@ -85,20 +88,23 @@ class PregelWrapper:
     @classmethod
     async def _aiterate_with_graph_context(cls, iterator: AsyncIterator[Any], graph_name: str) -> AsyncIterator[Any]:
         """Advance an async iterator without exposing the Pregel context to its consumer."""
+        graph_context = context.set_value(cls._CONTEXT_KEY, graph_name)
         try:
             while True:
-                token = context.attach(context.set_value(cls._CONTEXT_KEY, graph_name))
+                token = context.attach(graph_context)
                 try:
                     item = await anext(iterator)
                 except StopAsyncIteration:
                     return
                 finally:
+                    # Retain the agent span attached by callbacks for the next iteration.
+                    graph_context = context.get_current()
                     context.detach(token)
                 yield item
         except GeneratorExit:
             aclose = getattr(iterator, "aclose", None)
             if callable(aclose):
-                token = context.attach(context.set_value(cls._CONTEXT_KEY, graph_name))
+                token = context.attach(graph_context)
                 try:
                     await aclose()
                 finally:

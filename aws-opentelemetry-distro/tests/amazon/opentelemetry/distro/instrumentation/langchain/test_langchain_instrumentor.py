@@ -45,7 +45,7 @@ from langchain_core.tools import StructuredTool, tool
 
 from amazon.opentelemetry.distro.instrumentation.langchain import LangChainInstrumentor
 from amazon.opentelemetry.distro.instrumentation.langchain.wrapper import PregelWrapper
-from opentelemetry import context
+from opentelemetry import context, trace
 from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -289,6 +289,63 @@ class TestLangChainInstrumentor(TestCase):
         self.assertIn(GEN_AI_INPUT_MESSAGES, agent_spans[0].attributes)
         self.assertIn(GEN_AI_OUTPUT_MESSAGES, agent_spans[0].attributes)
         self.assertIsNone(PregelWrapper.get_active_agent_name())
+
+    def test_raw_stategraph_stream_preserves_agent_context_across_yields(self):
+        try:
+            from langgraph.graph import END, START, MessagesState, StateGraph
+        except ImportError:
+            self.skipTest("langgraph is not available")
+
+        tracer = self.tracer_provider.get_tracer(__name__)
+
+        def step(_):
+            self.assertEqual(trace.get_current_span().name, "invoke_agent ContextGraph")
+            with tracer.start_as_current_span("child step"):
+                return {"messages": [AIMessage(content="Done.")]}
+
+        async def async_step(state):
+            return step(state)
+
+        for is_async in (False, True):
+            with self.subTest(is_async=is_async):
+                self.span_exporter.clear()
+                graph_builder = StateGraph(MessagesState)
+                graph_builder.add_node("first", async_step if is_async else step)
+                graph_builder.add_node("second", async_step if is_async else step)
+                graph_builder.add_edge(START, "first")
+                graph_builder.add_edge("first", "second")
+                graph_builder.add_edge("second", END)
+                graph = graph_builder.compile(name="ContextGraph")
+
+                with tracer.start_as_current_span("request") as request_span:
+                    if is_async:
+
+                        async def consume():
+                            updates = 0
+                            async for _ in graph.astream(
+                                {"messages": [HumanMessage(content="Hello")]}, stream_mode="updates"
+                            ):
+                                updates += 1
+                                self.assertEqual(trace.get_current_span().name, "request")
+                            return updates
+
+                        updates = asyncio.run(consume())
+                    else:
+                        updates = 0
+                        for _ in graph.stream({"messages": [HumanMessage(content="Hello")]}, stream_mode="updates"):
+                            updates += 1
+                            self.assertEqual(trace.get_current_span().name, "request")
+                    self.assertEqual(updates, 2)
+                    self.assertEqual(trace.get_current_span().name, "request")
+
+                spans = self.span_exporter.get_finished_spans()
+                agent_span = next(span for span in spans if span.name == "invoke_agent ContextGraph")
+                self.assertEqual(agent_span.parent.span_id, request_span.get_span_context().span_id)
+                child_spans = [span for span in spans if span.name == "child step"]
+                self.assertEqual(len(child_spans), 2)
+                for span in child_spans:
+                    self.assertEqual(span.parent.span_id, agent_span.context.span_id)
+                    self.assertEqual(span.context.trace_id, agent_span.context.trace_id)
 
     def test_raw_stategraph_astream_creates_invoke_agent_span(self):
         try:
