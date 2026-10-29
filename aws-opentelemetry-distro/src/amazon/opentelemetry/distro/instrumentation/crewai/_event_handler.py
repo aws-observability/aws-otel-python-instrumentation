@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import logging
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
@@ -77,6 +78,8 @@ if TYPE_CHECKING:
     from crewai.tools.tool_usage import ToolUsage
     from crewai.types.usage_metrics import UsageMetrics
 
+_logger = logging.getLogger(__name__)
+
 
 @dataclass
 class _SpanEntry:
@@ -89,7 +92,11 @@ class _SpanEntry:
 
 
 class _EventBusEmitWrapper:
-    """Wrapper for crewai_event_bus.emit that runs our event handler synchronously."""
+    """Wrapper for crewai_event_bus.emit that runs our event handler synchronously.
+
+    Wrapping emit bypasses CrewAI's per-handler error isolation, so handler failures are caught here. A failure only
+    loses telemetry; the event is always emitted and emit's result is always returned.
+    """
 
     def __init__(self, event_handler: "OpenTelemetryEventHandler"):
         self._event_handler = event_handler
@@ -103,13 +110,19 @@ class _EventBusEmitWrapper:
         source = args[0] if args else kwargs.get("source")
 
         if isinstance(event, ToolUsageStartedEvent):
-            self._event_handler._maybe_end_pending_llm_span_for_tool_call(source, event)
+            try:
+                self._event_handler._maybe_end_pending_llm_span_for_tool_call(source, event)
+            except Exception:  # pylint: disable=broad-exception-caught
+                _logger.debug("Failed to end pending CrewAI LLM span before tool call", exc_info=True)
 
         result = wrapped(*args, **kwargs)
         if not isinstance(event, BaseEvent):
             return result
 
-        self._event_handler._handle_event(source, event)
+        try:
+            self._event_handler._handle_event(source, event)
+        except Exception:  # pylint: disable=broad-exception-caught
+            _logger.debug("Failed to handle CrewAI event %s", type(event).__name__, exc_info=True)
         return result
 
 
@@ -352,7 +365,7 @@ class OpenTelemetryEventHandler:
             f"{GenAiOperationNameValues.CHAT.value} {model_name}" if model_name else GenAiOperationNameValues.CHAT.value
         )
 
-        usage = source.get_token_usage_summary()
+        initial_token_usage = self._get_cumulative_token_usage(source) or (0, 0)
 
         messages = event.messages
         if messages:
@@ -375,7 +388,7 @@ class OpenTelemetryEventHandler:
             attributes,
             parent_event_id,
             kind=SpanKind.CLIENT,
-            initial_token_usage=(usage.prompt_tokens, usage.completion_tokens),
+            initial_token_usage=initial_token_usage,
         )
         self._task_or_agent_id_to_started_llm_event_id.put(self._get_task_or_agent_id(event), event.event_id)
 
@@ -445,9 +458,12 @@ class OpenTelemetryEventHandler:
             cache_creation_input_tokens = event_usage.get("cache_creation_tokens") or 0
             reasoning_output_tokens = event_usage.get("reasoning_tokens") or 0
         else:
-            usage: "UsageMetrics" = source.get_token_usage_summary()
-            input_tokens = usage.prompt_tokens - prev_prompt_tokens
-            output_tokens = usage.completion_tokens - prev_completion_tokens
+            prompt_tokens, completion_tokens = self._get_cumulative_token_usage(source) or (
+                prev_prompt_tokens,
+                prev_completion_tokens,
+            )
+            input_tokens = prompt_tokens - prev_prompt_tokens
+            output_tokens = completion_tokens - prev_completion_tokens
         if input_tokens > 0:
             attrs[GEN_AI_USAGE_INPUT_TOKENS] = input_tokens
         if output_tokens > 0:
@@ -468,7 +484,9 @@ class OpenTelemetryEventHandler:
         )
         self._end_span(started_event_id, error=getattr(event, "error", None))
 
-    def _maybe_end_pending_llm_span_for_tool_call(self, source: Any, event: "ToolUsageStartedEvent") -> None:
+    def _maybe_end_pending_llm_span_for_tool_call(  # pylint: disable=too-many-locals
+        self, source: Any, event: "ToolUsageStartedEvent"
+    ) -> None:
         # Some CrewAI tool-call paths transition directly to ToolUsageStartedEvent
         # without a matching LLMCallCompletedEvent. Finalize the pending LLM span
         # with the tool call and token usage before the tool span starts.
@@ -501,13 +519,22 @@ class OpenTelemetryEventHandler:
 
         span_entry = self._event_id_to_span.get(started_event_id)
         previous = span_entry.initial_token_usage if span_entry else (0, 0)
-        usage: "UsageMetrics" = llm.get_token_usage_summary()
-        if (input_tokens := usage.prompt_tokens - previous[0]) > 0:
+        prompt_tokens, completion_tokens = self._get_cumulative_token_usage(llm) or previous
+        if (input_tokens := prompt_tokens - previous[0]) > 0:
             attrs[GEN_AI_USAGE_INPUT_TOKENS] = input_tokens
-        if (output_tokens := usage.completion_tokens - previous[1]) > 0:
+        if (output_tokens := completion_tokens - previous[1]) > 0:
             attrs[GEN_AI_USAGE_OUTPUT_TOKENS] = output_tokens
 
         self._end_span(started_event_id, attrs)
+
+    @staticmethod
+    def _get_cumulative_token_usage(llm: Any) -> Optional[Tuple[int, int]]:
+        # only BaseLLM exposes a usage summary; LLM events can also be emitted from other sources (e.g. customer code)
+        get_token_usage_summary = getattr(llm, "get_token_usage_summary", None)
+        if not callable(get_token_usage_summary):
+            return None
+        usage: "UsageMetrics" = get_token_usage_summary()
+        return usage.prompt_tokens, usage.completion_tokens
 
     def _get_parent_event_id(self, event: Any) -> Optional[str]:
         parent_event_id = getattr(event, "parent_event_id", None)

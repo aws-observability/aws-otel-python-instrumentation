@@ -244,6 +244,29 @@ class TestCrewAIInstrumentor(TestCase):
         self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_STOP_SEQUENCES], ("STOP",))
         self.assertIs(chat_span.attributes[GEN_AI_REQUEST_STREAM], False)
 
+    def test_llm_events_from_non_base_llm_source(self):
+        # customer code can emit LLM events itself; such sources have no get_token_usage_summary
+        source = object()
+        start_event = LLMCallStartedEvent(call_id="c1", messages=[{"role": "user", "content": "Hello"}])
+        crewai_event_bus.emit(source, start_event)
+        crewai_event_bus.emit(
+            source,
+            LLMCallCompletedEvent(
+                call_id="c1",
+                response="Hello",
+                call_type=LLMCallType.LLM_CALL,
+                started_event_id=start_event.event_id,
+            ),
+        )
+
+        chat_span = self._find_span("chat")
+        self.assertIsNotNone(chat_span)
+        self.assertIn(GEN_AI_INPUT_MESSAGES, chat_span.attributes)
+        # don't assume token counts from external source
+        self.assertNotIn(GEN_AI_USAGE_INPUT_TOKENS, chat_span.attributes)
+        self.assertNotIn(GEN_AI_USAGE_OUTPUT_TOKENS, chat_span.attributes)
+        self._assert_spans_all_ended()
+
     def test_llm_call_uses_effective_request_attributes_from_started_event(self):
         if "temperature" not in LLMCallStartedEvent.model_fields:
             self.skipTest("crewai <1.11.0 does not report effective request attributes on LLMCallStartedEvent")
@@ -573,6 +596,67 @@ class TestCrewAIInstrumentor(TestCase):
         agent_span = self._find_span("invoke_agent Multi")
         self._assert_span_parent(self._find_span("execute_tool tool_a"), agent_span)
         self._assert_span_parent(self._find_span("execute_tool tool_b"), agent_span)
+        self._assert_spans_all_ended()
+
+    def test_handler_error_does_not_fail_kickoff(self):
+        # A custom LLM attaches an image in LiteLLM's string image_url form and reports the call on CrewAI's event
+        # bus. Converting that content raises inside our handler; the crew must still finish with its result.
+        class VisionLLM(BaseLLM):
+            def __init__(self):
+                super().__init__(model="vision-model")
+
+            def call(self, messages, *args, **kwargs):  # pylint: disable=unused-argument
+                prompt = messages if isinstance(messages, list) else [{"role": "user", "content": messages}]
+                multimodal = prompt + [
+                    # image_url is a plain string (LiteLLM accepts this form), but the handler's content_to_parts
+                    # expects {"url": ...} and calls .get("url") on it -> AttributeError: 'str' object has no
+                    # attribute 'get'
+                    {"role": "user", "content": [{"type": "image_url", "image_url": "https://example.com/chart.png"}]}
+                ]
+                started = LLMCallStartedEvent(call_id="v1", messages=multimodal)
+                # the handler raises here, in _on_llm_start, while processing this event
+                crewai_event_bus.emit(self, started)
+                answer = "Final Answer: The chart shows growth."
+                crewai_event_bus.emit(
+                    self,
+                    LLMCallCompletedEvent(
+                        call_id="v1",
+                        response=answer,
+                        call_type=LLMCallType.LLM_CALL,
+                        started_event_id=started.event_id,
+                    ),
+                )
+                return answer
+
+            def supports_function_calling(self):
+                return False
+
+            def supports_stop_words(self):
+                return False
+
+            def get_context_window_size(self):
+                return 8192
+
+        agent = Agent(role="Analyst", goal="Describe charts", backstory="Agent.", llm=VisionLLM())
+        task = Task(description="Describe the chart.", expected_output="A description.", agent=agent)
+        with self.assertLogs("amazon.opentelemetry.distro.instrumentation.crewai._event_handler", "DEBUG") as logs:
+            result = Crew(name="ChartCrew", agents=[agent], tasks=[task]).kickoff()
+
+        # the handler did raise on this input, and the error was contained rather than reaching kickoff()
+        handler_errors = [
+            r for r in logs.records if r.getMessage() == "Failed to handle CrewAI event LLMCallStartedEvent"
+        ]
+        self.assertEqual(len(handler_errors), 1)
+        self.assertIs(handler_errors[0].exc_info[0], AttributeError)
+        self.assertIn("The chart shows growth.", result.raw)
+        crew_span = self._find_span("invoke_workflow ChartCrew")
+        agent_spans = [s for s in self.span_exporter.get_finished_spans() if s.name == "invoke_agent Analyst"]
+        self.assertIsNotNone(crew_span)
+        self.assertEqual(crew_span.status.status_code.name, "OK")
+        # one attempt: the handler error must not trigger CrewAI's agent retries
+        self.assertEqual(len(agent_spans), 1)
+        self.assertEqual(agent_spans[0].status.status_code.name, "OK")
+        self._assert_span_parent(agent_spans[0], crew_span)
         self._assert_spans_all_ended()
 
     def test_async_task_parenting(self):

@@ -11,6 +11,19 @@ For any change that affects end users of this package, please add an entry under
 If your change does not need a CHANGELOG entry, add the "skip changelog" label to your PR.
 
 ## Unreleased
+
+- fix: auto-instrumentation now enforces the supported framework versions of the AWS GenAI instrumentors
+  (`aws_crewai`, `aws_langchain`, `aws_llama-index`, `aws_mcp`, `aws_openai_agents`). Previously each
+  instrumentor's declared range was skipped under `opentelemetry-instrument`, operator injection and the Lambda
+  layer, so unsupported versions were instrumented anyway: for example, every `Crew.kickoff()` raised
+  `AttributeError` on crewai 0.177.0-1.9.x, and MCP 2.x was only partially instrumented. An instrumentor whose
+  framework is outside its supported range is now skipped, with the version conflict logged.
+  ([#953](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/953))
+- fix: CrewAI instrumentation errors no longer fail the customer's call. The `crewai_event_bus.emit` wrapper now
+  catches and debug-logs exceptions from the ADOT event handler, so the event is still emitted and `kickoff()`
+  returns normally; only telemetry for that event is lost. LLM events emitted from a source other than a CrewAI
+  `BaseLLM` now produce a chat span without token usage instead of raising `AttributeError`.
+  ([#953](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/953))
 - fix: accept LangGraph interrupt and resume callbacks in the LangChain instrumentation, so they no longer log an
   `AttributeError` warning
   ([#959](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/959))
