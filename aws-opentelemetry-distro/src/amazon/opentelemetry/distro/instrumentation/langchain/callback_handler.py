@@ -486,6 +486,12 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
     def on_agent_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> None:
         self._handle_error(error, run_id, **kwargs)
 
+    def on_interrupt(self, event: Any) -> None:
+        """Accept LangGraph's graph interrupt event without recording it."""
+
+    def on_resume(self, event: Any) -> None:
+        """Accept LangGraph's graph resume event without recording it."""
+
     @staticmethod
     def _format_lc_messages(messages: list[list[BaseMessage]]) -> tuple[list[dict], list[dict]]:
         # converts langchain messages to OTel format conversation and system instructions format based on

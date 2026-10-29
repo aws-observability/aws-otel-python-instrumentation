@@ -309,6 +309,27 @@ class TestLangChainInstrumentor(TestCase):
         self.assertIn(GEN_AI_OUTPUT_MESSAGES, agent_spans[0].attributes)
         self.assertIsNone(PregelWrapper.get_active_agent_name())
 
+    def test_stategraph_interrupt_and_resume_do_not_log_callback_warnings(self):
+        try:
+            from langgraph.checkpoint.memory import MemorySaver
+            from langgraph.graph import END, START, MessagesState, StateGraph
+            from langgraph.types import Command, interrupt
+        except ImportError:
+            self.skipTest("langgraph is not available")
+
+        graph_builder = StateGraph(MessagesState)
+        graph_builder.add_node("ask", lambda _: {"messages": [AIMessage(content=interrupt("approve?"))]})
+        graph_builder.add_edge(START, "ask")
+        graph_builder.add_edge("ask", END)
+        graph = graph_builder.compile(checkpointer=MemorySaver())
+        config = {"configurable": {"thread_id": "1"}}
+
+        with self.assertNoLogs("langchain_core.callbacks.manager", level="WARNING"):
+            graph.invoke({"messages": [HumanMessage(content="Hello")]}, config)
+            result = graph.invoke(Command(resume="yes"), config)
+
+        self.assertEqual(result["messages"][-1].content, "yes")
+
     def test_raw_stategraph_invoke_uses_stream_fallback(self):
         try:
             from langgraph.graph import END, START, MessagesState, StateGraph
