@@ -24,6 +24,9 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   returns normally; only telemetry for that event is lost. LLM events emitted from a source other than a CrewAI
   `BaseLLM` now produce a chat span without token usage instead of raising `AttributeError`.
   ([#953](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/953))
+- fix: accept LangGraph interrupt and resume callbacks in the LangChain instrumentation, so they no longer log an
+  `AttributeError` warning
+  ([#959](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/959))
 - fix(langchain): preserve the active agent context across LangGraph stream yields so child
   spans remain children of the graph's agent span while the consumer retains its original context.
   ([#957](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/957))
