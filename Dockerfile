@@ -20,6 +20,11 @@ RUN sed -i "/opentelemetry-exporter-otlp-proto-grpc/d" ./aws-opentelemetry-distr
 
 RUN mkdir workspace && pip install --target workspace ./aws-opentelemetry-distro
 
+# Replace upstream's sitecustomize.py with the ADOT bootstrap, which skips auto-instrumentation instead of breaking the
+# application when the app's Python is older than the payload supports.
+RUN cp workspace/amazon/opentelemetry/distro/bootstrap/sitecustomize.py \
+    workspace/opentelemetry/instrumentation/auto_instrumentation/sitecustomize.py
+
 # Stage 2: Build the cp-utility binary
 FROM public.ecr.aws/docker/library/rust:1.89 AS builder
 
