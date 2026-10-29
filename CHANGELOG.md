@@ -15,7 +15,7 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 - fix: the auto-instrumentation image no longer crashes applications on an unsupported Python (older than 3.10).
   Its `sitecustomize.py` now skips instrumentation before the payload can shadow the application's own packages,
   logs an `[ADOT]` line to stderr, and records the decision in `adot-status.json` in the shared volume.
-  ([#PR_NUMBER](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/PR_NUMBER))
+  ([#958](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/958))
 - fix(langchain): preserve the active agent context across LangGraph stream yields so child
   spans remain children of the graph's agent span while the consumer retains its original context.
   ([#957](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/957))
