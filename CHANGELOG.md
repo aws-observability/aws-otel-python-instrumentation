@@ -11,6 +11,11 @@ For any change that affects end users of this package, please add an entry under
 If your change does not need a CHANGELOG entry, add the "skip changelog" label to your PR.
 
 ## Unreleased
+- fix: CrewAI error spans now set `error.type` to the exception class (for example `TimeoutError`), or `_OTHER`
+  when it is unknown, instead of the full error message. The message could contain task descriptions, tool
+  arguments or provider details, and made `error.type` unusable for grouping errors. The message is still
+  recorded as the span status description.
+  ([#962](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/962))
 - fix: accept LangGraph interrupt and resume callbacks in the LangChain instrumentation, so they no longer log an
   `AttributeError` warning
   ([#959](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/959))

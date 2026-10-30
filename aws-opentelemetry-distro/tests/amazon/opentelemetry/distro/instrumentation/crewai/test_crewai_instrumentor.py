@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import threading
+import time
 import unittest
 from typing import Any, Dict, Optional, Sequence
 from unittest import TestCase
@@ -20,7 +21,7 @@ if sys.version_info < (3, 10) or sys.version_info >= (3, 14):
 
 from crewai import LLM, Agent, Crew, Task
 from crewai.events import crewai_event_bus
-from crewai.events.types.llm_events import LLMCallCompletedEvent, LLMCallStartedEvent, LLMCallType
+from crewai.events.types.llm_events import LLMCallCompletedEvent, LLMCallFailedEvent, LLMCallStartedEvent, LLMCallType
 from crewai.llms.base_llm import BaseLLM, llm_call_context
 from crewai.tools import tool
 
@@ -70,6 +71,10 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GenAiProviderNameValues,
 )
 from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
+
+
+class ProviderRateLimitError(Exception):
+    pass
 
 
 # https://pypi.org/project/crewai/
@@ -482,7 +487,90 @@ class TestCrewAIInstrumentor(TestCase):
         spans = self.span_exporter.get_finished_spans()
         error_span = next((s for s in spans if s.status.status_code.name == "ERROR"), None)
         self.assertIsNotNone(error_span, "Expected at least one span with ERROR status")
-        self.assertIn("LLM call failed", error_span.attributes.get(ERROR_TYPE, ""))
+        self.assertEqual(error_span.attributes[ERROR_TYPE], "RuntimeError")
+        self.assertIn("LLM call failed", error_span.status.description)
+
+    def test_error_type_is_exception_class_not_message(self):
+        # error.type must be a low-cardinality class name; the message (which can hold task text, tool arguments
+        # or provider details) belongs only in the status description
+        @tool
+        def lookup(account: str) -> str:
+            """Look up an account."""
+            raise ValueError(f"no record for account {account}")
+
+        def slow_completion(*args, **kwargs):
+            time.sleep(2)
+            return self._mock_response("Final Answer: too late")
+
+        cases = [
+            (
+                "task timeout",
+                {"max_execution_time": 1, "max_retry_limit": 0},
+                {"side_effect": slow_completion},
+                "invoke_agent",
+                "TimeoutError",
+                "SECRET-TASK-DESCRIPTION",
+            ),
+            (
+                "tool error",
+                {"tools": [lookup]},
+                {
+                    "side_effect": [
+                        self._mock_response(
+                            tool_calls=[self._mock_tool_call("c1", "lookup", '{"account": "ACCT-4111"}')]
+                        ),
+                        self._mock_response("Final Answer: not found"),
+                    ]
+                },
+                "execute_tool lookup",
+                "ValueError",
+                "ACCT-4111",
+            ),
+            (
+                "LLM error",
+                {"max_retry_limit": 0},
+                {"side_effect": ProviderRateLimitError("429 for org-ABC123, request req_9f8e7d")},
+                "chat gpt-4",
+                "ProviderRateLimitError",
+                "org-ABC123",
+            ),
+        ]
+        for name, agent_kwargs, completion, span_name, expected_type, secret in cases:
+            with self.subTest(case=name):
+                self.span_exporter.clear()
+                llm = LLM(model="openai/gpt-4", is_litellm=True)
+                llm.supports_function_calling = lambda: True
+                agent = Agent(role="Worker", goal="Work", backstory="Agent.", llm=llm, **agent_kwargs)
+                task = Task(description="SECRET-TASK-DESCRIPTION", expected_output="Done.", agent=agent)
+                with patch("litellm.completion", **completion):
+                    try:
+                        Crew(name="ErrorCrew", agents=[agent], tasks=[task]).kickoff()
+                    except Exception:  # pylint: disable=broad-except
+                        pass
+
+                error_spans = [
+                    s for s in self.span_exporter.get_finished_spans() if s.status.status_code.name == "ERROR"
+                ]
+                span = next(s for s in error_spans if s.name.startswith(span_name))
+                self.assertEqual(span.attributes[ERROR_TYPE], expected_type)
+                self.assertIn(secret, span.status.description)
+                for error_span in error_spans:
+                    self.assertNotIn(secret, error_span.attributes[ERROR_TYPE], f"content leaked on {error_span.name}")
+                self._assert_spans_all_ended()
+
+    def test_error_type_falls_back_to_other(self):
+        # a failure event emitted outside an except block has no exception to take the class from
+        llm = LLM(model="openai/gpt-4", is_litellm=True)
+        start_event = LLMCallStartedEvent(call_id="c1", messages=[{"role": "user", "content": "Hello"}])
+        crewai_event_bus.emit(llm, start_event)
+        crewai_event_bus.emit(
+            llm, LLMCallFailedEvent(call_id="c1", error="boom", started_event_id=start_event.event_id)
+        )
+
+        chat_span = self._find_span("chat gpt-4")
+        self.assertEqual(chat_span.attributes[ERROR_TYPE], "_OTHER")
+        self.assertEqual(chat_span.status.description, "boom")
+        self._assert_spans_all_ended()
 
     def test_text_based_tool_calling(self):
         mock_llm = MagicMock(spec=LLM)

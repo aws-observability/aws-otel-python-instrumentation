@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import re
+import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
@@ -334,7 +335,7 @@ class OpenTelemetryEventHandler:
     def _on_tool_error(
         self, source: "ToolUsage", event: "ToolUsageErrorEvent"
     ) -> None:  # pylint: disable=unused-argument
-        self._end_span(event.started_event_id, error=str(event.error))
+        self._end_span(event.started_event_id, error=event.error)
 
     def _on_llm_start(self, source: "BaseLLM", event: "LLMCallStartedEvent") -> None:
         attributes: Dict[str, Any] = {
@@ -584,7 +585,7 @@ class OpenTelemetryEventHandler:
         self,
         started_event_id: Optional[str],
         set_attrs: Optional[Dict[str, Any]] = None,
-        error: Optional[str] = None,
+        error: Optional[Any] = None,
     ) -> None:
         if not started_event_id:
             return
@@ -595,16 +596,17 @@ class OpenTelemetryEventHandler:
                     if value is not None:
                         entry.span.set_attribute(key, value)
             if error:
-                entry.span.set_status(Status(StatusCode.ERROR, error))
-                entry.span.set_attribute(ERROR_TYPE, error)
+                entry.span.set_status(Status(StatusCode.ERROR, str(error)))
+                entry.span.set_attribute(ERROR_TYPE, self._get_error_type(error))
             else:
                 entry.span.set_status(Status(StatusCode.OK))
             entry.span.end()
             try_detach(entry.token)
 
-    def _end_spans_for_root_event(self, root_event_id: Optional[str], error: Optional[str] = None) -> None:
+    def _end_spans_for_root_event(self, root_event_id: Optional[str], error: Optional[Any] = None) -> None:
         if not root_event_id:
             return
+        error_type = self._get_error_type(error) if error else None
 
         removed_span_entries = self._event_id_to_span.pop_items_if_matches(
             lambda _, span_entry: span_entry.root_event_id == root_event_id
@@ -616,12 +618,22 @@ class OpenTelemetryEventHandler:
         for _, entry in reversed(removed_span_entries):
             if entry.span.is_recording():
                 if error:
-                    entry.span.set_status(Status(StatusCode.ERROR, error))
-                    entry.span.set_attribute(ERROR_TYPE, error)
+                    entry.span.set_status(Status(StatusCode.ERROR, str(error)))
+                    entry.span.set_attribute(ERROR_TYPE, error_type)
                 else:
                     entry.span.set_status(Status(StatusCode.OK))
                 entry.span.end()
                 try_detach(entry.token)
+
+    @staticmethod
+    def _get_error_type(error: Any) -> str:
+        # error.type must be a low-cardinality class name, not the message (which can contain task or tool content).
+        # Most CrewAI failure events carry the error as a string, but this handler runs synchronously inside
+        # CrewAI's except block, so the exception being handled gives the real type.
+        if isinstance(error, BaseException):
+            return type(error).__qualname__
+        active_exception = sys.exc_info()[1]
+        return type(active_exception).__qualname__ if active_exception else "_OTHER"
 
     @staticmethod
     def _extract_provider_and_model(llm: Any) -> Tuple[Optional[str], Optional[str]]:
