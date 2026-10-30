@@ -11,6 +11,11 @@ For any change that affects end users of this package, please add an entry under
 If your change does not need a CHANGELOG entry, add the "skip changelog" label to your PR.
 
 ## Unreleased
+
+- feat: add CrewAI LiteAgent support. The CrewAI instrumentor now handles the `LiteAgentExecution*` events emitted
+  by standalone `Agent.kickoff()` / `kickoff_async()`, so these runs produce an `invoke_agent` span and their LLM
+  and tool spans stay in the caller's trace instead of each starting a new trace.
+  ([#955](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/955))
 - fix: accept LangGraph interrupt and resume callbacks in the LangChain instrumentation, so they no longer log an
   `AttributeError` warning
   ([#959](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/959))
