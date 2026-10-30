@@ -11,6 +11,8 @@ For any change that affects end users of this package, please add an entry under
 If your change does not need a CHANGELOG entry, add the "skip changelog" label to your PR.
 
 ## Unreleased
+
+## v0.22.0 - 2026-10-29
 - fix: accept LangGraph interrupt and resume callbacks in the LangChain instrumentation, so they no longer log an
   `AttributeError` warning
   ([#959](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/959))
