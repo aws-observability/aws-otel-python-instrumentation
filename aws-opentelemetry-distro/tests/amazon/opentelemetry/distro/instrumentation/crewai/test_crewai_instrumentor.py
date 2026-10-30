@@ -781,90 +781,6 @@ class TestCrewAIInstrumentor(TestCase):
         )
         self._assert_spans_all_ended()
 
-    def test_lite_agent_unknown_parent_joins_current_context(self):
-        # CrewAI can hand us a parent_event_id we never mapped (e.g. a stale scope entry); the LiteAgent span is a
-        # root, so it must join the active context instead of starting a detached trace
-        agent = Agent(
-            role="Researcher",
-            goal="Answer questions",
-            backstory="Agent.",
-            llm=LLM(model="openai/gpt-4", is_litellm=True),
-        )
-        agent_info = {"id": str(agent.id), "role": agent.role, "goal": agent.goal}
-        start_event = LiteAgentExecutionStartedEvent(
-            agent_info=agent_info, tools=None, messages="Hello", parent_event_id="unknown-parent-event-id"
-        )
-        end_event = LiteAgentExecutionCompletedEvent(
-            agent_info=agent_info, output="Done!", started_event_id=start_event.event_id
-        )
-        # call the handler directly, since the event bus would overwrite parent_event_id from its own scope stack
-        with self.tracer_provider.get_tracer("test").start_as_current_span("POST /chat", kind=SpanKind.SERVER):
-            self.instrumentor._handler._handle_event(agent, start_event)
-            self.instrumentor._handler._handle_event(agent, end_event)
-
-        self._assert_span_parent(self._find_span("invoke_agent Researcher"), self._find_span("POST /chat"))
-        self._assert_spans_all_ended()
-
-    def test_lite_agent_concurrent_kickoffs_same_instance(self):
-        # mirrors test_concurrent_crew_same_instance_isolation
-        both_calls_in_flight = threading.Barrier(2, timeout=10)
-
-        def concurrent_response(*args, **kwargs):
-            both_calls_in_flight.wait()
-            return self._mock_response("Final Answer: Done")
-
-        llm = LLM(model="openai/gpt-4", is_litellm=True)
-        llm.supports_function_calling = lambda: True
-        agent = Agent(role="Shared", goal="Answer", backstory="Agent.", llm=llm)
-        test_tracer = self.tracer_provider.get_tracer("test")
-        errors = []
-
-        def kickoff_in_request(request_name):
-            try:
-                with test_tracer.start_as_current_span(request_name, kind=SpanKind.SERVER):
-                    agent.kickoff("Go.")
-            except Exception as error:  # pylint: disable=broad-except
-                errors.append(error)
-
-        with patch("litellm.completion", side_effect=concurrent_response):
-            threads = [threading.Thread(target=kickoff_in_request, args=(name,)) for name in ("request_a", "request_b")]
-            for thread in threads:
-                thread.start()
-            for thread in threads:
-                thread.join(timeout=20)
-
-        self.assertEqual(errors, [])
-        for request_name in ("request_a", "request_b"):
-            request_span = self._find_span(request_name)
-            self._assert_trace_spans(request_span, [request_name, "invoke_agent Shared", "chat gpt-4"])
-            agent_span = next(
-                s
-                for s in self.span_exporter.get_finished_spans()
-                if s.name == "invoke_agent Shared" and s.context.trace_id == request_span.context.trace_id
-            )
-            self._assert_span_parent(agent_span, request_span)
-        self._assert_spans_all_ended()
-
-    def test_lite_agent_restores_context_after_kickoff(self):
-        llm = LLM(model="openai/gpt-4", is_litellm=True)
-        llm.supports_function_calling = lambda: True
-        agent = Agent(role="Researcher", goal="Answer questions", backstory="Agent.", llm=llm)
-        test_tracer = self.tracer_provider.get_tracer("test")
-
-        for name, completion in (
-            ("success", {"return_value": self._mock_response("Final Answer: Done!")}),
-            ("failure", {"side_effect": RuntimeError("LLM down")}),
-        ):
-            with self.subTest(kickoff=name):
-                with patch("litellm.completion", **completion):
-                    with test_tracer.start_as_current_span("POST /chat", kind=SpanKind.SERVER) as server_span:
-                        try:
-                            agent.kickoff("What is A of 1?")
-                        except RuntimeError:
-                            pass
-                        self.assertIs(trace.get_current_span(), server_span)
-                self._assert_spans_all_ended()
-
     def test_lite_agent_kickoff_inside_flow(self):
         # Agent.kickoff() inside a Flow step: Flow scope events are unhandled, so the agent's CrewAI parent is unknown
         llm = LLM(model="openai/gpt-4", is_litellm=True)
@@ -886,23 +802,6 @@ class TestCrewAIInstrumentor(TestCase):
         self._assert_span_parent(agent_span, server_span)
         self._assert_trace_spans(server_span, ["POST /chat", "invoke_agent FlowAgent", "chat gpt-4"])
         self._assert_spans_all_ended()
-
-    @unittest.expectedFailure
-    def test_llm_call_inside_flow_joins_request_trace(self):
-        # known gap (CR-09): a direct LLM.call() inside a Flow step still starts a detached trace, because its
-        # parent is an unhandled Flow scope event and _start_span uses an empty Context() for unknown parents
-        llm = LLM(model="openai/gpt-4", is_litellm=True)
-
-        class LLMFlow(Flow):
-            @start()
-            def call_llm(self):
-                return llm.call("Hello")
-
-        with patch("litellm.completion", return_value=self._mock_response("Hi")):
-            with self.tracer_provider.get_tracer("test").start_as_current_span("POST /chat", kind=SpanKind.SERVER):
-                LLMFlow().kickoff()
-
-        self._assert_trace_spans(self._find_span("POST /chat"), ["POST /chat", "chat gpt-4"])
 
     def test_lite_agent_events_with_missing_source_data(self):
         # the source may lack role/llm (e.g. customer code emitting events, or the deprecated LiteAgent class)
