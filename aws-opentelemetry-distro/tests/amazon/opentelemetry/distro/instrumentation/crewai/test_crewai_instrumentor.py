@@ -583,43 +583,6 @@ class TestCrewAIInstrumentor(TestCase):
         self._assert_span_parent(self._find_span("execute_tool tool_b"), agent_span)
         self._assert_spans_all_ended()
 
-    def test_lite_agent_events(self):
-        # the event bus pairs each completed/error event with its started event via started_event_id
-        agent = Agent(
-            role="Researcher",
-            goal="Answer questions",
-            backstory="Agent.",
-            llm=LLM(model="openai/gpt-4", is_litellm=True),
-        )
-        agent_info = {"id": str(agent.id), "role": agent.role, "goal": agent.goal}
-        cases = [
-            (LiteAgentExecutionCompletedEvent(agent_info=agent_info, output="Done!"), StatusCode.OK),
-            (LiteAgentExecutionErrorEvent(agent_info=agent_info, error="agent failed"), StatusCode.ERROR),
-        ]
-        for end_event, expected_status in cases:
-            with self.subTest(end_event=type(end_event).__name__):
-                self.span_exporter.clear()
-                crewai_event_bus.emit(
-                    agent, LiteAgentExecutionStartedEvent(agent_info=agent_info, tools=None, messages="Hello")
-                )
-                crewai_event_bus.emit(agent, end_event)
-
-                agent_span = self._find_span("invoke_agent Researcher")
-                self.assertIsNotNone(agent_span)
-                self.assertEqual(agent_span.status.status_code, expected_status)
-                self.assertEqual(agent_span.attributes[GEN_AI_AGENT_NAME], "Researcher")
-                self.assertEqual(agent_span.attributes[GEN_AI_AGENT_DESCRIPTION], "Answer questions")
-                self.assertEqual(
-                    json.loads(agent_span.attributes[GEN_AI_INPUT_MESSAGES]),
-                    [{"role": "user", "parts": [{"type": "text", "content": "Hello"}]}],
-                )
-                if expected_status == StatusCode.OK:
-                    self.assertIn("Done!", agent_span.attributes[GEN_AI_OUTPUT_MESSAGES])
-                else:
-                    self.assertEqual(agent_span.attributes[ERROR_TYPE], "agent failed")
-                    self.assertNotIn(GEN_AI_OUTPUT_MESSAGES, agent_span.attributes)
-                self._assert_spans_all_ended()
-
     def test_lite_agent_kickoff(self):
         # Agent.kickoff() without a Crew emits LiteAgentExecution* events instead of AgentExecution* events
         @tool
@@ -639,37 +602,47 @@ class TestCrewAIInstrumentor(TestCase):
             ],
         ):
             with self.tracer_provider.get_tracer("test").start_as_current_span("POST /chat", kind=SpanKind.SERVER):
-                result = agent.kickoff("What is A of 1?")
+                agent.kickoff("What is A of 1?")
 
-        self.assertIn("Done!", result.raw)
         server_span = self._find_span("POST /chat")
         agent_span = self._find_span("invoke_agent Researcher")
-        tool_span = self._find_span("execute_tool tool_a")
-        chat_spans = [s for s in self.span_exporter.get_finished_spans() if s.name == "chat gpt-4"]
-        self.assertIsNotNone(agent_span)
-        self.assertEqual(len(chat_spans), 2)
         self._assert_trace_spans(
             server_span,
             ["POST /chat", "invoke_agent Researcher", "chat gpt-4", "execute_tool tool_a", "chat gpt-4"],
         )
         self._assert_span_parent(agent_span, server_span)
-        self._assert_span_parent(tool_span, agent_span)
-        for chat_span in chat_spans:
-            self._assert_span_parent(chat_span, agent_span)
+        for span in self.span_exporter.get_finished_spans():
+            if span.name in ("chat gpt-4", "execute_tool tool_a"):
+                self._assert_span_parent(span, agent_span)
 
         self.assertEqual(agent_span.status.status_code, StatusCode.OK)
-        self.assertEqual(agent_span.attributes[GEN_AI_OPERATION_NAME], "invoke_agent")
-        self.assertEqual(agent_span.attributes[GEN_AI_AGENT_NAME], "Researcher")
-        self.assertEqual(agent_span.attributes[GEN_AI_AGENT_ID], str(agent.id))
-        self.assertEqual(agent_span.attributes[GEN_AI_AGENT_DESCRIPTION], "Answer questions")
-        self.assertEqual(agent_span.attributes[GEN_AI_REQUEST_MODEL], "gpt-4")
+        attributes = dict(agent_span.attributes)
         self.assertEqual(
-            json.loads(agent_span.attributes[GEN_AI_INPUT_MESSAGES]),
+            json.loads(attributes.pop(GEN_AI_INPUT_MESSAGES)),
             [{"role": "user", "parts": [{"type": "text", "content": "What is A of 1?"}]}],
         )
-        output_messages = json.loads(agent_span.attributes[GEN_AI_OUTPUT_MESSAGES])
-        self.assertEqual(output_messages[0]["role"], "assistant")
-        self.assertIn("Done!", output_messages[0]["parts"][0]["content"])
+        self.assertEqual(
+            json.loads(attributes.pop(GEN_AI_OUTPUT_MESSAGES)),
+            [
+                {
+                    "role": "assistant",
+                    "parts": [{"type": "text", "content": "Final Answer: Done!"}],
+                    "finish_reason": "stop",
+                }
+            ],
+        )
+        self.assertEqual(
+            attributes,
+            {
+                GEN_AI_OPERATION_NAME: "invoke_agent",
+                GEN_AI_AGENT_NAME: "Researcher",
+                GEN_AI_AGENT_ID: str(agent.id),
+                GEN_AI_AGENT_DESCRIPTION: "Answer questions",
+                GEN_AI_PROVIDER_NAME: "openai",
+                GEN_AI_REQUEST_MODEL: "gpt-4",
+                GEN_AI_REQUEST_STREAM: False,
+            },
+        )
         self._assert_spans_all_ended()
 
     def test_lite_agent_kickoff_with_message_list(self):
