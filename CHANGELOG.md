@@ -16,6 +16,9 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   by standalone `Agent.kickoff()` / `kickoff_async()`, so these runs produce an `invoke_agent` span and their LLM
   and tool spans stay in the caller's trace instead of each starting a new trace.
   ([#955](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/955))
+- fix: accept LangGraph interrupt and resume callbacks in the LangChain instrumentation, so they no longer log an
+  `AttributeError` warning
+  ([#959](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/959))
 - fix(langchain): preserve the active agent context across LangGraph stream yields so child
   spans remain children of the graph's agent span while the consumer retains its original context.
   ([#957](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/957))
