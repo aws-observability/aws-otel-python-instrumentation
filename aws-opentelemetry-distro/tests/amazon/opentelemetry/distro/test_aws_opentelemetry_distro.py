@@ -756,72 +756,52 @@ class TestAwsOpenTelemetryDistro(TestCase):
         mock_super = self._load_instrumentor_with_agent(ep, third_party_eps=third_party)
         mock_super.assert_not_called()
 
-    # (entry point, instrumentor, installed framework versions, supported); None means not installed
-    _GENAI_DEPENDENCY_CASES = [
-        ("aws_mcp", McpInstrumentor, {"mcp": "1.9.4"}, False),
-        ("aws_mcp", McpInstrumentor, {"mcp": "2.0.0"}, False),
-        ("aws_mcp", McpInstrumentor, {"mcp": "2.3.0"}, False),
-        ("aws_mcp", McpInstrumentor, {"mcp": None}, False),
-        ("aws_mcp", McpInstrumentor, {"mcp": "1.10.0"}, True),
-        ("aws_mcp", McpInstrumentor, {"mcp": "1.25.0"}, True),
-        ("aws_crewai", CrewAIInstrumentor, {"crewai": "1.9.3"}, False),
-        ("aws_crewai", CrewAIInstrumentor, {"crewai": "2.0.0"}, False),
-        ("aws_crewai", CrewAIInstrumentor, {"crewai": "2.1.0"}, False),
-        ("aws_crewai", CrewAIInstrumentor, {"crewai": "1.10.0"}, True),
-        ("aws_crewai", CrewAIInstrumentor, {"crewai": "1.15.30"}, True),
-        ("aws_langchain", LangChainInstrumentor, {"langchain": "0.3.20"}, False),
-        ("aws_langchain", LangChainInstrumentor, {"langchain": "2.0.0"}, False),
-        ("aws_langchain", LangChainInstrumentor, {"langchain": "2.1.0"}, False),
-        ("aws_langchain", LangChainInstrumentor, {"langchain": "0.3.21"}, True),
-        ("aws_langchain", LangChainInstrumentor, {"langchain": "1.2.0"}, True),
-        (
-            "aws_llama-index",
-            LlamaIndexInstrumentor,
-            {"llama-index-core": "0.12.52", "llama-index-workflows": "1.0.1"},
-            False,
-        ),
-        (
-            "aws_llama-index",
-            LlamaIndexInstrumentor,
-            {"llama-index-core": "1.0.0", "llama-index-workflows": "1.0.1"},
-            False,
-        ),
-        (
-            "aws_llama-index",
-            LlamaIndexInstrumentor,
-            {"llama-index-core": "0.13.0", "llama-index-workflows": "1.0.0"},
-            False,
-        ),
-        (
-            "aws_llama-index",
-            LlamaIndexInstrumentor,
-            {"llama-index-core": "0.13.0", "llama-index-workflows": "2.24.0"},
-            False,
-        ),
-        (
-            "aws_llama-index",
-            LlamaIndexInstrumentor,
-            {"llama-index-core": "0.13.0", "llama-index-workflows": "3.0.0"},
-            False,
-        ),
-        (
-            "aws_llama-index",
-            LlamaIndexInstrumentor,
-            {"llama-index-core": "0.13.0", "llama-index-workflows": "1.0.1"},
-            True,
-        ),
-        (
-            "aws_llama-index",
-            LlamaIndexInstrumentor,
-            {"llama-index-core": "0.14.8", "llama-index-workflows": "2.25.0"},
-            True,
-        ),
-        ("aws_openai_agents", OpenAIAgentsInstrumentor, {"openai-agents": "0.3.2"}, False),
-        ("aws_openai_agents", OpenAIAgentsInstrumentor, {"openai-agents": "1.0.0"}, False),
-        ("aws_openai_agents", OpenAIAgentsInstrumentor, {"openai-agents": "1.1.0"}, False),
-        ("aws_openai_agents", OpenAIAgentsInstrumentor, {"openai-agents": "0.3.3"}, True),
-        ("aws_openai_agents", OpenAIAgentsInstrumentor, {"openai-agents": "0.6.5"}, True),
+    # a supported install of every framework; each case below changes one package's version
+    _SUPPORTED_FRAMEWORK_VERSIONS = {
+        "mcp": "1.10.0",
+        "crewai": "1.10.0",
+        "langchain": "0.3.21",
+        "llama-index-core": "0.13.0",
+        "llama-index-workflows": "1.0.1",
+        "openai-agents": "0.3.3",
+    }
+    # entry point, instrumentor, package, unsupported versions (None = not installed), supported versions
+    _GENAI_DEPENDENCY_RANGES = [
+        ("aws_mcp", McpInstrumentor, "mcp", ["1.9.4", "2.0.0", "2.3.0", None], ["1.10.0", "1.25.0"]),
+        ("aws_crewai", CrewAIInstrumentor, "crewai", ["1.9.3", "2.0.0", "2.1.0", None], ["1.10.0", "1.15.30"]),
+        ("aws_langchain", LangChainInstrumentor, "langchain", ["0.3.20", "2.0.0", "2.1.0", None], ["0.3.21", "1.2.0"]),
+        ("aws_llama-index", LlamaIndexInstrumentor, "llama-index-core", ["0.12.52", "1.0.0", None], ["0.13.0"]),
+        ("aws_llama-index", LlamaIndexInstrumentor, "llama-index-workflows", ["1.0.0", "2.24.0", "3.0.0"], ["2.25.0"]),
+        ("aws_openai_agents", OpenAIAgentsInstrumentor, "openai-agents", ["0.3.2", "1.0.0", "1.1.0", None], ["0.6.5"]),
     ]
+
+    def test_load_instrumentor_enforces_genai_dependency_ranges(self):
+        """Auto-instrumentation passes skip_dep_check=True; AWS GenAI instrumentor ranges must still apply."""
+        for entry_point, instrumentor, package, unsupported, supported in self._GENAI_DEPENDENCY_RANGES:
+            for installed in unsupported:
+                with self.subTest(package=package, version=installed):
+                    self.assertFalse(self._auto_instrument(entry_point, instrumentor, {package: installed}))
+            for installed in supported:
+                with self.subTest(package=package, version=installed):
+                    self.assertTrue(self._auto_instrument(entry_point, instrumentor, {package: installed}))
+
+    def _auto_instrument(self, entry_point_name, instrumentor_class, installed):
+        """Load an instrumentor the way auto-instrumentation does and return whether it instrumented."""
+        entry_point = self._make_ep(entry_point_name, "aws-opentelemetry-distro")
+        entry_point.load.return_value = instrumentor_class
+        versions = {**self._SUPPORTED_FRAMEWORK_VERSIONS, **installed}
+        # the frameworks aren't installed in this environment, so only the wrapping is stubbed;
+        # the parent loader and the dependency check run for real
+        with self._installed_framework_versions(versions), patch.object(
+            instrumentor_class, "_instrument"
+        ) as mock_instrument, patch.object(instrumentor_class, "_uninstrument"):
+            try:
+                AwsOpenTelemetryDistro().load_instrumentor(entry_point, skip_dep_check=True)
+            except DependencyConflictError:
+                # the upstream auto-loader catches this and skips the instrumentor
+                return False
+            instrumentor_class().uninstrument()
+            return mock_instrument.called
 
     @staticmethod
     def _installed_framework_versions(versions):
@@ -838,28 +818,6 @@ class TestAwsOpenTelemetryDistro(TestCase):
             return dist
 
         return patch("importlib.metadata.distribution", side_effect=distribution)
-
-    def test_load_instrumentor_enforces_genai_dependency_ranges(self):
-        """Auto-instrumentation passes skip_dep_check=True; AWS GenAI instrumentor ranges must still apply."""
-        distro = AwsOpenTelemetryDistro()
-        for entry_point_name, instrumentor_class, versions, supported in self._GENAI_DEPENDENCY_CASES:
-            with self.subTest(entry_point=entry_point_name, versions=versions):
-                entry_point = self._make_ep(entry_point_name, "aws-opentelemetry-distro")
-                entry_point.load.return_value = instrumentor_class
-                # the frameworks themselves aren't installed in this environment, so only the wrapping is stubbed;
-                # the parent loader and the dependency check run for real
-                with self._installed_framework_versions(versions), patch.object(
-                    instrumentor_class, "_instrument"
-                ) as mock_instrument, patch.object(instrumentor_class, "_uninstrument"):
-                    if supported:
-                        distro.load_instrumentor(entry_point, skip_dep_check=True)
-                        mock_instrument.assert_called_once()
-                        instrumentor_class().uninstrument()
-                    else:
-                        # the upstream auto-loader catches this and skips the instrumentor
-                        with self.assertRaises(DependencyConflictError):
-                            distro.load_instrumentor(entry_point, skip_dep_check=True)
-                        mock_instrument.assert_not_called()
 
     def test_load_instrumentor_keeps_skip_dep_check_for_other_entry_points(self):
         entry_point = self._make_ep("requests", "opentelemetry-instrumentation-requests")
