@@ -14,6 +14,10 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 - fix: count Gen AI log content nested more than three levels deep when splitting CloudWatch Logs OTLP export
   batches by size, so batches of Gen AI logs no longer exceed the 1 MB request limit and get rejected.
   ([#944](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/944))
+- fix: in Lambda, treat `OTEL_EXPORTER_OTLP_ENDPOINT` as a custom trace endpoint, as the OTLP exporter
+  spec requires. Setting only the generic endpoint previously fell back to the X-Ray UDP exporter, so
+  traces never reached the configured collector
+  ([#562](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/562))
 - fix: accept LangGraph interrupt and resume callbacks in the LangChain instrumentation, so they no longer log an
   `AttributeError` warning
   ([#959](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/959))
