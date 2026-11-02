@@ -18,7 +18,12 @@ class PyMysqlTest(DatabaseContractTestBase):
     @classmethod
     def set_up_dependency_container(cls) -> None:
         cls.container = (
-            MySqlContainer(MYSQL_USER=DATABASE_USER, MYSQL_PASSWORD=DATABASE_PASSWORD, MYSQL_DATABASE=DATABASE_NAME)
+            MySqlContainer(
+                image="mysql:8.4",
+                MYSQL_USER=DATABASE_USER,
+                MYSQL_PASSWORD=DATABASE_PASSWORD,
+                MYSQL_DATABASE=DATABASE_NAME,
+            )
             .with_kwargs(network=NETWORK_NAME)
             .with_name(DATABASE_HOST)
         )

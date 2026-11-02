@@ -1,7 +1,8 @@
 # Meant to be run from aws-otel-python-instrumentation/contract-tests.
 # Assumes existence of dist/aws_opentelemetry_distro-<pkg_version>-py3-none-any.whl.
 # Assumes filename of aws_opentelemetry_distro-<pkg_version>-py3-none-any.whl is passed in as "DISTRO" arg.
-FROM python:3.10
+ARG PYTHON_VERSION=3.10
+FROM python:${PYTHON_VERSION}
 WORKDIR /psycopg2
 COPY ./dist/$DISTRO /psycopg2
 COPY ./contract-tests/images/applications/psycopg2 /psycopg2

@@ -1,0 +1,19 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Trivy ignore file for daily scans.
+# This file is intentionally empty. Daily scans should flag all CVEs.
+# See: https://aquasecurity.github.io/trivy/latest/docs/configuration/filtering/
+
+# Format:
+#  - id: <CVE-###>
+#    statement: "<Why are we excluding?> <link to CVE where we can we status>"
+#    expired_at: <required - YYYY-MM-DD>
+
+vulnerabilities:
+  - id: CVE-2026-44431
+    statement: "urllib3 sensitive headers forwarded across origins - pending image rebuild. https://avd.aquasec.com/nvd/cve-2026-44431"
+    expired_at: 2026-06-01
+  - id: CVE-2026-44432
+    statement: "urllib3 decompression-bomb safeguards bypassed - pending image rebuild. https://avd.aquasec.com/nvd/cve-2026-44432"
+    expired_at: 2026-06-01

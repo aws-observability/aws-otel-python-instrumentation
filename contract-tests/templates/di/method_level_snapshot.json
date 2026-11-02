@@ -1,0 +1,130 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$comment": "Golden template for method-level DI snapshots (PROBE or BREAKPOINT at line=0)",
+  "type": "object",
+  "required": ["id", "timestamp", "instrumentation", "captures", "thread", "service", "environment", "locationHash"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "UUID - will vary per snapshot"
+    },
+    "timestamp": {
+      "type": "integer",
+      "description": "Unix epoch milliseconds - will vary per snapshot"
+    },
+    "duration": {
+      "type": "integer",
+      "description": "Execution duration in milliseconds"
+    },
+    "service": {
+      "type": "string",
+      "description": "Service name from OTEL_SERVICE_NAME"
+    },
+    "environment": {
+      "type": "string",
+      "description": "Environment from deployment.environment.name resource attribute"
+    },
+    "locationHash": {
+      "type": "string",
+      "description": "Hash identifying the instrumentation location"
+    },
+    "instrumentation": {
+      "type": "object",
+      "required": ["location"],
+      "properties": {
+        "location": {
+          "type": "object",
+          "required": ["codeUnit", "className", "methodName", "lineNumber", "language"],
+          "properties": {
+            "codeUnit": {
+              "type": "string",
+              "description": "Module/package path (e.g., 'mycompany.payment_processor'). Not the class name."
+            },
+            "className": {
+              "type": "string",
+              "description": "Class name within the module if present (e.g., 'CreditCardManager'). For module-level functions, currently defaults to the module name."
+            },
+            "methodName": {
+              "type": "string",
+              "description": "Function/method name"
+            },
+            "lineNumber": {
+              "type": "integer",
+              "const": 0,
+              "description": "Always 0 for method-level snapshots"
+            },
+            "filePath": {
+              "type": "string",
+              "description": "Source file name"
+            },
+            "language": {
+              "type": "string",
+              "const": "python"
+            }
+          }
+        }
+      }
+    },
+    "trace": {
+      "type": "object",
+      "properties": {
+        "traceId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "spanId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{16}$"
+        }
+      }
+    },
+    "thread": {
+      "type": "object",
+      "required": ["id", "name"],
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        }
+      }
+    },
+    "stack": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["fileName", "function"],
+        "properties": {
+          "fileName": {"type": "string"},
+          "function": {"type": "string"},
+          "lineNumber": {"type": "integer"}
+        }
+      }
+    },
+    "captures": {
+      "type": "object",
+      "description": "Method-level snapshots have entry and/or return captures",
+      "properties": {
+        "entry": {
+          "type": "object",
+          "properties": {
+            "arguments": {
+              "type": "object",
+              "description": "Map of argument name to CapturedValue"
+            }
+          }
+        },
+        "return": {
+          "type": "object",
+          "properties": {
+            "returnValue": {
+              "type": "object",
+              "description": "CapturedValue of the return value"
+            }
+          }
+        }
+      }
+    }
+  }
+}

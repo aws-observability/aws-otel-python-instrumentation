@@ -84,3 +84,12 @@ class TestRateLimitingSampler(TestCase):
             if sampler.should_sample(None, 1234, "name").decision != Decision.DROP:
                 sampled += 1
         self.assertEqual(sampled, 1)
+
+
+class TestFallbackSampler(TestCase):
+    def test_get_description(self):
+        sampler = _FallbackSampler(MockClock())
+        self.assertEqual(
+            sampler.get_description(),
+            "FallbackSampler{fallback sampling with sampling config of 1 req/sec and 5% of additional requests}",
+        )

@@ -17,6 +17,7 @@ fi
 python3 -m pip install --upgrade pip setuptools wheel packaging build
 mkdir -p dist
 rm -rf dist/aws_opentelemetry_distro*
+rm -rf dist/cloudwatch_plugin_otel*
 
 # Build distro
 cd aws-opentelemetry-distro
@@ -26,4 +27,14 @@ python3 -m build --outdir ../dist
 cd ../dist
 DISTRO=(aws_opentelemetry_distro-*-py3-none-any.whl)
 python3 -m pip install $DISTRO --force-reinstall
+cd ..
+
+# Build cloudwatch-plugin-otel
+cd cloudwatch-plugin-otel
+python3 -m build --outdir ../dist
+
+# Install cloudwatch-plugin-otel
+cd ../dist
+PLUGIN=(cloudwatch_plugin_otel-*-py3-none-any.whl)
+python3 -m pip install $PLUGIN --force-reinstall
 cd ..

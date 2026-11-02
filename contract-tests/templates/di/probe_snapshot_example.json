@@ -1,0 +1,48 @@
+{
+  "$comment": "Example PROBE snapshot for compute_total function - fields marked with * are dynamic",
+  "id": "*",
+  "timestamp": "*",
+  "duration": "*",
+  "service": "di-test-service",
+  "environment": "test",
+  "locationHash": "aabb000000000002",
+  "instrumentation": {
+    "location": {
+      "codeUnit": "di_flask_server",
+      "className": "di_flask_server",
+      "methodName": "compute_total",
+      "lineNumber": 0,
+      "filePath": "*",
+      "language": "python"
+    }
+  },
+  "trace": {
+    "traceId": "*",
+    "spanId": "*"
+  },
+  "thread": {
+    "id": "*",
+    "name": "*"
+  },
+  "stack": "*",
+  "captures": {
+    "entry": {
+      "arguments": {
+        "items": {
+          "type": "list",
+          "elements": [
+            {"type": "int", "value": "10"},
+            {"type": "int", "value": "20"},
+            {"type": "int", "value": "30"}
+          ]
+        }
+      }
+    },
+    "return": {
+      "returnValue": {
+        "type": "int",
+        "value": "60"
+      }
+    }
+  }
+}

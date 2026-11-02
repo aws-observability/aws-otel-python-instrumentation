@@ -303,10 +303,18 @@ class CloudWatchLogClient:
                     logger.info("Log group or stream not found, creating resources and retrying")
                     with suppress_instrumentation():
                         try:
-                            # Create log group first
-                            self._create_log_group_if_needed()
-                            # Then create log stream
-                            self._create_log_stream_if_needed()
+                            # Try creating the log stream first — the log group
+                            # may already exist (e.g. managed by IaC)
+                            try:
+                                self._create_log_stream_if_needed()
+                            except ClientError as stream_error:
+                                stream_error_code = stream_error.response.get("Error", {}).get("Code")
+                                if stream_error_code == "ResourceNotFoundException":
+                                    # Log group doesn't exist either, create both
+                                    self._create_log_group_if_needed()
+                                    self._create_log_stream_if_needed()
+                                else:
+                                    raise
 
                             # Retry the PutLogEvents call
                             response = self.logs_client.put_log_events(**put_log_events_input)

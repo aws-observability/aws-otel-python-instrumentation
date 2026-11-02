@@ -29,7 +29,10 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on:
+      - codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}
+      - image:ubuntu-8.0
+      - instance-size:large
     outputs:
       aws_default_region: ${{ steps.python_output.outputs.awsDefaultRegion}}
       python_image_tag: ${{ steps.python_output.outputs.python_image_tag}}
@@ -37,6 +40,7 @@ jobs:
       staging_registry: ${{ steps.python_output.outputs.stagingRegistry}}
       staging_repository: ${{ steps.python_output.outputs.stagingRepository}}
       staging_wheel_file: ${{ steps.staging_wheel_output.outputs.STAGING_WHEEL}}
+      pkg_version: ${{ steps.python_output.outputs.ADOT_PYTHON_VERSION }}
     steps:
       - name: Checkout Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
@@ -69,6 +73,7 @@ jobs:
           python_version: "3.10"
           package_name: aws-opentelemetry-distro
           os: ubuntu-latest
+          platforms: linux/amd64,linux/arm64
 
         # workaround: prefixing the short-sha with a 0 to create a valid
         # wheel file name as per https://peps.python.org/pep-0427/#file-name-convention
@@ -80,6 +85,18 @@ jobs:
           cd ./dist
           cp aws_opentelemetry_distro-${{ steps.python_output.outputs.ADOT_PYTHON_VERSION}}-py3-none-any.whl $staging_wheel
 
+      # The Lambda layer's tox runs every supported Python and skips missing interpreters; GitHub-hosted
+      # images preinstall them, CodeBuild's do not, so set them up explicitly (same versions as pr-build).
+      - name: Set up Python versions for the Lambda layer tests
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c #v6.0.0
+        with:
+          python-version: |
+            3.10
+            3.11
+            3.12
+            3.13
+            3.14
+
       - name: Build and Publish Lambda Staging Layer
         uses: ./.github/actions/lambda_artifacts_build
         with:
@@ -89,6 +106,12 @@ jobs:
           layer_directory: lambda-layer
           staging_s3_bucket: ${{ env.STAGING_S3_BUCKET }}
           os: ubuntu-latest
+
+      - name: Upload Lambda Layer to GitHub Actions
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
+        with:
+          name: layer.zip
+          path: lambda-layer/src/build/aws-opentelemetry-python-layer.zip
 
       - name: Upload wheel to S3
         run: |
@@ -100,11 +123,112 @@ jobs:
           name: ${{ steps.staging_wheel_output.outputs.STAGING_WHEEL}}
           path: dist/${{ steps.staging_wheel_output.outputs.STAGING_WHEEL}}
 
-      - name: Set up and run contract tests with pytest
+      - name: Upload release artifacts to GitHub Actions
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
+        with:
+          name: release-artifacts
+          path: |
+            dist/aws_opentelemetry_distro-${{ steps.python_output.outputs.ADOT_PYTHON_VERSION }}-py3-none-any.whl
+            dist/aws_opentelemetry_distro-${{ steps.python_output.outputs.ADOT_PYTHON_VERSION }}.tar.gz
+
+      # Record the exact multi-arch image digest so release-build promotes precisely the image this
+      # run built, pushed, scanned, and E2E-tested. A digest is immutable, so (unlike a tag) a later
+      # rerun cannot repoint it -- release ships exactly what was validated here.
+      - name: Record staging image digest for release promotion
         run: |
-          bash scripts/set-up-contract-tests.sh
-          pip install pytest
-          pytest contract-tests/tests
+          set -euo pipefail
+          # printf forces buildx to render the template; some buildx versions ignore a bare
+          # {{.Manifest.Digest}} and print the full inspect output instead.
+          DIGEST=$(docker buildx imagetools inspect "${{ steps.python_output.outputs.stagingImage }}" --format '{{printf "%s" .Manifest.Digest}}')
+          if ! [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "ERROR: invalid staging image digest: $DIGEST"
+            exit 1
+          fi
+          echo "${{ env.STAGING_ECR_REGISTRY }}/${{ env.STAGING_ECR_REPOSITORY }}@${DIGEST}" | tee staging-image.txt
+
+      - name: Upload staging image reference
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
+        with:
+          name: staging-image
+          path: staging-image.txt
+
+      - name: Upload distro wheel
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
+        with:
+          name: distro-wheel
+          path: dist/aws_opentelemetry_distro-${{ steps.python_output.outputs.ADOT_PYTHON_VERSION }}-py3-none-any.whl
+          retention-days: 1
+
+  build-cloudwatch-plugin-otel:
+    runs-on:
+      - codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}
+      - image:ubuntu-8.0
+      - instance-size:large
+    outputs:
+      version: ${{ steps.plugin_build.outputs.version }}
+    steps:
+      - name: Checkout Repo @ SHA - ${{ github.sha }}
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+
+      - name: Build cloudwatch-plugin-otel distributions
+        id: plugin_build
+        uses: ./.github/actions/build_cloudwatch_plugin_otel
+
+      - name: Upload cloudwatch-plugin-otel artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
+        with:
+          name: cloudwatch-plugin-otel-artifacts
+          path: plugin-dist/cloudwatch_plugin_otel-*
+
+  unit-tests:
+    runs-on:
+      - codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}
+      - image:ubuntu-8.0
+      - instance-size:large
+    needs: build
+    strategy:
+      fail-fast: false # ensures the entire test matrix is run, even if one permutation fails
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - name: Checkout Repo @ SHA - ${{ github.sha }}
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+
+      - name: Download distro wheel
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
+        with:
+          name: distro-wheel
+          path: dist
+
+      - name: Resolve wheel path
+        id: wheel
+        run: echo "path=$(ls dist/aws_opentelemetry_distro-*-py3-none-any.whl)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up and run unit tests
+        uses: ./.github/actions/unit_tests
+        with:
+          python_version: ${{ matrix.python-version }}
+          package_name: aws-opentelemetry-distro
+          os: ubuntu-latest
+          wheel_path: ${{ steps.wheel.outputs.path }}
+
+  contract-tests:
+    needs: build
+    strategy:
+      fail-fast: false # ensures the entire test matrix is run, even if one permutation fails
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    uses: ./.github/workflows/contract-tests.yml
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+    with:
+      python-version: ${{ matrix.python-version }}
+      ref: ${{ inputs.ref || github.sha }}
 
   application-signals-e2e-test:
     name: "Application Signals E2E Test"
@@ -120,8 +244,11 @@ jobs:
 
   publish-main-build-status:
     name: "Publish Main Build Status"
-    needs: [ build, application-signals-e2e-test ]
-    runs-on: ubuntu-latest
+    needs: [ build, build-cloudwatch-plugin-otel, unit-tests, contract-tests, application-signals-e2e-test ]
+    runs-on:
+      - codebuild-adot-python-runner-${{ github.run_id }}-${{ github.run_attempt }}
+      - image:ubuntu-8.0
+      - instance-size:small
     if: always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/v'))
     steps:
       - name: Configure AWS Credentials for emitting metrics
@@ -132,7 +259,7 @@ jobs:
 
       - name: Publish main build status
         run: |
-          value="${{ needs.build.result == 'success' && needs.application-signals-e2e-test.result == 'success' && '0.0' || '1.0'}}"
+          value="${{ needs.build.result == 'success' && needs.build-cloudwatch-plugin-otel.result == 'success' && needs.unit-tests.result == 'success' && needs.contract-tests.result == 'success' && needs.application-signals-e2e-test.result == 'success' && '0.0' || '1.0'}}"
           aws cloudwatch put-metric-data --namespace 'ADOT/GitHubActions' \
             --metric-name Failure \
             --dimensions repository=${{ github.repository }},branch=${{ github.ref_name }},workflow=main_build \

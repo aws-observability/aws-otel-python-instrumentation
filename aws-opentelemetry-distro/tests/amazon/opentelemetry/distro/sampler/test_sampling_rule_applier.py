@@ -4,7 +4,7 @@ import datetime
 import json
 import os
 from unittest import TestCase
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from mock_clock import MockClock
 
@@ -14,6 +14,7 @@ from amazon.opentelemetry.distro.sampler._sampling_rule import _SamplingRule
 from amazon.opentelemetry.distro.sampler._sampling_rule_applier import _SamplingRuleApplier
 from amazon.opentelemetry.distro.sampler._sampling_target import _SamplingTarget
 from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.sampling import Decision, SamplingResult, TraceIdRatioBased
 from opentelemetry.semconv.resource import ResourceAttributes
 from opentelemetry.semconv.trace import SpanAttributes
@@ -22,6 +23,7 @@ from opentelemetry.util.types import Attributes
 TEST_DIR = os.path.dirname(os.path.realpath(__file__))
 DATA_DIR = os.path.join(TEST_DIR, "data")
 
+SERVICE_NAME = "my_service"
 CLIENT_ID = "12345678901234567890abcd"
 
 
@@ -51,18 +53,7 @@ class TestSamplingRuleApplier(TestCase):
             "abc": "1234",
         }
 
-        rule_applier = _SamplingRuleApplier(default_rule, CLIENT_ID, _Clock())
-        self.assertTrue(rule_applier.matches(res, attr))
-
-        # Test again using deprecated Span Attributes
-        attr: Attributes = {
-            SpanAttributes.HTTP_TARGET: "target",
-            SpanAttributes.HTTP_METHOD: "method",
-            SpanAttributes.HTTP_URL: "url",
-            SpanAttributes.HTTP_HOST: "host",
-            "foo": "bar",
-            "abc": "1234",
-        }
+        rule_applier = _SamplingRuleApplier(default_rule, SERVICE_NAME, CLIENT_ID, _Clock())
         self.assertTrue(rule_applier.matches(res, attr))
 
     def test_applier_matches_with_all_attributes(self):
@@ -105,7 +96,7 @@ class TestSamplingRuleApplier(TestCase):
         }
         resource = Resource.create(attributes=resource_attr)
 
-        rule_applier = _SamplingRuleApplier(sampling_rule, CLIENT_ID, _Clock())
+        rule_applier = _SamplingRuleApplier(sampling_rule, SERVICE_NAME, CLIENT_ID, _Clock())
         self.assertTrue(rule_applier.matches(resource, attributes))
 
         # Test using deprecated Span Attributes
@@ -159,7 +150,7 @@ class TestSamplingRuleApplier(TestCase):
             "attr9": "Bye.World",
         }
 
-        rule_applier = _SamplingRuleApplier(sampling_rule, CLIENT_ID, _Clock())
+        rule_applier = _SamplingRuleApplier(sampling_rule, SERVICE_NAME, CLIENT_ID, _Clock())
         self.assertTrue(rule_applier.matches(Resource.get_empty(), attributes))
 
     def test_applier_wild_card_attributes_matches_http_span_attributes(self):
@@ -185,7 +176,7 @@ class TestSamplingRuleApplier(TestCase):
             SpanAttributes.URL_FULL: "http://127.0.0.1:5000/helloworld",
         }
 
-        rule_applier = _SamplingRuleApplier(sampling_rule, CLIENT_ID, _Clock())
+        rule_applier = _SamplingRuleApplier(sampling_rule, SERVICE_NAME, CLIENT_ID, _Clock())
         self.assertTrue(rule_applier.matches(Resource.get_empty(), attributes))
 
         # Test using deprecated Span Attributes
@@ -221,7 +212,7 @@ class TestSamplingRuleApplier(TestCase):
         }
         resource = Resource.create(attributes=resource_attr)
 
-        rule_applier = _SamplingRuleApplier(sampling_rule, CLIENT_ID, _Clock())
+        rule_applier = _SamplingRuleApplier(sampling_rule, SERVICE_NAME, CLIENT_ID, _Clock())
         self.assertTrue(rule_applier.matches(resource, attributes))
         self.assertTrue(rule_applier.matches(resource, None))
         self.assertTrue(rule_applier.matches(Resource.get_empty(), attributes))
@@ -253,7 +244,7 @@ class TestSamplingRuleApplier(TestCase):
         }
         resource = Resource.create(attributes=resource_attr)
 
-        rule_applier = _SamplingRuleApplier(sampling_rule, CLIENT_ID, _Clock())
+        rule_applier = _SamplingRuleApplier(sampling_rule, SERVICE_NAME, CLIENT_ID, _Clock())
         self.assertFalse(rule_applier.matches(resource, attributes))
 
     def test_applier_matches_with_http_target(self):
@@ -280,7 +271,7 @@ class TestSamplingRuleApplier(TestCase):
         }
         resource = Resource.create(attributes=resource_attr)
 
-        rule_applier = _SamplingRuleApplier(sampling_rule, CLIENT_ID, _Clock())
+        rule_applier = _SamplingRuleApplier(sampling_rule, SERVICE_NAME, CLIENT_ID, _Clock())
         self.assertTrue(rule_applier.matches(resource, attributes))
 
         # Test again using deprecated Span Attributes
@@ -319,7 +310,7 @@ class TestSamplingRuleApplier(TestCase):
         }
         resource = Resource.create(attributes=resource_attr)
 
-        rule_applier = _SamplingRuleApplier(sampling_rule, CLIENT_ID, _Clock())
+        rule_applier = _SamplingRuleApplier(sampling_rule, SERVICE_NAME, CLIENT_ID, _Clock())
         self.assertTrue(rule_applier.matches(resource, attributes))
 
         # Test again using deprecated Span Attributes
@@ -363,8 +354,118 @@ class TestSamplingRuleApplier(TestCase):
         }
         resource = Resource.create(attributes=resource_attr)
 
-        rule_applier = _SamplingRuleApplier(sampling_rule, CLIENT_ID, _Clock())
+        rule_applier = _SamplingRuleApplier(sampling_rule, SERVICE_NAME, CLIENT_ID, _Clock())
         self.assertFalse(rule_applier.matches(resource, attributes))
+
+    def test_applier_with_boost(self):
+        sampling_rule = _SamplingRule(
+            Attributes={"abc": "123", "def": "456", "ghi": "789"},
+            FixedRate=0.0,
+            HTTPMethod="*",
+            Host="*",
+            Priority=20,
+            ReservoirSize=0,
+            ResourceARN="*",
+            RuleARN="arn:aws:xray:us-east-1:999999999999:sampling-rule/test",
+            RuleName="test",
+            ServiceName="*",
+            ServiceType="*",
+            URLPath="*",
+            Version=1,
+            SamplingRateBoost={"MaxRate": 0.9, "CooldownWindowMinutes": 5},
+        )
+        mock_clock = MockClock()
+        rule_applier = _SamplingRuleApplier(sampling_rule, SERVICE_NAME, CLIENT_ID, mock_clock)
+
+        # Appropriately detected sampling rule with boost
+        self.assertTrue(rule_applier.has_boost())
+
+        # No reservoir, always use fixed rate (drop)
+        self.assertEqual(rule_applier.should_sample(None, 0, "name").decision, Decision.DROP)
+        self.assertEqual(rule_applier.should_sample(None, 0, "name").decision, Decision.DROP)
+
+        rule_applier = rule_applier.with_target(
+            _SamplingTarget(
+                FixedRate=0.0,
+                Interval=5,
+                ReservoirQuota=0,
+                ReservoirQuotaTTL=0,
+                SamplingBoost={
+                    "BoostRate": 1.0,
+                    "BoostRateTTL": (mock_clock.now() + datetime.timedelta(seconds=20)).timestamp(),
+                },
+                RuleName="test",
+            )
+        )
+
+        # We should start sampling at this point
+        self.assertEqual(rule_applier.should_sample(None, 0, "name").decision, Decision.RECORD_AND_SAMPLE)
+
+        # After waiting 10 seconds, we should still be sampling
+        mock_clock.add_time(seconds=10)
+        self.assertEqual(rule_applier.should_sample(None, 0, "name").decision, Decision.RECORD_AND_SAMPLE)
+
+        # After 30 seconds, we should stop sampling
+        mock_clock.add_time(seconds=20)
+        self.assertEqual(rule_applier.should_sample(None, 0, "name").decision, Decision.DROP)
+
+    def test_count_trace(self):
+        sampling_rule = _SamplingRule(
+            Attributes={"abc": "123", "def": "456", "ghi": "789"},
+            FixedRate=0.0,
+            HTTPMethod="*",
+            Host="*",
+            Priority=20,
+            ReservoirSize=0,
+            ResourceARN="*",
+            RuleARN="arn:aws:xray:us-east-1:999999999999:sampling-rule/test",
+            RuleName="test",
+            ServiceName="*",
+            ServiceType="*",
+            URLPath="*",
+            Version=1,
+            SamplingRateBoost={"MaxRate": 0.9, "CooldownWindowMinutes": 5},
+        )
+        mock_clock = MockClock()
+        rule_applier = _SamplingRuleApplier(sampling_rule, SERVICE_NAME, CLIENT_ID, mock_clock)
+
+        _, boost_stats = rule_applier.get_then_reset_statistics()
+        self.assertEqual(boost_stats["TotalCount"], 0)
+
+        rule_applier.count_trace()
+        rule_applier.count_trace()
+        rule_applier.count_trace()
+
+        _, boost_stats = rule_applier.get_then_reset_statistics()
+        self.assertEqual(boost_stats["TotalCount"], 3)
+        self.assertEqual(boost_stats["AnomalyCount"], 0)
+        self.assertEqual(boost_stats["SampledAnomalyCount"], 0)
+
+        # Snapshotting again should have reset the statistics
+        _, boost_stats = rule_applier.get_then_reset_statistics()
+        self.assertEqual(boost_stats["TotalCount"], 0)
+        self.assertEqual(boost_stats["AnomalyCount"], 0)
+        self.assertEqual(boost_stats["SampledAnomalyCount"], 0)
+
+        # Decision to separate by trace ID is made in XrayRulesSampler class, so we can ignore
+        # trace/span ID in span context here
+        readable_span_mock: ReadableSpan = MagicMock()
+        # Mock sampling the first two traces
+        readable_span_mock.context.trace_flags.sampled = True
+        rule_applier.count_trace()
+        rule_applier.count_anomaly_trace(readable_span_mock)
+        rule_applier.count_trace()
+        rule_applier.count_anomaly_trace(readable_span_mock)
+
+        # Mock not sampling the last trace
+        readable_span_mock.context.trace_flags.sampled = False
+        rule_applier.count_trace()
+        rule_applier.count_anomaly_trace(readable_span_mock)
+
+        _, boost_stats = rule_applier.get_then_reset_statistics()
+        self.assertEqual(boost_stats["TotalCount"], 3)
+        self.assertEqual(boost_stats["AnomalyCount"], 3)
+        self.assertEqual(boost_stats["SampledAnomalyCount"], 2)
 
     def test_update_sampling_applier(self):
         sampling_rule = _SamplingRule(
@@ -386,10 +487,12 @@ class TestSamplingRuleApplier(TestCase):
         time_now = datetime.datetime.fromtimestamp(1707551387.0)
         mock_clock = MockClock(time_now)
 
-        rule_applier = _SamplingRuleApplier(sampling_rule, CLIENT_ID, mock_clock)
+        rule_applier = _SamplingRuleApplier(sampling_rule, SERVICE_NAME, CLIENT_ID, mock_clock)
 
-        self.assertEqual(rule_applier._SamplingRuleApplier__fixed_rate_sampler._rate, 0.11)
-        self.assertEqual(rule_applier._SamplingRuleApplier__reservoir_sampler._RateLimitingSampler__reservoir._quota, 1)
+        self.assertEqual(rule_applier._SamplingRuleApplier__fixed_rate_sampler._root._rate, 0.11)
+        self.assertEqual(
+            rule_applier._SamplingRuleApplier__reservoir_sampler._root._RateLimitingSampler__reservoir._quota, 1
+        )
         self.assertEqual(rule_applier._SamplingRuleApplier__reservoir_expiry, datetime.datetime.max)
 
         target = _SamplingTarget(
@@ -401,9 +504,9 @@ class TestSamplingRuleApplier(TestCase):
         time_now = datetime.datetime.fromtimestamp(target.ReservoirQuotaTTL)
         mock_clock.set_time(time_now)
 
-        self.assertEqual(rule_applier._SamplingRuleApplier__fixed_rate_sampler._rate, 1.0)
+        self.assertEqual(rule_applier._SamplingRuleApplier__fixed_rate_sampler._root._rate, 1.0)
         self.assertEqual(
-            rule_applier._SamplingRuleApplier__reservoir_sampler._RateLimitingSampler__reservoir._quota, 30
+            rule_applier._SamplingRuleApplier__reservoir_sampler._root._RateLimitingSampler__reservoir._quota, 30
         )
         self.assertEqual(rule_applier._SamplingRuleApplier__reservoir_expiry, mock_clock.now())
 
@@ -423,12 +526,14 @@ class TestSamplingRuleApplier(TestCase):
     @patch.object(_RateLimitingSampler, "should_sample", fake_reservoir_do_sample)
     def test_populate_and_get_then_reset_statistics(self):
         mock_clock = MockClock()
-        rule_applier = _SamplingRuleApplier(_SamplingRule(RuleName="test", ReservoirSize=10), CLIENT_ID, mock_clock)
+        rule_applier = _SamplingRuleApplier(
+            _SamplingRule(RuleName="test", ReservoirSize=10), SERVICE_NAME, CLIENT_ID, mock_clock
+        )
         rule_applier.should_sample(None, 0, "name")
         rule_applier.should_sample(None, 0, "name")
         rule_applier.should_sample(None, 0, "name")
 
-        statistics = rule_applier.get_then_reset_statistics()
+        statistics, _ = rule_applier.get_then_reset_statistics()
 
         self.assertEqual(statistics["ClientID"], CLIENT_ID)
         self.assertEqual(statistics["RuleName"], "test")
@@ -445,7 +550,10 @@ class TestSamplingRuleApplier(TestCase):
         time_now = datetime.datetime.fromtimestamp(1707551387.0)
         mock_clock = MockClock(time_now)
         rule_applier = _SamplingRuleApplier(
-            _SamplingRule(RuleName="test", ReservoirSize=reservoir_size, FixedRate=0.0), CLIENT_ID, mock_clock
+            _SamplingRule(RuleName="test", ReservoirSize=reservoir_size, FixedRate=0.0),
+            SERVICE_NAME,
+            CLIENT_ID,
+            mock_clock,
         )
 
         mock_clock.add_time(seconds=2.0)

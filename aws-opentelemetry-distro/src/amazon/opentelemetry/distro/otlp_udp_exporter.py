@@ -7,6 +7,7 @@ from typing import Dict, Optional, Sequence, Tuple
 
 from typing_extensions import override
 
+from amazon.opentelemetry.distro._udp_span_payload import build_payloads, max_payload_size
 from opentelemetry.exporter.otlp.proto.common.metrics_encoder import encode_metrics
 from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
 from opentelemetry.sdk.metrics._internal.aggregation import AggregationTemporality
@@ -106,16 +107,26 @@ class OTLPUdpSpanExporter(SpanExporter):
 
     @override
     def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
-        serialized_data = encode_spans(spans).SerializeToString()
+        prefix = (
+            FORMAT_OTEL_SAMPLED_TRACES_BINARY_PREFIX if self._sampled else FORMAT_OTEL_UNSAMPLED_TRACES_BINARY_PREFIX
+        )
+        max_size = max_payload_size(len(PROTOCOL_HEADER) + len(prefix))
+        result = SpanExportResult.SUCCESS
 
         try:
-            prefix = (
-                FORMAT_OTEL_SAMPLED_TRACES_BINARY_PREFIX
-                if self._sampled
-                else FORMAT_OTEL_UNSAMPLED_TRACES_BINARY_PREFIX
-            )
-            self._udp_exporter.send_data(data=serialized_data, signal_format_prefix=prefix)
-            return SpanExportResult.SUCCESS
+            # Split by encoded size so one oversized batch does not drop every span in it
+            for _, serialized_data in build_payloads(
+                list(spans), lambda batch: encode_spans(batch).SerializeToString(), max_size
+            ):
+                if serialized_data is None:
+                    result = SpanExportResult.FAILURE
+                    continue
+                try:
+                    self._udp_exporter.send_data(data=serialized_data, signal_format_prefix=prefix)
+                except Exception as exc:  # pylint: disable=broad-except
+                    _logger.error("Error exporting spans: %s", exc)
+                    result = SpanExportResult.FAILURE
+            return result
         except Exception as exc:  # pylint: disable=broad-except
             _logger.error("Error exporting spans: %s", exc)
             return SpanExportResult.FAILURE

@@ -19,16 +19,12 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_BEDROCK_AGENTCORE_RUNTIME_ENDPOINT_ARN,
     AWS_BEDROCK_DATA_SOURCE_ID,
     AWS_BEDROCK_GUARDRAIL_ARN,
-    AWS_BEDROCK_GUARDRAIL_ID,
-    AWS_BEDROCK_KNOWLEDGE_BASE_ID,
     AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER,
     AWS_DYNAMODB_TABLE_ARN,
     AWS_GATEWAY_TARGET_ID,
     AWS_KINESIS_STREAM_ARN,
-    AWS_KINESIS_STREAM_NAME,
     AWS_LAMBDA_FUNCTION_ARN,
     AWS_LAMBDA_FUNCTION_NAME,
-    AWS_LAMBDA_RESOURCEMAPPING_ID,
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
     AWS_REMOTE_DB_USER,
@@ -40,13 +36,8 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_REMOTE_RESOURCE_REGION,
     AWS_REMOTE_RESOURCE_TYPE,
     AWS_REMOTE_SERVICE,
-    AWS_SECRETSMANAGER_SECRET_ARN,
-    AWS_SNS_TOPIC_ARN,
     AWS_SPAN_KIND,
     AWS_SQS_QUEUE_NAME,
-    AWS_SQS_QUEUE_URL,
-    AWS_STEPFUNCTIONS_ACTIVITY_ARN,
-    AWS_STEPFUNCTIONS_STATEMACHINE_ARN,
 )
 from amazon.opentelemetry.distro._aws_resource_attribute_configurator import get_service_attribute
 from amazon.opentelemetry.distro._aws_span_processing_util import (
@@ -71,17 +62,29 @@ from amazon.opentelemetry.distro.metric_attribute_generator import (
     SERVICE_METRIC,
     MetricAttributeGenerator,
 )
-from amazon.opentelemetry.distro.patches.semconv._incubating.attributes.gen_ai_attributes import (
+from amazon.opentelemetry.distro.presigned_url_attributor import PresignedUrlAttribution, PresignedUrlAttributor
+from amazon.opentelemetry.distro.regional_resource_arn_parser import RegionalResourceArnParser
+from amazon.opentelemetry.distro.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_BROWSER_ID,
     GEN_AI_CODE_INTERPRETER_ID,
     GEN_AI_GATEWAY_ID,
     GEN_AI_MEMORY_ID,
     GEN_AI_RUNTIME_ID,
 )
-from amazon.opentelemetry.distro.regional_resource_arn_parser import RegionalResourceArnParser
 from amazon.opentelemetry.distro.sqs_url_parser import SqsUrlParser
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import BoundedAttributes, ReadableSpan
+from opentelemetry.semconv._incubating.attributes.aws_attributes import (
+    AWS_BEDROCK_GUARDRAIL_ID,
+    AWS_BEDROCK_KNOWLEDGE_BASE_ID,
+    AWS_KINESIS_STREAM_NAME,
+    AWS_LAMBDA_RESOURCE_MAPPING_ID,
+    AWS_SECRETSMANAGER_SECRET_ARN,
+    AWS_SNS_TOPIC_ARN,
+    AWS_SQS_QUEUE_URL,
+    AWS_STEP_FUNCTIONS_ACTIVITY_ARN,
+    AWS_STEP_FUNCTIONS_STATE_MACHINE_ARN,
+)
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import GEN_AI_REQUEST_MODEL
 from opentelemetry.semconv.trace import SpanAttributes
 
@@ -134,6 +137,15 @@ _LAMBDA_INVOKE_OPERATION: str = "Invoke"
 # Special DEPENDENCY attribute value if GRAPHQL_OPERATION_TYPE attribute key is present.
 _GRAPHQL: str = "graphql"
 
+# Opt-in (default off) config that enables attributing raw-HTTP presigned AWS URL calls (e.g.
+# presigned S3 URLs) as AWS dependencies instead of generic HTTP calls.
+_PRESIGNED_URL_ATTRIBUTION_ENABLED_CONFIG: str = "OTEL_AWS_APPLICATION_SIGNALS_PRESIGNED_URL_ATTRIBUTION_ENABLED"
+
+
+def _is_presigned_url_attribution_enabled() -> bool:
+    return os.environ.get(_PRESIGNED_URL_ATTRIBUTION_ENABLED_CONFIG, "false").strip().lower() == "true"
+
+
 # AWS SDK service mapping for normalization
 _AWS_SDK_SERVICE_MAPPING = {
     "Bedrock Agent": _NORMALIZED_BEDROCK_SERVICE_NAME,
@@ -184,8 +196,12 @@ def _generate_dependency_metric_attributes(span: ReadableSpan, resource: Resourc
     attributes: BoundedAttributes = BoundedAttributes(immutable=False)
     _set_service(resource, span, attributes)
     _set_egress_operation(span, attributes)
-    _set_remote_service_and_operation(span, attributes)
-    is_remote_identifier_present = _set_remote_type_and_identifier(span, attributes)
+    # Presigned AWS URL attribution is resolved lazily as a fallback inside
+    # _set_remote_service_and_operation (only when no higher-priority remote attribute matched). It
+    # returns the resolved attribution, if any, so the remote resource can reuse it without
+    # re-parsing the URL.
+    presigned_attribution = _set_remote_service_and_operation(span, attributes)
+    is_remote_identifier_present = _set_remote_type_and_identifier(span, attributes, presigned_attribution)
     if is_remote_identifier_present:
         is_remote_account_id_present = _set_remote_account_id_and_region(span, attributes)
         if not is_remote_account_id_present:
@@ -239,7 +255,10 @@ def _set_egress_operation(span: ReadableSpan, attributes: BoundedAttributes) -> 
     attributes[AWS_LOCAL_OPERATION] = operation
 
 
-def _set_remote_service_and_operation(span: ReadableSpan, attributes: BoundedAttributes) -> None:
+# pylint: disable=too-many-branches
+def _set_remote_service_and_operation(
+    span: ReadableSpan, attributes: BoundedAttributes
+) -> Optional[PresignedUrlAttribution]:
     """
     Remote attributes (only for Client and Producer spans) are generated based on low-cardinality span attributes, in
     priority order.
@@ -271,6 +290,7 @@ def _set_remote_service_and_operation(span: ReadableSpan, attributes: BoundedAtt
     """
     remote_service: str = UNKNOWN_REMOTE_SERVICE
     remote_operation: str = UNKNOWN_REMOTE_OPERATION
+    presigned_attribution: Optional[PresignedUrlAttribution] = None
     if is_key_present(span, AWS_REMOTE_SERVICE) or is_key_present(span, AWS_REMOTE_OPERATION):
         remote_service = _get_remote_service(span, AWS_REMOTE_SERVICE)
         remote_operation = _get_remote_operation(span, AWS_REMOTE_OPERATION)
@@ -292,6 +312,14 @@ def _set_remote_service_and_operation(span: ReadableSpan, attributes: BoundedAtt
     elif is_key_present(span, _GRAPHQL_OPERATION_TYPE):
         remote_service = _GRAPHQL
         remote_operation = _get_remote_operation(span, _GRAPHQL_OPERATION_TYPE)
+    elif _is_presigned_url_attribution_enabled() and not is_aws_sdk_span(span):
+        # Fallback for raw HTTP calls using a presigned URL. Exclude AWS SDK spans explicitly: they
+        # use the SDK attribution path even when their RPC service or method attributes are absent.
+        # Parse the URL only when we reach this branch.
+        presigned_attribution = PresignedUrlAttributor.attribute(span)
+        if presigned_attribution is not None:
+            remote_service = presigned_attribution.get_remote_service()
+            remote_operation = presigned_attribution.get_remote_operation()
 
     # Peer service takes priority as RemoteService over everything but AWS Remote.
     if is_key_present(span, _PEER_SERVICE) and not is_key_present(span, AWS_REMOTE_SERVICE):
@@ -300,11 +328,16 @@ def _set_remote_service_and_operation(span: ReadableSpan, attributes: BoundedAtt
     # Try to derive RemoteService and RemoteOperation from the other related attributes.
     if remote_service == UNKNOWN_REMOTE_SERVICE:
         remote_service = _generate_remote_service(span)
-    if remote_operation == UNKNOWN_REMOTE_OPERATION:
+    # When a presigned AWS URL was attributed, keep its remote operation as-is. Resolvers
+    # intentionally return UnknownRemoteOperation for ambiguous calls (e.g. a bucket-level S3 GET),
+    # and falling back to the generic HTTP path here would reintroduce the high-cardinality
+    # "GET /<key>" operation this feature is meant to avoid.
+    if remote_operation == UNKNOWN_REMOTE_OPERATION and presigned_attribution is None:
         remote_operation = _generate_remote_operation(span)
 
     attributes[AWS_REMOTE_SERVICE] = remote_service
     attributes[AWS_REMOTE_OPERATION] = remote_operation
+    return presigned_attribution
 
 
 def _get_remote_service(span: ReadableSpan, remote_service_key: str) -> str:
@@ -414,7 +447,11 @@ def _generate_remote_operation(span: ReadableSpan) -> str:
 
 
 # pylint: disable=too-many-branches,too-many-statements
-def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttributes) -> bool:
+def _set_remote_type_and_identifier(
+    span: ReadableSpan,
+    attributes: BoundedAttributes,
+    presigned_attribution: Optional[PresignedUrlAttribution] = None,
+) -> bool:
     """
     Remote resource attributes {@link AwsAttributeKeys#AWS_REMOTE_RESOURCE_TYPE} and {@link
     AwsAttributeKeys#AWS_REMOTE_RESOURCE_IDENTIFIER} are used to store information about the resource associated with
@@ -509,24 +546,24 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
                 RegionalResourceArnParser.extract_resource_name_from_arn(span.attributes.get(AWS_SNS_TOPIC_ARN))
             )
             cloudformation_primary_identifier = _escape_delimiters(span.attributes.get(AWS_SNS_TOPIC_ARN))
-        elif is_key_present(span, AWS_STEPFUNCTIONS_STATEMACHINE_ARN):
+        elif is_key_present(span, AWS_STEP_FUNCTIONS_STATE_MACHINE_ARN):
             remote_resource_type = _NORMALIZED_STEPFUNCTIONS_SERVICE_NAME + "::StateMachine"
             remote_resource_identifier = _escape_delimiters(
                 RegionalResourceArnParser.extract_resource_name_from_arn(
-                    span.attributes.get(AWS_STEPFUNCTIONS_STATEMACHINE_ARN)
+                    span.attributes.get(AWS_STEP_FUNCTIONS_STATE_MACHINE_ARN)
                 )
             )
             cloudformation_primary_identifier = _escape_delimiters(
-                span.attributes.get(AWS_STEPFUNCTIONS_STATEMACHINE_ARN)
+                span.attributes.get(AWS_STEP_FUNCTIONS_STATE_MACHINE_ARN)
             )
-        elif is_key_present(span, AWS_STEPFUNCTIONS_ACTIVITY_ARN):
+        elif is_key_present(span, AWS_STEP_FUNCTIONS_ACTIVITY_ARN):
             remote_resource_type = _NORMALIZED_STEPFUNCTIONS_SERVICE_NAME + "::Activity"
             remote_resource_identifier = _escape_delimiters(
                 RegionalResourceArnParser.extract_resource_name_from_arn(
-                    span.attributes.get(AWS_STEPFUNCTIONS_ACTIVITY_ARN)
+                    span.attributes.get(AWS_STEP_FUNCTIONS_ACTIVITY_ARN)
                 )
             )
-            cloudformation_primary_identifier = _escape_delimiters(span.attributes.get(AWS_STEPFUNCTIONS_ACTIVITY_ARN))
+            cloudformation_primary_identifier = _escape_delimiters(span.attributes.get(AWS_STEP_FUNCTIONS_ACTIVITY_ARN))
         elif is_key_present(span, AWS_LAMBDA_FUNCTION_NAME):
             # For non-Invoke Lambda operations, treat Lambda as a resource,
             # see normalize_remote_service_name for more information.
@@ -534,9 +571,14 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
                 remote_resource_type = _NORMALIZED_LAMBDA_SERVICE_NAME + "::Function"
                 remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_LAMBDA_FUNCTION_NAME))
                 cloudformation_primary_identifier = _escape_delimiters(span.attributes.get(AWS_LAMBDA_FUNCTION_ARN))
-        elif is_key_present(span, AWS_LAMBDA_RESOURCEMAPPING_ID):
+        elif is_key_present(span, AWS_LAMBDA_RESOURCE_MAPPING_ID):
             remote_resource_type = _NORMALIZED_LAMBDA_SERVICE_NAME + "::EventSourceMapping"
-            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_LAMBDA_RESOURCEMAPPING_ID))
+            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_LAMBDA_RESOURCE_MAPPING_ID))
+    elif presigned_attribution is not None:
+        remote_resource = presigned_attribution.get_remote_resource()
+        if remote_resource is not None:
+            remote_resource_type = remote_resource.get_type()
+            remote_resource_identifier = _escape_delimiters(remote_resource.get_identifier())
     elif is_db_span(span):
         remote_resource_type = _DB_CONNECTION_STRING_TYPE
         remote_resource_identifier = _get_db_connection(span)
@@ -564,8 +606,8 @@ def _set_remote_account_id_and_region(span: ReadableSpan, attributes: BoundedAtt
         AWS_KINESIS_STREAM_ARN,
         AWS_SNS_TOPIC_ARN,
         AWS_SECRETSMANAGER_SECRET_ARN,
-        AWS_STEPFUNCTIONS_STATEMACHINE_ARN,
-        AWS_STEPFUNCTIONS_ACTIVITY_ARN,
+        AWS_STEP_FUNCTIONS_STATE_MACHINE_ARN,
+        AWS_STEP_FUNCTIONS_ACTIVITY_ARN,
         AWS_BEDROCK_GUARDRAIL_ARN,
         AWS_LAMBDA_FUNCTION_ARN,
     ]

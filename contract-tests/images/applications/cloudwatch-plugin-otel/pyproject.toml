@@ -1,0 +1,6 @@
+[project]
+name = "cloudwatch-plugin-otel-contract-test"
+description = "Contract-test application for the CloudWatch OpenTelemetry plugin"
+version = "1.0.0"
+license = "Apache-2.0"
+requires-python = ">=3.10"

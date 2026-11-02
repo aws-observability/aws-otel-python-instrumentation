@@ -7,8 +7,8 @@ name = "aws-opentelemetry-distro"
 dynamic = ["version"]
 description = "AWS OpenTelemetry Python Distro"
 readme = "README.rst"
-license = "Apache-2.0"
-requires-python = ">=3.9"
+license = {text = "Apache-2.0"}
+requires-python = ">=3.10"
 authors = [
   { name = "Amazon Web Services" },
 ]
@@ -18,71 +18,87 @@ classifiers = [
   "License :: OSI Approved :: Apache Software License",
   "Programming Language :: Python",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
 ]
 
 dependencies = [
-  "opentelemetry-api == 1.33.1",
-  "opentelemetry-sdk == 1.33.1",
-  "opentelemetry-exporter-otlp-proto-grpc == 1.33.1",
-  "opentelemetry-exporter-otlp-proto-http == 1.33.1",
-  "opentelemetry-propagator-b3 == 1.33.1",
-  "opentelemetry-propagator-jaeger == 1.33.1",
-  "opentelemetry-exporter-otlp-proto-common == 1.33.1",
-  "opentelemetry-sdk-extension-aws == 2.0.2",
-  "opentelemetry-propagator-aws-xray == 1.0.1",
-  "opentelemetry-distro == 0.54b1",
-  "opentelemetry-processor-baggage == 0.54b1",
-  "opentelemetry-propagator-ot-trace == 0.54b1",
-  "opentelemetry-instrumentation == 0.54b1",
-  "opentelemetry-instrumentation-aws-lambda == 0.54b1",
-  "opentelemetry-instrumentation-aio-pika == 0.54b1",
-  "opentelemetry-instrumentation-aiohttp-client == 0.54b1",
-  "opentelemetry-instrumentation-aiokafka == 0.54b1",
-  "opentelemetry-instrumentation-aiopg == 0.54b1",
-  "opentelemetry-instrumentation-asgi == 0.54b1",
-  "opentelemetry-instrumentation-asyncpg == 0.54b1",
-  "opentelemetry-instrumentation-boto == 0.54b1",
-  "opentelemetry-instrumentation-boto3sqs == 0.54b1",
-  "opentelemetry-instrumentation-botocore == 0.54b1",
-  "opentelemetry-instrumentation-celery == 0.54b1",
-  "opentelemetry-instrumentation-confluent-kafka == 0.54b1",
-  "opentelemetry-instrumentation-dbapi == 0.54b1",
-  "opentelemetry-instrumentation-django == 0.54b1",
-  "opentelemetry-instrumentation-elasticsearch == 0.54b1",
-  "opentelemetry-instrumentation-falcon == 0.54b1",
-  "opentelemetry-instrumentation-fastapi == 0.54b1",
-  "opentelemetry-instrumentation-flask == 0.54b1",
-  "opentelemetry-instrumentation-grpc == 0.54b1",
-  "opentelemetry-instrumentation-httpx == 0.54b1",
-  "opentelemetry-instrumentation-jinja2 == 0.54b1",
-  "opentelemetry-instrumentation-kafka-python == 0.54b1",
-  "opentelemetry-instrumentation-logging == 0.54b1",
-  "opentelemetry-instrumentation-mysql == 0.54b1",
-  "opentelemetry-instrumentation-mysqlclient == 0.54b1",
-  "opentelemetry-instrumentation-pika == 0.54b1",
-  "opentelemetry-instrumentation-psycopg2 == 0.54b1",
-  "opentelemetry-instrumentation-pymemcache == 0.54b1",
-  "opentelemetry-instrumentation-pymongo == 0.54b1",
-  "opentelemetry-instrumentation-pymysql == 0.54b1",
-  "opentelemetry-instrumentation-pyramid == 0.54b1",
-  "opentelemetry-instrumentation-redis == 0.54b1",
-  "opentelemetry-instrumentation-remoulade == 0.54b1",
-  "opentelemetry-instrumentation-requests == 0.54b1",
-  "opentelemetry-instrumentation-sqlalchemy == 0.54b1",
-  "opentelemetry-instrumentation-sqlite3 == 0.54b1",
-  "opentelemetry-instrumentation-starlette == 0.54b1",
-  "opentelemetry-instrumentation-system-metrics == 0.54b1",
-  "opentelemetry-instrumentation-tornado == 0.54b1",
-  "opentelemetry-instrumentation-tortoiseorm == 0.54b1",
-  "opentelemetry-instrumentation-urllib == 0.54b1",
-  "opentelemetry-instrumentation-urllib3 == 0.54b1",
-  "opentelemetry-instrumentation-wsgi == 0.54b1",
-  "opentelemetry-instrumentation-cassandra == 0.54b1",
+  "opentelemetry-api == 1.45.1",
+  "opentelemetry-sdk == 1.45.1",
+  "opentelemetry-exporter-otlp-proto-grpc == 1.45.1",
+  "opentelemetry-exporter-otlp-proto-http == 1.45.1",
+  "opentelemetry-propagator-b3 == 1.45.1",
+  "opentelemetry-propagator-jaeger == 1.45.1",
+  "opentelemetry-exporter-otlp-proto-common == 1.45.1",
+  "opentelemetry-sdk-extension-aws == 2.1.0",
+  "opentelemetry-propagator-aws-xray == 1.0.2",
+  "opentelemetry-distro == 0.66b1",
+  "opentelemetry-processor-baggage == 0.66b1",
+  "opentelemetry-propagator-ot-trace == 0.66b1",
+  "opentelemetry-instrumentation == 0.66b1",
+  "opentelemetry-instrumentation-aws-lambda == 0.66b1",
+  "opentelemetry-instrumentation-aio-pika == 0.66b1",
+  "opentelemetry-instrumentation-aiohttp-client == 0.66b1",
+  "opentelemetry-instrumentation-aiokafka == 0.66b1",
+  "opentelemetry-instrumentation-aiopg == 0.66b1",
+  "opentelemetry-instrumentation-asgi == 0.66b1",
+  "opentelemetry-instrumentation-asyncpg == 0.66b1",
+  "opentelemetry-instrumentation-boto3sqs == 0.66b1",
+  "opentelemetry-instrumentation-botocore == 0.66b1",
+  "opentelemetry-instrumentation-celery == 0.66b1",
+  "opentelemetry-instrumentation-confluent-kafka == 0.66b1",
+  "opentelemetry-instrumentation-dbapi == 0.66b1",
+  "opentelemetry-instrumentation-django == 0.66b1",
+  "opentelemetry-instrumentation-falcon == 0.66b1",
+  "opentelemetry-instrumentation-fastapi == 0.66b1",
+  "opentelemetry-instrumentation-flask == 0.66b1",
+  "opentelemetry-instrumentation-grpc == 0.66b1",
+  "opentelemetry-instrumentation-httpx == 0.66b1",
+  "opentelemetry-instrumentation-jinja2 == 0.66b1",
+  "opentelemetry-instrumentation-kafka-python == 0.66b1",
+  "opentelemetry-instrumentation-logging == 0.66b1",
+  "opentelemetry-instrumentation-mysql == 0.66b1",
+  "opentelemetry-instrumentation-mysqlclient == 0.66b1",
+  "opentelemetry-instrumentation-pika == 0.66b1",
+  "opentelemetry-instrumentation-psycopg2 == 0.66b1",
+  "opentelemetry-instrumentation-pymemcache == 0.66b1",
+  "opentelemetry-instrumentation-pymongo == 0.66b1",
+  "opentelemetry-instrumentation-pymysql == 0.66b1",
+  "opentelemetry-instrumentation-pyramid == 0.66b1",
+  "opentelemetry-instrumentation-redis == 0.66b1",
+  "opentelemetry-instrumentation-remoulade == 0.66b1",
+  "opentelemetry-instrumentation-requests == 0.66b1",
+  "opentelemetry-instrumentation-sqlalchemy == 0.66b1",
+  "opentelemetry-instrumentation-sqlite3 == 0.66b1",
+  "opentelemetry-instrumentation-starlette == 0.66b1",
+  "opentelemetry-instrumentation-system-metrics == 0.66b1",
+  "opentelemetry-instrumentation-threading == 0.66b1",
+  "opentelemetry-instrumentation-tornado == 0.66b1",
+  "opentelemetry-instrumentation-tortoiseorm == 0.66b1",
+  "opentelemetry-instrumentation-urllib == 0.66b1",
+  "opentelemetry-instrumentation-urllib3 == 0.66b1",
+  "opentelemetry-instrumentation-wsgi == 0.66b1",
+  "opentelemetry-instrumentation-cassandra == 0.66b1",
+  "cachetools == 6.2.4",
+  "urllib3 >= 2.7.0; python_version >= '3.10'",
+  # Imported directly by the X-Ray remote sampler, the SigV4 AwsAuthSession used by the AWS OTLP exporters and
+  # Dynamic Instrumentation. No longer a transitive dependency since opentelemetry-exporter-otlp-proto-http 1.45.0.
+  "requests ~= 2.25",
+  # Pulled in by requests and bundled into the Lambda layer. 2026.10.18 removes the eMudhra (emSign) roots whose
+  # intermediates were compromised (GHSA-6q48-6c7w-9gw2), so older bundles must not resolve.
+  "certifi >= 2026.10.18",
+  "protobuf == 6.33.5",
+  "pyyaml == 6.0.3",
+  # Used by Dynamic Instrumentation to parse ISO-8601 timestamps from polled configurations
+  # (debugger/_data_models.py). Required on all supported Python versions, hence a core dependency.
+  "python-dateutil >= 2.7.0",
+  # Used by Dynamic Instrumentation's bytecode-injection engine for line-level instrumentation on
+  # Python 3.10-3.11 (3.12+ uses the built-in sys.monitoring instead, so the marker excludes it there).
+  # A core dependency so `pip install aws-opentelemetry-distro` gives a fully working feature with no extras.
+  "bytecode; python_version >= '3.10' and python_version < '3.12'",
 ]
 
 [project.optional-dependencies]
@@ -98,6 +114,23 @@ aws_configurator = "amazon.opentelemetry.distro.aws_opentelemetry_configurator:A
 
 [project.entry-points.opentelemetry_distro]
 aws_distro = "amazon.opentelemetry.distro.aws_opentelemetry_distro:AwsOpenTelemetryDistro"
+
+[project.entry-points.opentelemetry_metrics_exporter]
+awsemf = "amazon.opentelemetry.distro.exporter.aws.metrics._auto_aws_emf_exporter:_AutoAwsEmfExporter"
+"otlp/sigv4" = "amazon.opentelemetry.distro.exporter.otlp.aws.metrics.otlp_aws_metric_exporter:OTLPAwsMetricExporter"
+
+[project.entry-points.opentelemetry_logs_exporter]
+"otlp/sigv4" = "amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_log_record_exporter:OTLPAwsLogRecordExporter"
+
+[project.entry-points.opentelemetry_traces_exporter]
+"otlp/sigv4" = "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter:OTLPAwsSpanExporter"
+
+[project.entry-points.opentelemetry_instrumentor]
+aws_llama-index = "amazon.opentelemetry.distro.instrumentation.llama_index:LlamaIndexInstrumentor"
+aws_crewai = "amazon.opentelemetry.distro.instrumentation.crewai:CrewAIInstrumentor"
+aws_langchain = "amazon.opentelemetry.distro.instrumentation.langchain:LangChainInstrumentor"
+aws_mcp = "amazon.opentelemetry.distro.instrumentation.mcp:McpInstrumentor"
+aws_openai_agents = "amazon.opentelemetry.distro.instrumentation.openai_agents:OpenAIAgentsInstrumentor"
 
 [project.urls]
 Homepage = "https://github.com/aws-observability/aws-otel-python-instrumentation/tree/main/aws-opentelemetry-distro"

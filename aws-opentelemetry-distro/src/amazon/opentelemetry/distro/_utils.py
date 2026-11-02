@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import os
+import re
 from importlib.metadata import PackageNotFoundError, version
 from logging import Logger, getLogger
 from typing import Optional
@@ -12,6 +13,43 @@ _logger: Logger = getLogger(__name__)
 
 AGENT_OBSERVABILITY_ENABLED = "AGENT_OBSERVABILITY_ENABLED"
 OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS = "OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS"
+AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT = "AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT"
+
+# Region prefix -> DNS suffix for every AWS partition that does not use "amazonaws.com".
+# Mirrors the "dnsSuffix" values in botocore's partitions.json. Regions that match none of
+# these prefixes (commercial and GovCloud) use "amazonaws.com".
+_AWS_COMMERCIAL_DNS_SUFFIX = "amazonaws.com"
+_AWS_PARTITION_DNS_SUFFIXES = (
+    ("cn-", "amazonaws.com.cn"),  # aws-cn
+    ("eusc-", "amazonaws.eu"),  # aws-eusc (European Sovereign Cloud)
+    ("us-iso-", "c2s.ic.gov"),  # aws-iso
+    ("us-isob-", "sc2s.sgov.gov"),  # aws-iso-b
+    ("eu-isoe-", "cloud.adc-e.uk"),  # aws-iso-e
+    ("us-isof-", "csp.hci.ic.gov"),  # aws-iso-f
+)
+
+# Regex alternation matching the DNS suffix of any AWS partition. Used to recognize AWS OTLP
+# endpoints regardless of partition.
+AWS_DNS_SUFFIX_PATTERN = (
+    "(?:"
+    + "|".join(
+        re.escape(suffix) for suffix in [_AWS_COMMERCIAL_DNS_SUFFIX] + [s for _, s in _AWS_PARTITION_DNS_SUFFIXES]
+    )
+    + ")"
+)
+
+
+def get_aws_dns_suffix(region: str) -> str:
+    """Return the AWS DNS suffix for the partition that owns the given region."""
+    for prefix, suffix in _AWS_PARTITION_DNS_SUFFIXES:
+        if region.startswith(prefix):
+            return suffix
+    return _AWS_COMMERCIAL_DNS_SUFFIX
+
+
+def get_env(name: str, fallback_name: str, default: Optional[str] = None) -> Optional[str]:
+    """Get an environment variable, falling back to another name when unset."""
+    return os.environ.get(name, os.environ.get(fallback_name, default))
 
 
 def is_installed(req: str) -> bool:
@@ -39,12 +77,25 @@ def is_agent_observability_enabled() -> bool:
     return os.environ.get(AGENT_OBSERVABILITY_ENABLED, "false").lower() == "true"
 
 
+def is_lambda_environment() -> bool:
+    """Is the process running in an AWS Lambda environment?"""
+    return "AWS_LAMBDA_FUNCTION_NAME" in os.environ
+
+
+def is_genai_content_extraction_opted_out() -> bool:
+    """Has the user opted out of GenAI content extraction from spans?"""
+    return os.environ.get(AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT, "false").lower() == "true"
+
+
 def should_add_application_signals_dimensions() -> bool:
     """Should Service and Environment Application Signals dimensions be added to EMF logs?"""
     return os.environ.get(OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS, "true").lower() == "true"
 
 
 IS_BOTOCORE_INSTALLED: bool = is_installed("botocore")
+# The 'bytecode' package is an optional dependency (the 'debugger' extra), installed only on
+# Python 3.10-3.11. Dynamic Instrumentation's bytecode-injection engine guards on this flag.
+IS_BYTECODE_INSTALLED: bool = is_installed("bytecode")
 
 
 def get_aws_session():

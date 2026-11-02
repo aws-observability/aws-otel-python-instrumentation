@@ -30,6 +30,16 @@ DATA_DIR = os.path.join(TEST_DIR, "data")
 
 
 class TestAwsXRaySamplingClient(TestCase):
+    def setUp(self):
+        self._original_provider = trace_api._TRACER_PROVIDER
+        self._original_provider_set_once = trace_api._TRACER_PROVIDER_SET_ONCE
+        self._original_proxy = trace_api._PROXY_TRACER_PROVIDER
+
+    def tearDown(self):
+        trace_api._TRACER_PROVIDER_SET_ONCE = self._original_provider_set_once
+        trace_api._TRACER_PROVIDER = self._original_provider
+        trace_api._PROXY_TRACER_PROVIDER = self._original_proxy
+
     @patch("requests.Session.post")
     def test_get_no_sampling_rules(self, mock_post=None):
         mock_post.return_value.configure_mock(**{"json.return_value": {"SamplingRuleRecords": []}})
@@ -76,6 +86,33 @@ class TestAwsXRaySamplingClient(TestCase):
         self.assertEqual(sampling_rule.Version, 0)
 
     @patch("requests.Session.post")
+    def test_default_values_used_when_extra_properties_in_sampling_rule(self, mock_post=None):
+        mock_post.return_value.configure_mock(
+            **{"json.return_value": {"SamplingRuleRecords": [{"SamplingRule": {"ExtraField": "test"}}]}}
+        )
+        client = _AwsXRaySamplingClient("http://127.0.0.1:2000")
+
+        sampling_rules = client.get_sampling_rules()
+        self.assertTrue(len(sampling_rules) == 1)
+
+        # Should load sampling rule without raising an error
+        sampling_rule = sampling_rules[0]
+        self.assertEqual(sampling_rule.Attributes, {})
+        self.assertEqual(sampling_rule.FixedRate, 0.0)
+        self.assertEqual(sampling_rule.HTTPMethod, "")
+        self.assertEqual(sampling_rule.Host, "")
+        self.assertEqual(sampling_rule.Priority, 10001)
+        self.assertEqual(sampling_rule.ReservoirSize, 0)
+        self.assertEqual(sampling_rule.ResourceARN, "")
+        self.assertEqual(sampling_rule.RuleARN, "")
+        self.assertEqual(sampling_rule.RuleName, "")
+        self.assertEqual(sampling_rule.ServiceName, "")
+        self.assertEqual(sampling_rule.ServiceType, "")
+        self.assertEqual(sampling_rule.URLPath, "")
+        self.assertEqual(sampling_rule.Version, 0)
+        self.assertFalse(hasattr(sampling_rule, "ExtraField"))
+
+    @patch("requests.Session.post")
     def test_get_correct_number_of_sampling_rules(self, mock_post=None):
         sampling_records = []
         with open(f"{DATA_DIR}/get-sampling-rules-response-sample.json", encoding="UTF-8") as file:
@@ -88,6 +125,19 @@ class TestAwsXRaySamplingClient(TestCase):
         self.assertEqual(len(sampling_rules), 3)
         self.assertEqual(len(sampling_rules), len(sampling_records))
         self.validate_match_sampling_rules_properties_with_records(sampling_rules, sampling_records)
+
+    @patch("requests.Session.post")
+    def test_get_sampling_rules_with_boost(self, mock_post=None):
+        with open(f"{DATA_DIR}/get-sampling-rules-response-sample-3.json", encoding="UTF-8") as file:
+            sample_response = json.load(file)
+            mock_post.return_value.configure_mock(**{"json.return_value": sample_response})
+            file.close()
+        client = _AwsXRaySamplingClient("http://127.0.0.1:2000")
+        sampling_rules = client.get_sampling_rules()
+        rule = sampling_rules[0]
+
+        self.assertEqual(rule.SamplingRateBoost.MaxRate, 0.5)
+        self.assertEqual(rule.SamplingRateBoost.CooldownWindowMinutes, 1)
 
     def validate_match_sampling_rules_properties_with_records(self, sampling_rules, sampling_records):
         for _, (sampling_rule, sampling_record) in enumerate(zip(sampling_rules, sampling_records)):

@@ -1,0 +1,73 @@
+name: Run unit tests
+description: |
+  This action assumes that the repo was checked out. Sets up the Python/tox environment
+  (via the set_up action) and runs the unit tests/benchmarks with tox, then checks coverage.
+
+inputs:
+  python_version:
+    required: true
+    description: "The python version used in actions"
+  package_name:
+    required: true
+    description: "The package name"
+  os:
+    required: true
+    description: "The os"
+  wheel_path:
+    required: false
+    default: ''
+    description: "Optional path to a prebuilt aws-opentelemetry-distro wheel. When set, tox installs the distro from this wheel (via ADOT_WHEEL) instead of building from source."
+
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python and tox
+      uses: ./.github/actions/set_up
+      with:
+        python_version: ${{ inputs.python_version }}
+        package_name: ${{ inputs.package_name }}
+        os: ${{ inputs.os }}
+
+    - name: Use prebuilt distro wheel
+      if: ${{ inputs.wheel_path != '' }}
+      shell: bash
+      run: echo "ADOT_WHEEL=$(realpath '${{ inputs.wheel_path }}')" >> "$GITHUB_ENV"
+
+    - name: Run unit tests/benchmarks with tox
+      shell: bash
+      run: |
+        PY_VERSION="${{ inputs.python_version }}"
+        # we intend for new or unrecognized Python versions to fail if a new Python version is added to the test
+        # to ensure they are not silently skipped from testing
+        ENVS=$(tox list -q | grep "^${PY_VERSION}-test-" | sed 's/ .*//' | tr '\n' ',' | sed 's/,$//' || true)
+        echo "Running tox envs: $ENVS"
+        set -o pipefail
+        if tox --parallel auto --parallel-live -e "$ENVS" -- -v 2>&1 | tee tox-output.log; then
+          exit 0
+        fi
+        # pip does not retry a download that is cut off mid-body ("Connection broken: IncompleteRead"), and with
+        # ~10 envs installing in parallel one truncated PyPI response fails the whole job. Retry the failed envs
+        # once, but only when the log shows a pip network error, so real test failures are never retried.
+        sed 's/\x1b\[[0-9;]*m//g' tox-output.log > tox-output.clean.log
+        if ! grep -qE "Could not install packages due to an OSError: .*(Connection broken|IncompleteRead|ReadTimeoutError|Connection reset)" tox-output.clean.log; then
+          exit 1
+        fi
+        FAILED_ENVS=$(sed -nE 's/^ +([^ :]+): FAIL code .*/\1/p' tox-output.clean.log | sort -u | paste -sd, -)
+        if [ -z "$FAILED_ENVS" ]; then
+          exit 1
+        fi
+        echo "::warning::pip network error during tox run; retrying failed envs once: $FAILED_ENVS"
+        tox --parallel auto --parallel-live -e "$FAILED_ENVS" -- -v
+
+    - name: Combine and check coverage
+      shell: bash
+      run: |
+        pip install coverage
+        if [ "${{ inputs.python_version }}" = "3.14" ]; then
+          RCFILE=.coveragerc-py314
+        else
+          RCFILE=.coveragerc
+        fi
+        coverage combine --rcfile=$RCFILE
+        coverage report --rcfile=$RCFILE
