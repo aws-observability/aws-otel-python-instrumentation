@@ -24,6 +24,10 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   returns normally; only telemetry for that event is lost. LLM events emitted from a source other than a CrewAI
   `BaseLLM` now produce a chat span without token usage instead of raising `AttributeError`.
   ([#953](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/953))
+- fix: in Lambda, treat `OTEL_EXPORTER_OTLP_ENDPOINT` as a custom trace endpoint, as the OTLP exporter
+  spec requires. Setting only the generic endpoint previously fell back to the X-Ray UDP exporter, so
+  traces never reached the configured collector
+  ([#562](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/562))
 - fix: accept LangGraph interrupt and resume callbacks in the LangChain instrumentation, so they no longer log an
   `AttributeError` warning
   ([#959](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/959))
