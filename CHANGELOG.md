@@ -16,6 +16,10 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   arguments or provider details, and made `error.type` unusable for grouping errors. The message is still
   recorded as the span status description.
   ([#962](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/962))
+- fix: in Lambda, treat `OTEL_EXPORTER_OTLP_ENDPOINT` as a custom trace endpoint, as the OTLP exporter
+  spec requires. Setting only the generic endpoint previously fell back to the X-Ray UDP exporter, so
+  traces never reached the configured collector
+  ([#562](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/562))
 - fix: accept LangGraph interrupt and resume callbacks in the LangChain instrumentation, so they no longer log an
   `AttributeError` warning
   ([#959](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/959))
