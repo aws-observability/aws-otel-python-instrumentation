@@ -200,9 +200,10 @@ class TestEndToEndFunctionCaptureRespectsLimits(unittest.TestCase):
     def test_instrumented_function_truncates_return_at_configured_limit(self):
         module = _make_module(self.module_name, echo=_echo)
         wrapper = FunctionWrapper()
-        # The wrapper keys breakpoints by "<module>.<qualified_name>"; use the same key
-        # the wrapper computes so the fake manager's function-level breakpoint is found.
-        func_key = f"{self.module_name}.{FunctionWrapper._get_qualified_name(_echo)}"
+        # The manager registers (and the wrapper now looks up) by the
+        # CONFIGURED key "<module>.<function_name>" — here function_name="echo" (the
+        # module attribute), not the underlying object's __name__ ("_echo").
+        func_key = f"{self.module_name}.echo"
         manager = _FakeManager(func_key)
 
         config = CaptureConfig(capture_arguments=[], capture_return=True, max_string_length=10)
