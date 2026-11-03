@@ -20,11 +20,7 @@ if sys.version_info < (3, 10) or sys.version_info >= (3, 14):
 
 from crewai import LLM, Agent, Crew, Task
 from crewai.events import crewai_event_bus
-from crewai.events.types.agent_events import (
-    LiteAgentExecutionCompletedEvent,
-    LiteAgentExecutionErrorEvent,
-    LiteAgentExecutionStartedEvent,
-)
+from crewai.events.types.agent_events import LiteAgentExecutionCompletedEvent, LiteAgentExecutionStartedEvent
 from crewai.events.types.llm_events import LLMCallCompletedEvent, LLMCallStartedEvent, LLMCallType
 from crewai.flow.flow import Flow, start
 from crewai.llms.base_llm import BaseLLM, llm_call_context
@@ -35,7 +31,6 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
     OPERATION_INVOKE_WORKFLOW,
 )
 from amazon.opentelemetry.distro.instrumentation.crewai import CrewAIInstrumentor
-from opentelemetry import trace
 from opentelemetry.instrumentation.threading import ThreadingInstrumentor
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -789,7 +784,7 @@ class TestCrewAIInstrumentor(TestCase):
 
         class AgentFlow(Flow):
             @start()
-            def run_agent(self):
+            def run_agent(self):  # pylint: disable=no-self-use
                 return agent.kickoff("Go.")
 
         with patch("litellm.completion", return_value=self._mock_response("Final Answer: Done")):
