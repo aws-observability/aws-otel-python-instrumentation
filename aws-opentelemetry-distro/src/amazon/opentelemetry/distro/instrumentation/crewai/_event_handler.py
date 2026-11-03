@@ -118,7 +118,7 @@ class _EventBusEmitWrapper:
 
 class OpenTelemetryEventHandler:
 
-    def __init__(self, tracer: trace.Tracer) -> None:
+    def __init__(self, tracer: trace.Tracer) -> None:  # pylint: disable=too-many-locals
         # pylint: disable=import-outside-toplevel
         from crewai.events.types.agent_events import (
             AgentExecutionCompletedEvent,
