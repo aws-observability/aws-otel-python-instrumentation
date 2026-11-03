@@ -626,6 +626,8 @@ class TestCrewAIInstrumentor(TestCase):
                 }
             ],
         )
+        # older crewai versions add their ReAct stop words to the agent's LLM; that request param is not under test
+        attributes.pop(GEN_AI_REQUEST_STOP_SEQUENCES, None)
         self.assertEqual(
             attributes,
             {
