@@ -65,7 +65,7 @@ if TYPE_CHECKING:
         AgentExecutionCompletedEvent,
         AgentExecutionErrorEvent,
         AgentExecutionStartedEvent,
-        LiteAgentExecutionCompletedEvent,
+        LiteAgentExecutionCompletedEvent, 
         LiteAgentExecutionErrorEvent,
         LiteAgentExecutionStartedEvent,
     )
@@ -294,6 +294,13 @@ class OpenTelemetryEventHandler:
             error=getattr(event, "error", None),
         )
 
+    # LiteAgent will be deprecated starting in version 2.0.0 
+    # https://github.com/crewAIInc/crewAI/blob/main/lib/crewai/src/crewai/lite_agent.py
+    #
+    # LiteAgent exists so you can invoke an agent without building a Crew or a Task. 
+    # It is only used by Agent.Kickoff().
+    # They carry less than crew agent events (no task, agent info as a plain dict), so this span is started
+    # as its own root and paired with its end event by started_event_id.
     def _on_lite_agent_started(  # pylint: disable=too-many-branches
         self, source: "BaseAgent", event: "LiteAgentExecutionStartedEvent"  # pylint: disable=unused-argument
     ) -> None:
