@@ -249,92 +249,92 @@ class TestAttributePropagatingSpanProcessorOperationPaths(TestCase):
     def tearDown(self):
         reset_operation_paths()
 
-    @patch.dict(os.environ, {"OTEL_AWS_HTTP_OPERATION_PATHS": "/smart/v1/getAppraisers, /smart/v1"})
+    @patch.dict(os.environ, {"OTEL_AWS_HTTP_OPERATION_PATHS": "/api/v1/orders, /api/v1"})
     def test_child_of_server_span_inherits_operation_path_override(self):
-        server_span: Span = self._start_coarse_server_span("/smart/v1/getAppraisers")
+        server_span: Span = self._start_coarse_server_span("/api/v1/orders")
         leaf_span: ReadableSpan = self._create_nested_span(server_span, 10)
-        self.assertEqual(leaf_span.attributes.get(_SPAN_NAME_KEY), "POST /smart/v1/getAppraisers")
+        self.assertEqual(leaf_span.attributes.get(_SPAN_NAME_KEY), "POST /api/v1/orders")
         client_child: ReadableSpan = self._start_child(server_span, SpanKind.CLIENT)
-        self.assertEqual(client_child.attributes.get(_SPAN_NAME_KEY), "POST /smart/v1/getAppraisers")
+        self.assertEqual(client_child.attributes.get(_SPAN_NAME_KEY), "POST /api/v1/orders")
         # The live server span is not renamed at child start; the override is applied to a snapshot.
-        self.assertEqual(server_span.name, "POST /smart/v1/*")
+        self.assertEqual(server_span.name, "POST /api/v1/*")
 
     def test_child_of_server_span_unchanged_when_operation_paths_unset(self):
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("OTEL_AWS_HTTP_OPERATION_PATHS", None)
             reset_operation_paths()
-            server_span: Span = self._start_coarse_server_span("/smart/v1/getAppraisers")
+            server_span: Span = self._start_coarse_server_span("/api/v1/orders")
             leaf_span: ReadableSpan = self._create_nested_span(server_span, 10)
-            self.assertEqual(leaf_span.attributes.get(_SPAN_NAME_KEY), "POST /smart/v1/*")
+            self.assertEqual(leaf_span.attributes.get(_SPAN_NAME_KEY), "POST /api/v1/*")
             client_child: ReadableSpan = self._start_child(server_span, SpanKind.CLIENT)
-            self.assertEqual(client_child.attributes.get(_SPAN_NAME_KEY), "POST /smart/v1/*")
+            self.assertEqual(client_child.attributes.get(_SPAN_NAME_KEY), "POST /api/v1/*")
 
-    @patch.dict(os.environ, {"OTEL_AWS_HTTP_OPERATION_PATHS": "/other/getAppraisers"})
+    @patch.dict(os.environ, {"OTEL_AWS_HTTP_OPERATION_PATHS": "/other/orders"})
     def test_child_of_server_span_unchanged_when_no_operation_path_matches(self):
-        server_span: Span = self._start_coarse_server_span("/smart/v1/getAppraisers")
+        server_span: Span = self._start_coarse_server_span("/api/v1/orders")
         leaf_span: ReadableSpan = self._create_nested_span(server_span, 10)
-        self.assertEqual(leaf_span.attributes.get(_SPAN_NAME_KEY), "POST /smart/v1/*")
+        self.assertEqual(leaf_span.attributes.get(_SPAN_NAME_KEY), "POST /api/v1/*")
         client_child: ReadableSpan = self._start_child(server_span, SpanKind.CLIENT)
-        self.assertEqual(client_child.attributes.get(_SPAN_NAME_KEY), "POST /smart/v1/*")
+        self.assertEqual(client_child.attributes.get(_SPAN_NAME_KEY), "POST /api/v1/*")
 
-    @patch.dict(os.environ, {"OTEL_AWS_HTTP_OPERATION_PATHS": "/smart/v1/schdefaults/{inscompId}, /smart/v1"})
+    @patch.dict(os.environ, {"OTEL_AWS_HTTP_OPERATION_PATHS": "/api/v1/products/{productId}, /api/v1"})
     def test_child_of_server_span_inherits_wildcard_operation_path_template(self):
-        server_span: Span = self._start_coarse_server_span("/smart/v1/schdefaults/123")
+        server_span: Span = self._start_coarse_server_span("/api/v1/products/123")
         client_child: ReadableSpan = self._start_child(server_span, SpanKind.CLIENT)
-        self.assertEqual(client_child.attributes.get(_SPAN_NAME_KEY), "POST /smart/v1/schdefaults/{inscompId}")
+        self.assertEqual(client_child.attributes.get(_SPAN_NAME_KEY), "POST /api/v1/products/{productId}")
 
-    @patch.dict(os.environ, {"OTEL_AWS_HTTP_OPERATION_PATHS": "/smart/v1/getAppraisers"})
+    @patch.dict(os.environ, {"OTEL_AWS_HTTP_OPERATION_PATHS": "/api/v1/orders"})
     def test_child_of_server_span_inherits_operation_path_override_from_http_target(self):
         # Old HTTP semantic conventions: http.method + http.target (with a query string).
         server_span: Span = self.tracer.start_span(
-            name="POST /smart/v1/*",
+            name="POST /api/v1/*",
             kind=SpanKind.SERVER,
             attributes={
                 SpanAttributes.HTTP_METHOD: "POST",
-                SpanAttributes.HTTP_TARGET: "/smart/v1/getAppraisers?id=1",
+                SpanAttributes.HTTP_TARGET: "/api/v1/orders?id=1",
             },
         )
         client_child: ReadableSpan = self._start_child(server_span, SpanKind.CLIENT)
-        self.assertEqual(client_child.attributes.get(_SPAN_NAME_KEY), "POST /smart/v1/getAppraisers")
+        self.assertEqual(client_child.attributes.get(_SPAN_NAME_KEY), "POST /api/v1/orders")
 
-    @patch.dict(os.environ, {"OTEL_AWS_HTTP_OPERATION_PATHS": "/smart/v1/getAppraisers, /smart/v1/appraiser/details"})
+    @patch.dict(os.environ, {"OTEL_AWS_HTTP_OPERATION_PATHS": "/api/v1/orders, /api/v1/users/profile"})
     def test_children_of_different_server_spans_inherit_their_own_operation_path_override(self):
-        server_a: Span = self._start_coarse_server_span("/smart/v1/getAppraisers")
-        server_b: Span = self._start_coarse_server_span("/smart/v1/appraiser/details")
+        server_a: Span = self._start_coarse_server_span("/api/v1/orders")
+        server_b: Span = self._start_coarse_server_span("/api/v1/users/profile")
         child_a: ReadableSpan = self._start_child(server_a, SpanKind.CLIENT)
         child_b: ReadableSpan = self._start_child(server_b, SpanKind.CLIENT)
-        self.assertEqual(child_a.attributes.get(_SPAN_NAME_KEY), "POST /smart/v1/getAppraisers")
-        self.assertEqual(child_b.attributes.get(_SPAN_NAME_KEY), "POST /smart/v1/appraiser/details")
+        self.assertEqual(child_a.attributes.get(_SPAN_NAME_KEY), "POST /api/v1/orders")
+        self.assertEqual(child_b.attributes.get(_SPAN_NAME_KEY), "POST /api/v1/users/profile")
 
     # The operation propagated to children must equal the operation the server span's own service metrics use
     # (the override applied at span end, then get_ingress_operation).
-    @patch.dict(os.environ, {"OTEL_AWS_HTTP_OPERATION_PATHS": "/smart/v1/getAppraisers, /smart/v1"})
+    @patch.dict(os.environ, {"OTEL_AWS_HTTP_OPERATION_PATHS": "/api/v1/orders, /api/v1"})
     def test_child_operation_matches_server_span_service_operation(self):
-        server_span: Span = self._start_coarse_server_span("/smart/v1/getAppraisers")
+        server_span: Span = self._start_coarse_server_span("/api/v1/orders")
         internal_child: ReadableSpan = self._start_child(server_span, SpanKind.INTERNAL)
         server_span.end()
         service_operation: str = get_ingress_operation(None, apply_operation_path_span_name(server_span))
         self.assertEqual(internal_child.attributes.get(_SPAN_NAME_KEY), service_operation)
 
     # An INTERNAL local root keeps InternalOperation even when a pattern matches its URL path.
-    @patch.dict(os.environ, {"OTEL_AWS_HTTP_OPERATION_PATHS": "/smart/v1/getAppraisers"})
+    @patch.dict(os.environ, {"OTEL_AWS_HTTP_OPERATION_PATHS": "/api/v1/orders"})
     def test_internal_local_root_unchanged_by_operation_path_override(self):
         local_root: Span = self.tracer.start_span(
-            name="POST /smart/v1/*",
+            name="POST /api/v1/*",
             kind=SpanKind.INTERNAL,
             attributes={
                 SpanAttributes.HTTP_REQUEST_METHOD: "POST",
-                SpanAttributes.URL_PATH: "/smart/v1/getAppraisers",
+                SpanAttributes.URL_PATH: "/api/v1/orders",
             },
         )
         self.assertEqual(local_root.attributes.get(_SPAN_NAME_KEY), "InternalOperation")
         leaf_span: ReadableSpan = self._create_nested_span(local_root, 10)
         self.assertEqual(leaf_span.attributes.get(_SPAN_NAME_KEY), "InternalOperation")
-        self.assertEqual(local_root.name, "POST /smart/v1/*")
+        self.assertEqual(local_root.name, "POST /api/v1/*")
 
     def _start_coarse_server_span(self, url_path: str) -> Span:
         return self.tracer.start_span(
-            name="POST /smart/v1/*",
+            name="POST /api/v1/*",
             kind=SpanKind.SERVER,
             attributes={SpanAttributes.HTTP_REQUEST_METHOD: "POST", SpanAttributes.URL_PATH: url_path},
         )
