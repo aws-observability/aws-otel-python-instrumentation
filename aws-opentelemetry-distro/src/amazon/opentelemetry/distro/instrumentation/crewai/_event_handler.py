@@ -55,7 +55,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_USAGE_REASONING_OUTPUT_TOKENS,
     GenAiOperationNameValues,
 )
-from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
+from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE, ErrorTypeValues
 from opentelemetry.trace import SpanKind, Status, StatusCode
 
 if TYPE_CHECKING:
@@ -633,7 +633,7 @@ class OpenTelemetryEventHandler:
         if isinstance(error, BaseException):
             return type(error).__qualname__
         active_exception = sys.exc_info()[1]
-        return type(active_exception).__qualname__ if active_exception else "_OTHER"
+        return type(active_exception).__qualname__ if active_exception else ErrorTypeValues.OTHER.value
 
     @staticmethod
     def _extract_provider_and_model(llm: Any) -> Tuple[Optional[str], Optional[str]]:
