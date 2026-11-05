@@ -267,6 +267,31 @@ class TestCrewAIInstrumentor(TestCase):
         self.assertNotIn(GEN_AI_USAGE_OUTPUT_TOKENS, chat_span.attributes)
         self._assert_spans_all_ended()
 
+    def test_llm_events_from_non_base_llm_source_with_reported_usage(self):
+        # an external source that reports usage on its completed event still gets token counts
+        if "usage" not in LLMCallCompletedEvent.model_fields:
+            self.skipTest("crewai <1.13.0 does not report per-call usage on LLMCallCompletedEvent")
+
+        source = object()
+        start_event = LLMCallStartedEvent(call_id="c1", messages=[{"role": "user", "content": "Hello"}])
+        crewai_event_bus.emit(source, start_event)
+        crewai_event_bus.emit(
+            source,
+            LLMCallCompletedEvent(
+                call_id="c1",
+                response="Hello",
+                call_type=LLMCallType.LLM_CALL,
+                started_event_id=start_event.event_id,
+                usage={"prompt_tokens": 10, "completion_tokens": 5},
+            ),
+        )
+
+        chat_span = self._find_span("chat")
+        self.assertIsNotNone(chat_span)
+        self.assertEqual(chat_span.attributes[GEN_AI_USAGE_INPUT_TOKENS], 10)
+        self.assertEqual(chat_span.attributes[GEN_AI_USAGE_OUTPUT_TOKENS], 5)
+        self._assert_spans_all_ended()
+
     def test_llm_call_uses_effective_request_attributes_from_started_event(self):
         if "temperature" not in LLMCallStartedEvent.model_fields:
             self.skipTest("crewai <1.11.0 does not report effective request attributes on LLMCallStartedEvent")
