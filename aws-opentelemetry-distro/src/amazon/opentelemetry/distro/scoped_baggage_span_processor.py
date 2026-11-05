@@ -55,7 +55,8 @@ class ScopedBaggageSpanProcessor(SpanProcessor):
     Pending baggage is released when the span ends, or when the span is garbage-collected without
     ending, so abandoned spans do not retain it. Garbage collection can run a finalizer at any
     allocation, including while this processor holds its lock, so the finalizer never takes the lock.
-    It only queues the span's key on a thread-safe deque, and the locked paths remove queued entries.
+    It only queues the span's key on a thread-safe deque. Every lifecycle call (``on_start``,
+    ``on_end``, ``force_flush``) removes queued entries, whether or not the span carries scoped baggage.
 
     A key is only set when the span does not already have it, so a value set by the instrumentation wins.
     """
@@ -85,6 +86,7 @@ class ScopedBaggageSpanProcessor(SpanProcessor):
         entries = baggage.get_all(parent_context)
         pending = {key: value for key, value in entries.items() if key in self._scoped_keys}
         if not pending:
+            self._remove_collected()
             return
         span_key = _span_key(span)
         # The SDK passes a separate ReadableSpan to on_end, so the entry is keyed by span identity. The
@@ -100,6 +102,7 @@ class ScopedBaggageSpanProcessor(SpanProcessor):
         if span.context is None:
             return
         with self._lock:
+            self._remove_collected_locked()
             entry = self._pending_by_span.pop(_span_key(span), None)
         if entry is None:
             return
@@ -123,13 +126,19 @@ class ScopedBaggageSpanProcessor(SpanProcessor):
         for _, finalizer in entries:
             finalizer.detach()
 
+    def _remove_collected(self) -> None:
+        # Checking the deque without the lock keeps the common case, nothing collected, lock-free.
+        if self._collected:
+            with self._lock:
+                self._remove_collected_locked()
+
     def _remove_collected_locked(self) -> None:
         while self._collected:
             self._pending_by_span.pop(self._collected.popleft(), None)
 
-    # pylint: disable=no-self-use
     @override
     def force_flush(self, timeout_millis: int = 30000) -> bool:
+        self._remove_collected()
         return True
 
 

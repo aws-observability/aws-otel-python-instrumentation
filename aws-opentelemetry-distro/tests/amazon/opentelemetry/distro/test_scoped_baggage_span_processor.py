@@ -143,6 +143,38 @@ class TestScopedBaggageSpanProcessor(unittest.TestCase):
 
         self.assertEqual(self.processor._pending_by_span, {})  # noqa: SLF001
 
+    def _abandon_batch(self, count):
+        # Hold the spans together, then drop them at once, like concurrent requests that never end.
+        spans = [self.tracer.start_span("abandoned", kind=SpanKind.CLIENT) for _ in range(count)]
+        del spans
+        gc.collect()
+
+    def test_collected_entries_removed_when_later_spans_have_no_lineage(self):
+        self._abandon_batch(100)
+        self.assertEqual(len(self.processor._collected), 100)  # noqa: SLF001
+        self.assertEqual(len(self.processor._pending_by_span), 100)  # noqa: SLF001
+
+        # Later traffic without the scoped baggage must still release the collected entries.
+        no_lineage = context.attach(baggage.remove_baggage(AWS_AGENT_LINEAGE))
+        try:
+            self.tracer.start_span("no lineage", kind=SpanKind.CLIENT)
+        finally:
+            context.detach(no_lineage)
+
+        self.assertEqual(self.processor._pending_by_span, {})  # noqa: SLF001
+        self.assertEqual(len(self.processor._collected), 0)  # noqa: SLF001
+
+    def test_on_end_and_force_flush_remove_collected_entries(self):
+        held = self._start(name="held")
+        self._abandon_batch(10)
+        held.end()
+        self.assertEqual(self.processor._pending_by_span, {})  # noqa: SLF001
+
+        self._abandon_batch(10)
+        self.assertEqual(len(self.processor._pending_by_span), 10)  # noqa: SLF001
+        self.assertTrue(self.processor.force_flush())
+        self.assertEqual(self.processor._pending_by_span, {})  # noqa: SLF001
+
     def test_finalizer_does_not_deadlock_while_processor_holds_its_lock(self):
         # Garbage collection can run a finalizer while the processor holds its lock, for example during an
         # allocation inside shutdown(). The finalizer must not try to take the lock.
