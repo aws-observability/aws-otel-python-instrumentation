@@ -11,6 +11,11 @@ For any change that affects end users of this package, please add an entry under
 If your change does not need a CHANGELOG entry, add the "skip changelog" label to your PR.
 
 ## Unreleased
+- feat: with `AGENT_OBSERVABILITY_ENABLED`, copy the `aws.agent.lineage` baggage entry to GenAI inference
+  spans only (CLIENT spans for chat, text_completion, generate_content and embeddings), so the backend can
+  attribute model cost to agents. `session.id` and keys in `OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS` are still copied
+  to every span
+  ([#TBD](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/TBD))
 - fix: in Lambda, treat `OTEL_EXPORTER_OTLP_ENDPOINT` as a custom trace endpoint, as the OTLP exporter
   spec requires. Setting only the generic endpoint previously fell back to the X-Ray UDP exporter, so
   traces never reached the configured collector

@@ -9,6 +9,13 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
 )
 from opentelemetry.trace import SpanKind
 
+GEN_AI_INFERENCE_OPERATIONS = (
+    GenAiOperationNameValues.CHAT.value,
+    GenAiOperationNameValues.TEXT_COMPLETION.value,
+    GenAiOperationNameValues.GENERATE_CONTENT.value,
+    GenAiOperationNameValues.EMBEDDINGS.value,
+)
+
 
 class GenAINestedClientSpanProcessor(SpanProcessor):
     # OTel GenAI semantic conventions require outgoing LLM calls to be CLIENT spans.
@@ -25,17 +32,11 @@ class GenAINestedClientSpanProcessor(SpanProcessor):
         pass
 
     def on_end(self, span: ReadableSpan) -> None:
-        gen_ai_inference_operations = (
-            GenAiOperationNameValues.CHAT.value,
-            GenAiOperationNameValues.TEXT_COMPLETION.value,
-            GenAiOperationNameValues.GENERATE_CONTENT.value,
-            GenAiOperationNameValues.EMBEDDINGS.value,
-        )
         # Clean up before early returns so child state cannot leak for non-GenAI parents.
         span_id = span.context.span_id if span.context else None
         child_operations = {
             operation
-            for operation in gen_ai_inference_operations
+            for operation in GEN_AI_INFERENCE_OPERATIONS
             if span_id and self._parent_span_id_and_operation_to_gen_ai_client_child.pop((span_id, operation))
         }
 
@@ -43,7 +44,7 @@ class GenAINestedClientSpanProcessor(SpanProcessor):
             return
 
         operation = (span.attributes or {}).get(GEN_AI_OPERATION_NAME)
-        if operation not in gen_ai_inference_operations:
+        if operation not in GEN_AI_INFERENCE_OPERATIONS:
             return
 
         parent_span_id = span.parent.span_id if span.parent else None

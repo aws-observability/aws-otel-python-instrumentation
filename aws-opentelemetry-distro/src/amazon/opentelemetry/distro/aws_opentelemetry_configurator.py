@@ -50,6 +50,11 @@ from amazon.opentelemetry.distro.sampler._aws_xray_adaptive_sampling_config impo
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
 from amazon.opentelemetry.distro.scope_based_exporter import ScopeBasedPeriodicExportingMetricReader
 from amazon.opentelemetry.distro.scope_based_filtering_view import ScopeBasedRetainingView
+from amazon.opentelemetry.distro.scoped_baggage_span_processor import (
+    AWS_AGENT_LINEAGE,
+    INFERENCE_SCOPE,
+    ScopedBaggageSpanProcessor,
+)
 from opentelemetry._logs import get_logger_provider, set_logger_provider
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPHttpOTLPMetricExporter
@@ -346,6 +351,12 @@ def _init_tracing(
     # processors to ensure exporters observe the updated kind.
     if is_agent_observability_enabled():
         trace_provider.add_span_processor(GenAINestedClientSpanProcessor())
+
+    # This processor adds attributes in on_end, so it must run after GenAINestedClientSpanProcessor
+    # (its scopes check the corrected span kind) and before the redacting and batch processors.
+    scoped_baggage_keys = _get_scoped_baggage_keys()
+    if scoped_baggage_keys:
+        trace_provider.add_span_processor(ScopedBaggageSpanProcessor(scoped_baggage_keys))
 
     # This processor modifies attributes in on_end, so it must run before batch
     # processors to ensure exporters observe the redacted values.
@@ -914,6 +925,20 @@ def _extract_endpoint_and_region_from_otlp_endpoint(endpoint: str):
 def _parse_otel_baggage_keys_env_var() -> set[str]:
     raw: str = os.environ.get(OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS, "").strip()
     return {k.strip() for k in raw.split(",") if k.strip()}
+
+
+def _get_scoped_baggage_keys() -> dict[str, str]:
+    """Baggage keys copied only to spans matching a scope, as a mapping of key to scope name.
+
+    Agent observability copies aws.agent.lineage to GenAI inference spans. A key the customer lists in
+    OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS is copied to every span by BaggageSpanProcessor instead, so explicit
+    customer configuration wins over this default.
+    """
+    if not is_agent_observability_enabled():
+        return {}
+    if AWS_AGENT_LINEAGE in _parse_otel_baggage_keys_env_var():
+        return {}
+    return {AWS_AGENT_LINEAGE: INFERENCE_SCOPE}
 
 
 def _get_metric_export_interval():

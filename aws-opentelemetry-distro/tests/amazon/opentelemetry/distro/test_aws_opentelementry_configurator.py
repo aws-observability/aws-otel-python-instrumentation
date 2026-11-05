@@ -38,6 +38,7 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     _customize_span_processors,
     _export_unsampled_span_for_agent_observability,
     _export_unsampled_span_for_lambda,
+    _get_scoped_baggage_keys,
     _has_authorization_header,
     _has_custom_otlp_traces_endpoint,
     _init_logging,
@@ -73,6 +74,7 @@ from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler._aws_xray_sampling_client import _AwsXRaySamplingClient
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
 from amazon.opentelemetry.distro.scope_based_exporter import ScopeBasedPeriodicExportingMetricReader
+from amazon.opentelemetry.distro.scoped_baggage_span_processor import ScopedBaggageSpanProcessor
 from opentelemetry.environment_variables import OTEL_LOGS_EXPORTER, OTEL_METRICS_EXPORTER, OTEL_TRACES_EXPORTER
 from opentelemetry.exporter.otlp.proto.common._internal.metrics_encoder import OTLPMetricExporterMixin
 from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter as OTLPGrpcLogExporter
@@ -687,11 +689,64 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
         processors = [call.args[0] for call in trace_provider.add_span_processor.call_args_list]
         self.assertIsInstance(processors[0], GenAINestedClientSpanProcessor)
-        self.assertIsInstance(processors[1], AttributeRedactingSpanProcessor)
-        self.assertIs(processors[2], batch_processor)
+        self.assertIsInstance(processors[1], ScopedBaggageSpanProcessor)
+        self.assertIsInstance(processors[2], AttributeRedactingSpanProcessor)
+        self.assertIs(processors[3], batch_processor)
 
         os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
         os.environ.pop("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", None)
+
+    def test_scoped_baggage_keys(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
+            os.environ.pop("OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS", None)
+            self.assertEqual(_get_scoped_baggage_keys(), {})
+
+            os.environ["AGENT_OBSERVABILITY_ENABLED"] = "true"
+            self.assertEqual(_get_scoped_baggage_keys(), {"aws.agent.lineage": "inference"})
+
+            # A key the customer allowlists is copied to every span instead, so the scoped default steps aside.
+            os.environ["OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS"] = "tenant.id, aws.agent.lineage"
+            self.assertEqual(_get_scoped_baggage_keys(), {})
+
+    @staticmethod
+    def _init_tracing_processors() -> list:
+        trace_provider = MagicMock()
+        exporter = MagicMock()
+        with patch.multiple(
+            "amazon.opentelemetry.distro.aws_opentelemetry_configurator",
+            TracerProvider=MagicMock(return_value=trace_provider),
+            BatchSpanProcessor=MagicMock(),
+            _customize_span_exporter=MagicMock(return_value=exporter),
+            _customize_span_processors=MagicMock(),
+            set_tracer_provider=MagicMock(),
+        ):
+            _init_tracing({"otlp": MagicMock(return_value=exporter)})
+        return [call.args[0] for call in trace_provider.add_span_processor.call_args_list]
+
+    def test_scoped_baggage_processor_not_added_without_agent_observability(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
+            processors = self._init_tracing_processors()
+        self.assertFalse(any(isinstance(p, ScopedBaggageSpanProcessor) for p in processors))
+
+    def test_customer_allowlisted_lineage_goes_to_every_span(self):
+        with patch.dict(
+            os.environ,
+            {
+                "AGENT_OBSERVABILITY_ENABLED": "true",
+                "OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS": "aws.agent.lineage",
+                "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": "https://xray.us-east-1.amazonaws.com/v1/traces",
+            },
+        ):
+            processors = self._init_tracing_processors()
+            self.assertFalse(any(isinstance(p, ScopedBaggageSpanProcessor) for p in processors))
+
+            provider = MagicMock()
+            _customize_span_processors(provider, Resource.get_empty(), MagicMock())
+            added = [call.args[0] for call in provider.add_span_processor.call_args_list]
+            baggage_processor = next(p for p in added if isinstance(p, BaggageSpanProcessor))
+            self.assertTrue(any(predicate("aws.agent.lineage") for predicate in baggage_processor._predicates))
 
     def test_baggage_span_processor_session_id_xray_endpoint(self):
         """Test that session.id is added when traces endpoint is XRay"""
