@@ -10,7 +10,9 @@ from amazon.opentelemetry.distro.scoped_baggage_span_processor import (
     AWS_AGENT_LINEAGE,
     INFERENCE_SCOPE,
     ScopedBaggageSpanProcessor,
+    _set_active_processor,
     is_gen_ai_inference_span,
+    register_scoped_baggage_key,
 )
 from opentelemetry import baggage, context, trace
 from opentelemetry.processor.baggage import BaggageSpanProcessor
@@ -260,6 +262,73 @@ class TestScopedBaggageSpanProcessor(unittest.TestCase):
         self.assertNotIn(AWS_AGENT_LINEAGE, spans["agent"].attributes)
         self.assertEqual(spans["chat model"].attributes["session.id"], "s-1")
         self.assertEqual(spans["chat model"].attributes[AWS_AGENT_LINEAGE], LINEAGE)
+
+
+class TestRegisterScopedBaggageKey(unittest.TestCase):
+    def setUp(self):
+        self.exporter = InMemorySpanExporter()
+        self.processor = ScopedBaggageSpanProcessor({})
+        provider = TracerProvider()
+        provider.add_span_processor(self.processor)
+        provider.add_span_processor(SimpleSpanProcessor(self.exporter))
+        self.tracer = provider.get_tracer("test")
+        _set_active_processor(self.processor)
+        self.token = context.attach(baggage.set_baggage("my.key", "v1"))
+
+    def tearDown(self):
+        context.detach(self.token)
+        _set_active_processor(None)
+
+    def _finished(self, name):
+        return next(s for s in self.exporter.get_finished_spans() if s.name == name)
+
+    def test_register_with_predicate(self):
+        def is_tool_span(span):
+            return (span.attributes or {}).get(GEN_AI_OPERATION_NAME) == "execute_tool"
+
+        self.assertTrue(register_scoped_baggage_key("my.key", is_tool_span))
+
+        tool = self.tracer.start_span("tool")
+        tool.set_attribute(GEN_AI_OPERATION_NAME, "execute_tool")
+        tool.end()
+        self.tracer.start_span("other").end()
+
+        self.assertEqual(self._finished("tool").attributes["my.key"], "v1")
+        self.assertNotIn("my.key", self._finished("other").attributes)
+
+    def test_register_with_builtin_scope_name(self):
+        self.assertTrue(register_scoped_baggage_key("my.key", INFERENCE_SCOPE))
+
+        chat = self.tracer.start_span("chat model", kind=SpanKind.CLIENT)
+        chat.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
+        chat.end()
+
+        self.assertEqual(self._finished("chat model").attributes["my.key"], "v1")
+
+    def test_unknown_scope_name_is_rejected(self):
+        self.assertFalse(register_scoped_baggage_key("my.key", "no_such_scope"))
+        self.assertEqual(self.processor._scoped_keys, {})  # noqa: SLF001
+
+    def test_predicate_errors_skip_the_key(self):
+        def broken(_span):
+            raise ValueError("boom")
+
+        register_scoped_baggage_key("my.key", broken)
+        self.tracer.start_span("s").end()
+
+        self.assertNotIn("my.key", self._finished("s").attributes)
+
+    def test_registration_replaces_the_key_map(self):
+        before = self.processor._scoped_keys  # noqa: SLF001
+        register_scoped_baggage_key("my.key", INFERENCE_SCOPE)
+
+        self.assertEqual(before, {})
+        self.assertIn("my.key", self.processor._scoped_keys)  # noqa: SLF001
+
+    def test_returns_false_without_active_processor(self):
+        _set_active_processor(None)
+        with self.assertLogs("amazon.opentelemetry.distro.scoped_baggage_span_processor", level="WARNING"):
+            self.assertFalse(register_scoped_baggage_key("my.key", INFERENCE_SCOPE))
 
 
 class TestIsGenAiInferenceSpan(unittest.TestCase):

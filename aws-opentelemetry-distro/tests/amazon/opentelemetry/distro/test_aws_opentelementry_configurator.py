@@ -75,6 +75,10 @@ from amazon.opentelemetry.distro.sampler._aws_xray_sampling_client import _AwsXR
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
 from amazon.opentelemetry.distro.scope_based_exporter import ScopeBasedPeriodicExportingMetricReader
 from amazon.opentelemetry.distro.scoped_baggage_span_processor import ScopedBaggageSpanProcessor
+from amazon.opentelemetry.distro.scoped_baggage_span_processor import (
+    _set_active_processor as _set_active_scoped_baggage_processor,
+)
+from amazon.opentelemetry.distro.scoped_baggage_span_processor import register_scoped_baggage_key
 from opentelemetry.environment_variables import OTEL_LOGS_EXPORTER, OTEL_METRICS_EXPORTER, OTEL_TRACES_EXPORTER
 from opentelemetry.exporter.otlp.proto.common._internal.metrics_encoder import OTLPMetricExporterMixin
 from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter as OTLPGrpcLogExporter
@@ -724,6 +728,17 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             _init_tracing({"otlp": MagicMock(return_value=exporter)})
         return [call.args[0] for call in trace_provider.add_span_processor.call_args_list]
 
+    def test_registered_scoped_baggage_key_reaches_installed_processor(self):
+        try:
+            with patch.dict(os.environ, {"AGENT_OBSERVABILITY_ENABLED": "true"}):
+                processors = self._init_tracing_processors()
+            scoped = next(p for p in processors if isinstance(p, ScopedBaggageSpanProcessor))
+
+            self.assertTrue(register_scoped_baggage_key("my.key", "inference"))
+            self.assertIn("my.key", scoped._scoped_keys)
+        finally:
+            _set_active_scoped_baggage_processor(None)
+
     def test_scoped_baggage_processor_not_added_without_agent_observability(self):
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
@@ -740,7 +755,9 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             },
         ):
             processors = self._init_tracing_processors()
-            self.assertFalse(any(isinstance(p, ScopedBaggageSpanProcessor) for p in processors))
+            # The processor stays installed for registered keys, but without the lineage default.
+            scoped = next(p for p in processors if isinstance(p, ScopedBaggageSpanProcessor))
+            self.assertNotIn("aws.agent.lineage", scoped._scoped_keys)
 
             provider = MagicMock()
             _customize_span_processors(provider, Resource.get_empty(), MagicMock())

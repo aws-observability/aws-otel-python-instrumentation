@@ -5,7 +5,7 @@ import logging
 import threading
 import weakref
 from collections import deque
-from typing import Callable, Deque, Dict, Mapping, Optional, Tuple
+from typing import Callable, Deque, Dict, Mapping, Optional, Tuple, Union
 
 from typing_extensions import override
 
@@ -35,6 +35,37 @@ def is_gen_ai_inference_span(span: ReadableSpan) -> bool:
 _SCOPES: Dict[str, Callable[[ReadableSpan], bool]] = {
     INFERENCE_SCOPE: is_gen_ai_inference_span,
 }
+
+# The processor installed by the distro configurator, used by register_scoped_baggage_key().
+_active_processor: Optional["ScopedBaggageSpanProcessor"] = None
+
+
+def register_scoped_baggage_key(key: str, scope: Union[str, Callable[[ReadableSpan], bool]]) -> bool:
+    """Copy baggage entry ``key`` to spans that match ``scope``. Not part of the documented API.
+
+    Call it from application code after the distro has started. ``scope`` is a built-in scope name (for
+    example ``"inference"``) or a predicate that receives the ending span and returns True to copy the
+    key. A predicate runs synchronously at the end of every span that carries the key, so it must be fast
+    and must not modify the span. If it raises, the key is not copied to that span.
+
+    A key that is also listed in OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS is already copied to every span at
+    start, and that value is kept.
+
+    Returns False, without registering, when agent observability is not enabled or the scope is unknown.
+    """
+    if _active_processor is None:
+        _logger.warning(
+            "Cannot register scoped baggage key '%s': the scoped baggage processor is installed only when "
+            "AGENT_OBSERVABILITY_ENABLED=true.",
+            key,
+        )
+        return False
+    return _active_processor.register(key, scope)
+
+
+def _set_active_processor(processor: Optional["ScopedBaggageSpanProcessor"]) -> None:
+    global _active_processor  # pylint: disable=global-statement
+    _active_processor = processor
 
 
 class ScopedBaggageSpanProcessor(SpanProcessor):
@@ -66,25 +97,36 @@ class ScopedBaggageSpanProcessor(SpanProcessor):
         Args:
             scoped_keys: Mapping of baggage key to scope name. Keys with unknown scopes are ignored.
         """
+        # Replaced as a whole on registration (copy-on-write), so span processing reads it without a lock.
         self._scoped_keys: Dict[str, Callable[[ReadableSpan], bool]] = {}
+        self._registration_lock = threading.Lock()
         for key, scope_name in scoped_keys.items():
-            predicate = _SCOPES.get(scope_name)
-            if predicate is None:
-                _logger.warning("Unknown baggage scope '%s' for key '%s'. The key will not be copied.", scope_name, key)
-                continue
-            self._scoped_keys[key] = predicate
+            self.register(key, scope_name)
         self._lock = threading.Lock()
         # (trace_id, span_id) -> (pending baggage, finalizer). Guarded by _lock.
         self._pending_by_span: Dict[Tuple[int, int], Tuple[Dict[str, str], weakref.finalize]] = {}
         # Keys of spans collected without ending. Appended by finalizers without the lock.
         self._collected: Deque[Tuple[int, int]] = deque()
 
+    def register(self, key: str, scope: Union[str, Callable[[ReadableSpan], bool]]) -> bool:
+        """Copy baggage entry ``key`` to spans that match ``scope``, a built-in scope name or a predicate."""
+        predicate = _SCOPES.get(scope) if isinstance(scope, str) else scope
+        if not callable(predicate):
+            _logger.warning("Unknown baggage scope '%s' for key '%s'. The key will not be copied.", scope, key)
+            return False
+        with self._registration_lock:
+            scoped_keys = dict(self._scoped_keys)
+            scoped_keys[key] = predicate
+            self._scoped_keys = scoped_keys
+        return True
+
     @override
     def on_start(self, span: Span, parent_context: Optional[Context] = None) -> None:
-        if not self._scoped_keys or span.context is None:
+        scoped_keys = self._scoped_keys
+        if not scoped_keys or span.context is None:
             return
         entries = baggage.get_all(parent_context)
-        pending = {key: value for key, value in entries.items() if key in self._scoped_keys}
+        pending = {key: value for key, value in entries.items() if key in scoped_keys}
         if not pending:
             self._remove_collected()
             return
@@ -108,9 +150,13 @@ class ScopedBaggageSpanProcessor(SpanProcessor):
             return
         pending, finalizer = entry
         finalizer.detach()
+        scoped_keys = self._scoped_keys
         for key, value in pending.items():
+            predicate = scoped_keys.get(key)
+            if predicate is None:
+                continue
             try:
-                matches = self._scoped_keys[key](span)
+                matches = predicate(span)
             except Exception:  # pylint: disable=broad-exception-caught
                 _logger.debug("Baggage scope check failed for key '%s'", key, exc_info=True)
                 continue
