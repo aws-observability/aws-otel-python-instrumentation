@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
-from typing import Callable, Dict, Mapping, NamedTuple, Optional
+import weakref
+from typing import Callable, Dict, Mapping, Optional, Tuple
 
 from typing_extensions import override
 
@@ -28,22 +29,10 @@ def is_gen_ai_inference_span(span: ReadableSpan) -> bool:
     return (span.attributes or {}).get(GEN_AI_OPERATION_NAME) in GEN_AI_INFERENCE_OPERATIONS
 
 
-def _is_client_span(span: Span) -> bool:
-    return span.kind == SpanKind.CLIENT
-
-
-class _Scope(NamedTuple):
-    # Cheap check at span start. Spans that fail it are not tracked, which keeps memory bounded for
-    # spans that start but never end. It may only use what is fixed at start, such as span kind.
-    may_match: Callable[[Span], bool]
-    # Full check when the span ends, after instrumentations have set their attributes.
-    matches: Callable[[ReadableSpan], bool]
-
-
-# Internal scope registry: scope name -> scope.
-_SCOPES: Dict[str, _Scope] = {
-    # Span kind only changes after start from CLIENT to INTERNAL, so non-CLIENT spans can never match.
-    INFERENCE_SCOPE: _Scope(may_match=_is_client_span, matches=is_gen_ai_inference_span),
+# Internal scope registry: scope name -> predicate evaluated when the span ends. Predicates run only at
+# end because instrumentations and processors can change a span's kind and attributes after it starts.
+_SCOPES: Dict[str, Callable[[ReadableSpan], bool]] = {
+    INFERENCE_SCOPE: is_gen_ai_inference_span,
 }
 
 
@@ -62,6 +51,9 @@ class ScopedBaggageSpanProcessor(SpanProcessor):
     This processor must be registered after GenAINestedClientSpanProcessor, so it sees the corrected
     span kind, and before the batch processors, so exporters see the new attribute.
 
+    Pending baggage is released when the span ends, or when the span is garbage-collected without
+    ending, so abandoned spans do not retain it.
+
     A key is only set when the span does not already have it, so a value set by the instrumentation wins.
     """
 
@@ -70,38 +62,43 @@ class ScopedBaggageSpanProcessor(SpanProcessor):
         Args:
             scoped_keys: Mapping of baggage key to scope name. Keys with unknown scopes are ignored.
         """
-        self._scoped_keys: Dict[str, _Scope] = {}
+        self._scoped_keys: Dict[str, Callable[[ReadableSpan], bool]] = {}
         for key, scope_name in scoped_keys.items():
-            scope = _SCOPES.get(scope_name)
-            if scope is None:
+            predicate = _SCOPES.get(scope_name)
+            if predicate is None:
                 _logger.warning("Unknown baggage scope '%s' for key '%s'. The key will not be copied.", scope_name, key)
                 continue
-            self._scoped_keys[key] = scope
-        self._pending_by_span_id: DictWithLock = DictWithLock()
+            self._scoped_keys[key] = predicate
+        # (trace_id, span_id) -> (pending baggage, finalizer that drops the entry if the span is collected)
+        self._pending_by_span: DictWithLock = DictWithLock()
 
     @override
     def on_start(self, span: Span, parent_context: Optional[Context] = None) -> None:
         if not self._scoped_keys or span.context is None:
             return
         entries = baggage.get_all(parent_context)
-        pending = {
-            key: value
-            for key, value in entries.items()
-            if key in self._scoped_keys and self._scoped_keys[key].may_match(span)
-        }
-        if pending:
-            self._pending_by_span_id.put(span.context.span_id, pending)
+        pending = {key: value for key, value in entries.items() if key in self._scoped_keys}
+        if not pending:
+            return
+        span_key = _span_key(span)
+        # The SDK passes a separate ReadableSpan to on_end, so the entry is keyed by span identity. The
+        # finalizer removes it if the span is garbage-collected without ending.
+        finalizer = weakref.finalize(span, self._pending_by_span.pop, span_key)
+        finalizer.atexit = False
+        self._pending_by_span.put(span_key, (pending, finalizer))
 
     @override
     def on_end(self, span: ReadableSpan) -> None:
         if span.context is None:
             return
-        pending = self._pending_by_span_id.pop(span.context.span_id)
-        if not pending:
+        entry = self._pending_by_span.pop(_span_key(span))
+        if entry is None:
             return
+        pending, finalizer = entry
+        finalizer.detach()
         for key, value in pending.items():
             try:
-                matches = self._scoped_keys[key].matches(span)
+                matches = self._scoped_keys[key](span)
             except Exception:  # pylint: disable=broad-exception-caught
                 _logger.debug("Baggage scope check failed for key '%s'", key, exc_info=True)
                 continue
@@ -110,12 +107,17 @@ class ScopedBaggageSpanProcessor(SpanProcessor):
 
     @override
     def shutdown(self) -> None:
-        self._pending_by_span_id.clear()
+        for _, (_, finalizer) in self._pending_by_span.pop_items_if_matches(lambda _key, _value: True):
+            finalizer.detach()
 
     # pylint: disable=no-self-use
     @override
     def force_flush(self, timeout_millis: int = 30000) -> bool:
         return True
+
+
+def _span_key(span: ReadableSpan) -> Tuple[int, int]:
+    return span.context.trace_id, span.context.span_id
 
 
 def _set_attribute_if_absent(span: ReadableSpan, key: str, value: str) -> None:

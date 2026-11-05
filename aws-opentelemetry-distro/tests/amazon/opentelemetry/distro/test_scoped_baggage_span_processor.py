@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import gc
 import unittest
 
 from amazon.opentelemetry.distro.gen_ai_nested_client_span_processor import GenAINestedClientSpanProcessor
@@ -103,7 +104,7 @@ class TestScopedBaggageSpanProcessor(unittest.TestCase):
         self._start(name="tool", op="execute_tool").end()
         self._start().end()
 
-        self.assertEqual(self.processor._pending_by_span_id._data, {})  # noqa: SLF001
+        self.assertEqual(self.processor._pending_by_span._data, {})  # noqa: SLF001
 
     def test_full_attribute_container_skips_without_evicting(self):
         exporter = InMemorySpanExporter()
@@ -130,11 +131,28 @@ class TestScopedBaggageSpanProcessor(unittest.TestCase):
 
         self.assertEqual(exporter.get_finished_spans()[0].attributes[AWS_AGENT_LINEAGE], LINEAGE[:6])
 
-    def test_non_client_spans_are_not_tracked(self):
-        # Spans that start but never end must not accumulate state. Only CLIENT spans can match.
-        for _ in range(10):
-            self.tracer.start_span("agent", kind=SpanKind.INTERNAL)
-        self.assertEqual(self.processor._pending_by_span_id._data, {})  # noqa: SLF001
+    def test_pending_baggage_released_when_unended_span_is_collected(self):
+        # Spans of any kind that start but never end must not retain pending baggage once collected.
+        for kind in (SpanKind.CLIENT, SpanKind.INTERNAL):
+            for _ in range(100):
+                self.tracer.start_span("abandoned", kind=kind)
+        gc.collect()
+
+        self.assertEqual(self.processor._pending_by_span._data, {})  # noqa: SLF001
+
+    def test_span_promoted_to_client_after_start_still_matches(self):
+        # A span can start as INTERNAL and be changed to CLIENT before it ends.
+        span = self._start(kind=SpanKind.INTERNAL)
+        span._kind = SpanKind.CLIENT  # noqa: SLF001
+        span.end()
+
+        self.assertEqual(self._finished("chat model").attributes[AWS_AGENT_LINEAGE], LINEAGE)
+
+    def test_shutdown_clears_pending_state(self):
+        self._start()
+        self.processor.shutdown()
+
+        self.assertEqual(self.processor._pending_by_span._data, {})  # noqa: SLF001
 
     def test_unknown_scope_is_ignored(self):
         with self.assertLogs("amazon.opentelemetry.distro.scoped_baggage_span_processor", level="WARNING"):
