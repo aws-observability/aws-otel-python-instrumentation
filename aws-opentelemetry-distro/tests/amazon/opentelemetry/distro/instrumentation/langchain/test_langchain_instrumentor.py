@@ -74,6 +74,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_TOOL_CALL_ARGUMENTS,
     GEN_AI_TOOL_CALL_ID,
     GEN_AI_TOOL_CALL_RESULT,
+    GEN_AI_TOOL_DEFINITIONS,
     GEN_AI_TOOL_DESCRIPTION,
     GEN_AI_TOOL_NAME,
     GEN_AI_TOOL_TYPE,
@@ -1750,6 +1751,57 @@ class TestLangChainInstrumentor(TestCase):
                 self.assertEqual(attrs.get(GEN_AI_RESPONSE_FINISH_REASONS), ("stop",))
                 for attribute, value in expected_request_attributes.items():
                     self.assertEqual(attrs.get(attribute), value)
+
+    def test_llm_span_records_tool_definitions(self):
+        from langchain_aws import ChatBedrock, ChatBedrockConverse
+        from langchain_cohere import ChatCohere
+
+        @tool
+        def get_weather(city: str) -> str:
+            """Get the weather for a city."""
+            return "sunny"
+
+        fake_result = ChatResult(
+            generations=[ChatGeneration(message=AIMessage(content="ok"), generation_info={"finish_reason": "stop"})],
+            llm_output={"model_name": "test", "token_usage": {"prompt_tokens": 1, "completion_tokens": 1}},
+        )
+        weather = {"name": "get_weather", "description": "Get the weather for a city."}
+        schema = {"type": "object", "properties": {"city": {"type": "string"}}}
+
+        def bedrock():
+            return ChatBedrock(model_id="anthropic.claude-3-haiku-20240307-v1:0", region_name="us-east-1")
+
+        # One case per tool format found in invocation_params; bind kwargs of None means bind_tools([get_weather]).
+        cases = [
+            # {"type": "function", "function": {...}}, shared by OpenAI, Gemini, Mistral, etc.
+            ("nested function", lambda: ChatBedrockConverse(model="test", region_name="us-east-1"), None),
+            # Cohere ToolV2 pydantic objects instead of dicts.
+            ("object", lambda: ChatCohere(cohere_api_key="fake", model="command-a-03-2025"), None),
+            # Anthropic {"name", "description", "input_schema"}; the provider built-in tool is skipped.
+            (
+                "flat input_schema",
+                bedrock,
+                {"tools": [{"type": "web_search_20250305", "name": "web_search"}, {**weather, "input_schema": schema}]},
+            ),
+            # Legacy OpenAI functions under invocation_params["functions"].
+            ("legacy functions", bedrock, {"functions": [{**weather, "parameters": schema}]}),
+        ]
+
+        for label, make_llm, bind_kwargs in cases:
+            with self.subTest(case=label):
+                self.span_exporter.clear()
+                llm = make_llm()
+                with patch.object(type(llm), "_generate", return_value=fake_result):
+                    (llm.bind_tools([get_weather]) if bind_kwargs is None else llm.bind(**bind_kwargs)).invoke("hi")
+
+                (span,) = [s for s in self.span_exporter.get_finished_spans() if "chat" in s.name]
+                tool_defs = json.loads(span.attributes[GEN_AI_TOOL_DEFINITIONS])
+                validate_otel_genai_schema(tool_defs, "gen-ai-tool-definitions")
+                self.assertEqual(len(tool_defs), 1)
+                self.assertEqual(
+                    {k: tool_defs[0][k] for k in ("type", "name", "description")}, {"type": "function", **weather}
+                )
+                self.assertIn("city", tool_defs[0]["parameters"]["properties"])
 
     def test_provider_extracted_from_serialized_id(self):
         FakeChatModel = self.FakeChatModel

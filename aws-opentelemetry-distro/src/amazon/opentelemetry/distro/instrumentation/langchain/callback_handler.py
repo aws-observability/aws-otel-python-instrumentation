@@ -51,6 +51,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_TOOL_CALL_ID,
     GEN_AI_TOOL_CALL_RESULT,
     GEN_AI_TOOL_DESCRIPTION,
+    GEN_AI_TOOL_DEFINITIONS,
     GEN_AI_TOOL_NAME,
     GEN_AI_TOOL_TYPE,
     GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS,
@@ -93,7 +94,49 @@ class _SpanEntry:
     token: Token
     agent_content: Optional[_AgentContent] = None
 
+# Adapted from opentelemetry-python-genai (Apache-2.0):
+# https://github.com/open-telemetry/opentelemetry-python-genai/blob/main/instrumentation/opentelemetry-instrumentation-genai-langchain/src/opentelemetry/instrumentation/genai/langchain/utils.py
+def _get_property_value(obj: Any, property_name: str) -> Any:
+    if isinstance(obj, dict):
+        return obj.get(property_name)
 
+    return getattr(obj, property_name, None)
+
+def _extract_tool_definitions(tools: Any) -> list[dict[str, Any]]:
+    """Normalize LangChain provider tool formats to OTel gen_ai.tool.definitions entries."""
+    definitions = []
+    if not tools:
+        return []
+    for tool in tools:
+        tool_type = _get_property_value(tool, "type")
+
+        if tool_type == "function":
+            # OpenAI format (ChatOpenAI, ChatBedrockConverse, Gemini, Mistral, Cohere, ...):
+            # {"type": "function", "function": {"name", "description", "parameters"}}
+            spec = _get_property_value(tool, "function") or {}
+            parameters = _get_property_value(spec, "parameters")
+        elif tool_type is None:
+            # Flat formats with no "type":
+            #   Legacy OpenAI functions: {"name", "description", "parameters"}
+            #   Anthropic (ChatAnthropic, ChatBedrock InvokeModel): {"name", "description", "input_schema"}
+            spec = tool
+            parameters = _get_property_value(spec, "parameters") or _get_property_value(spec, "input_schema")
+        else:
+            # Provider built-in tools (e.g. web search) are not function tools.
+            continue
+
+        name = _get_property_value(spec, "name")
+        if not name:
+            continue
+
+        definition = {"type": "function", "name": name}
+        if description := _get_property_value(spec, "description"):
+            definition["description"] = description
+        if parameters:
+            definition["parameters"] = parameters
+        definitions.append(definition)
+    return definitions
+    
 class _BaseCallbackManagerInitWrapper:
     """Wrapper for BaseCallbackManager.__init__ to inject OpenTelemetry callback handler."""
 
@@ -157,6 +200,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         self._set_span_attribute(span, GEN_AI_PROVIDER_NAME, provider)
         self._set_span_attribute(span, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
         self._set_span_attribute(span, GEN_AI_INPUT_MESSAGES, serialize_to_json_string(conversation))
+
 
         if system_instructions:
             self._set_span_attribute(span, GEN_AI_SYSTEM_INSTRUCTIONS, serialize_to_json_string(system_instructions))
@@ -856,6 +900,9 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
                 nested_additional_model_request_fields.get("streaming"),
             ),
         )
+        if tool_defs := _extract_tool_definitions(params.get("tools") or params.get("functions")):
+            self._set_span_attribute(span, GEN_AI_TOOL_DEFINITIONS, serialize_to_json_string(tool_defs))
+
 
     def _should_skip_chain(
         self, serialized: dict[str, Any], name: Optional[str], metadata: Optional[dict] = None
