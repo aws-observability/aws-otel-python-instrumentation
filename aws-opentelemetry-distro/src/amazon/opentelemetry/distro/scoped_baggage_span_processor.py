@@ -2,13 +2,14 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
+import threading
 import weakref
-from typing import Callable, Dict, Mapping, Optional, Tuple
+from collections import deque
+from typing import Callable, Deque, Dict, Mapping, Optional, Tuple
 
 from typing_extensions import override
 
 from amazon.opentelemetry.distro.gen_ai_nested_client_span_processor import GEN_AI_INFERENCE_OPERATIONS
-from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import DictWithLock
 from opentelemetry import baggage
 from opentelemetry.attributes import BoundedAttributes
 from opentelemetry.context import Context
@@ -52,7 +53,9 @@ class ScopedBaggageSpanProcessor(SpanProcessor):
     span kind, and before the batch processors, so exporters see the new attribute.
 
     Pending baggage is released when the span ends, or when the span is garbage-collected without
-    ending, so abandoned spans do not retain it.
+    ending, so abandoned spans do not retain it. Garbage collection can run a finalizer at any
+    allocation, including while this processor holds its lock, so the finalizer never takes the lock.
+    It only queues the span's key on a thread-safe deque, and the locked paths remove queued entries.
 
     A key is only set when the span does not already have it, so a value set by the instrumentation wins.
     """
@@ -69,8 +72,11 @@ class ScopedBaggageSpanProcessor(SpanProcessor):
                 _logger.warning("Unknown baggage scope '%s' for key '%s'. The key will not be copied.", scope_name, key)
                 continue
             self._scoped_keys[key] = predicate
-        # (trace_id, span_id) -> (pending baggage, finalizer that drops the entry if the span is collected)
-        self._pending_by_span: DictWithLock = DictWithLock()
+        self._lock = threading.Lock()
+        # (trace_id, span_id) -> (pending baggage, finalizer). Guarded by _lock.
+        self._pending_by_span: Dict[Tuple[int, int], Tuple[Dict[str, str], weakref.finalize]] = {}
+        # Keys of spans collected without ending. Appended by finalizers without the lock.
+        self._collected: Deque[Tuple[int, int]] = deque()
 
     @override
     def on_start(self, span: Span, parent_context: Optional[Context] = None) -> None:
@@ -82,16 +88,19 @@ class ScopedBaggageSpanProcessor(SpanProcessor):
             return
         span_key = _span_key(span)
         # The SDK passes a separate ReadableSpan to on_end, so the entry is keyed by span identity. The
-        # finalizer removes it if the span is garbage-collected without ending.
-        finalizer = weakref.finalize(span, self._pending_by_span.pop, span_key)
+        # finalizer queues the key for removal if the span is garbage-collected without ending.
+        finalizer = weakref.finalize(span, self._collected.append, span_key)
         finalizer.atexit = False
-        self._pending_by_span.put(span_key, (pending, finalizer))
+        with self._lock:
+            self._remove_collected_locked()
+            self._pending_by_span[span_key] = (pending, finalizer)
 
     @override
     def on_end(self, span: ReadableSpan) -> None:
         if span.context is None:
             return
-        entry = self._pending_by_span.pop(_span_key(span))
+        with self._lock:
+            entry = self._pending_by_span.pop(_span_key(span), None)
         if entry is None:
             return
         pending, finalizer = entry
@@ -107,8 +116,16 @@ class ScopedBaggageSpanProcessor(SpanProcessor):
 
     @override
     def shutdown(self) -> None:
-        for _, (_, finalizer) in self._pending_by_span.pop_items_if_matches(lambda _key, _value: True):
+        with self._lock:
+            entries = list(self._pending_by_span.values())
+            self._pending_by_span.clear()
+            self._collected.clear()
+        for _, finalizer in entries:
             finalizer.detach()
+
+    def _remove_collected_locked(self) -> None:
+        while self._collected:
+            self._pending_by_span.pop(self._collected.popleft(), None)
 
     # pylint: disable=no-self-use
     @override

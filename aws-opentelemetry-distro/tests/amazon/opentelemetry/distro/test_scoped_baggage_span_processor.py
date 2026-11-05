@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import gc
+import threading
 import unittest
 
 from amazon.opentelemetry.distro.gen_ai_nested_client_span_processor import GenAINestedClientSpanProcessor
@@ -104,7 +105,7 @@ class TestScopedBaggageSpanProcessor(unittest.TestCase):
         self._start(name="tool", op="execute_tool").end()
         self._start().end()
 
-        self.assertEqual(self.processor._pending_by_span._data, {})  # noqa: SLF001
+        self.assertEqual(self.processor._pending_by_span, {})  # noqa: SLF001
 
     def test_full_attribute_container_skips_without_evicting(self):
         exporter = InMemorySpanExporter()
@@ -137,8 +138,31 @@ class TestScopedBaggageSpanProcessor(unittest.TestCase):
             for _ in range(100):
                 self.tracer.start_span("abandoned", kind=kind)
         gc.collect()
+        # Collected entries are removed the next time the processor takes its lock.
+        self._start().end()
 
-        self.assertEqual(self.processor._pending_by_span._data, {})  # noqa: SLF001
+        self.assertEqual(self.processor._pending_by_span, {})  # noqa: SLF001
+
+    def test_finalizer_does_not_deadlock_while_processor_holds_its_lock(self):
+        # Garbage collection can run a finalizer while the processor holds its lock, for example during an
+        # allocation inside shutdown(). The finalizer must not try to take the lock.
+        span = self.tracer.start_span("abandoned", kind=SpanKind.CLIENT)
+        cycle = [span]
+        cycle.append(cycle)  # Keep the span alive until the cyclic collector runs.
+        del span, cycle
+
+        def collect_inside_lock():
+            with self.processor._lock:  # noqa: SLF001
+                gc.collect()
+
+        worker = threading.Thread(target=collect_inside_lock, daemon=True)
+        worker.start()
+        worker.join(timeout=5)
+        self.assertFalse(worker.is_alive(), "finalizer deadlocked on the processor lock")
+        self.assertEqual(len(self.processor._collected), 1)  # noqa: SLF001
+
+        self.processor.shutdown()
+        self.assertEqual(self.processor._pending_by_span, {})  # noqa: SLF001
 
     def test_span_promoted_to_client_after_start_still_matches(self):
         # A span can start as INTERNAL and be changed to CLIENT before it ends.
@@ -148,11 +172,14 @@ class TestScopedBaggageSpanProcessor(unittest.TestCase):
 
         self.assertEqual(self._finished("chat model").attributes[AWS_AGENT_LINEAGE], LINEAGE)
 
-    def test_shutdown_clears_pending_state(self):
-        self._start()
+    def test_shutdown_clears_pending_state_and_detaches_finalizers(self):
+        span = self._start()
+        finalizer = self.processor._pending_by_span[(span.context.trace_id, span.context.span_id)][1]  # noqa: SLF001
         self.processor.shutdown()
 
-        self.assertEqual(self.processor._pending_by_span._data, {})  # noqa: SLF001
+        self.assertEqual(self.processor._pending_by_span, {})  # noqa: SLF001
+        self.assertFalse(finalizer.alive)
+        span.end()
 
     def test_unknown_scope_is_ignored(self):
         with self.assertLogs("amazon.opentelemetry.distro.scoped_baggage_span_processor", level="WARNING"):
