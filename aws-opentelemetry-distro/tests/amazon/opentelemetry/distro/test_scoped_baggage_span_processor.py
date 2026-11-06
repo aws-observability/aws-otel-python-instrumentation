@@ -10,6 +10,7 @@ from amazon.opentelemetry.distro.scoped_baggage_span_processor import (
     AWS_AGENT_LINEAGE,
     INFERENCE_SCOPE,
     ScopedBaggageSpanProcessor,
+    _claim_active_processor,
     _set_active_processor,
     is_gen_ai_inference_span,
     register_scoped_baggage_key,
@@ -324,6 +325,20 @@ class TestRegisterScopedBaggageKey(unittest.TestCase):
 
         self.assertEqual(before, {})
         self.assertIn("my.key", self.processor._scoped_keys)  # noqa: SLF001
+
+    def test_first_processor_keeps_the_hook(self):
+        self.assertFalse(_claim_active_processor(ScopedBaggageSpanProcessor({})))
+        self.assertTrue(register_scoped_baggage_key("my.key", INFERENCE_SCOPE))
+        self.assertIn("my.key", self.processor._scoped_keys)  # noqa: SLF001
+
+    def test_shutdown_releases_the_hook(self):
+        self.processor.shutdown()
+        with self.assertLogs("amazon.opentelemetry.distro.scoped_baggage_span_processor", level="WARNING"):
+            self.assertFalse(register_scoped_baggage_key("my.key", INFERENCE_SCOPE))
+
+        replacement = ScopedBaggageSpanProcessor({})
+        self.assertTrue(_claim_active_processor(replacement))
+        self.assertTrue(register_scoped_baggage_key("my.key", INFERENCE_SCOPE))
 
     def test_returns_false_without_active_processor(self):
         _set_active_processor(None)

@@ -729,6 +729,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         return [call.args[0] for call in trace_provider.add_span_processor.call_args_list]
 
     def test_registered_scoped_baggage_key_reaches_installed_processor(self):
+        _set_active_scoped_baggage_processor(None)
         try:
             with patch.dict(os.environ, {"AGENT_OBSERVABILITY_ENABLED": "true"}):
                 processors = self._init_tracing_processors()

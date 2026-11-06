@@ -63,9 +63,34 @@ def register_scoped_baggage_key(key: str, scope: Union[str, Callable[[ReadableSp
     return _active_processor.register(key, scope)
 
 
-def _set_active_processor(processor: Optional["ScopedBaggageSpanProcessor"]) -> None:
+_active_processor_lock = threading.Lock()
+
+
+def _claim_active_processor(processor: "ScopedBaggageSpanProcessor") -> bool:
+    """Make ``processor`` the hook target unless another processor already is.
+
+    The first configuration owns the global tracer provider, so its processor is the one that sees spans.
+    """
     global _active_processor  # pylint: disable=global-statement
-    _active_processor = processor
+    with _active_processor_lock:
+        if _active_processor is not None:
+            return False
+        _active_processor = processor
+        return True
+
+
+def _release_active_processor(processor: "ScopedBaggageSpanProcessor") -> None:
+    global _active_processor  # pylint: disable=global-statement
+    with _active_processor_lock:
+        if _active_processor is processor:
+            _active_processor = None
+
+
+def _set_active_processor(processor: Optional["ScopedBaggageSpanProcessor"]) -> None:
+    """Set or clear the hook target unconditionally. For tests."""
+    global _active_processor  # pylint: disable=global-statement
+    with _active_processor_lock:
+        _active_processor = processor
 
 
 class ScopedBaggageSpanProcessor(SpanProcessor):
@@ -165,6 +190,7 @@ class ScopedBaggageSpanProcessor(SpanProcessor):
 
     @override
     def shutdown(self) -> None:
+        _release_active_processor(self)
         with self._lock:
             entries = list(self._pending_by_span.values())
             self._pending_by_span.clear()

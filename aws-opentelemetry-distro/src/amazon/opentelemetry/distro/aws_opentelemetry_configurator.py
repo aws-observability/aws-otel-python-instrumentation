@@ -56,7 +56,7 @@ from amazon.opentelemetry.distro.scoped_baggage_span_processor import (
     ScopedBaggageSpanProcessor,
 )
 from amazon.opentelemetry.distro.scoped_baggage_span_processor import (
-    _set_active_processor as _set_active_scoped_baggage_processor,
+    _claim_active_processor as _claim_active_scoped_baggage_processor,
 )
 from opentelemetry._logs import get_logger_provider, set_logger_provider
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
@@ -361,7 +361,8 @@ def _init_tracing(
     # later with register_scoped_baggage_key() have a processor to attach to.
     if is_agent_observability_enabled():
         scoped_baggage_processor = ScopedBaggageSpanProcessor(_get_scoped_baggage_keys())
-        _set_active_scoped_baggage_processor(scoped_baggage_processor)
+        # The first configuration keeps the hook, as it owns the global tracer provider.
+        _claim_active_scoped_baggage_processor(scoped_baggage_processor)
         trace_provider.add_span_processor(scoped_baggage_processor)
 
     # This processor modifies attributes in on_end, so it must run before batch
