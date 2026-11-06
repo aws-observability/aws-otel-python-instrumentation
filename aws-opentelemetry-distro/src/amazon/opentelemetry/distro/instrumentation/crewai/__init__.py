@@ -19,6 +19,10 @@ class CrewAIInstrumentor(BaseInstrumentor):
     Instrumentation currently follows OpenTelemetry semantic conventions v1.39 for gen_ai attributes.
     See: https://opentelemetry.io/docs/specs/semconv/registry/attributes/gen-ai/
     Note: Semantic conventions may change in future versions.
+
+    Errors: failed crew, agent, LLM and tool spans set error.type to the class name of the exception that caused
+    the failure (for example TimeoutError or RateLimitError), or _OTHER when it is unknown. The error message is
+    recorded only as the span status description.
     """
 
     def __init__(self, **kwargs: Any) -> None:
