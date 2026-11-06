@@ -50,7 +50,9 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     _is_defer_to_workers_enabled,
     _is_serviceevents_enabled,
     _is_wsgi_master_process,
+    _parse_baggage_span_attribute_keys,
     _parse_config_string,
+    _parse_otel_baggage_keys_env_var,
     fetch_otlp_logs_header,
 )
 from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetryDistro
@@ -75,10 +77,6 @@ from amazon.opentelemetry.distro.sampler._aws_xray_sampling_client import _AwsXR
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
 from amazon.opentelemetry.distro.scope_based_exporter import ScopeBasedPeriodicExportingMetricReader
 from amazon.opentelemetry.distro.scoped_baggage_span_processor import ScopedBaggageSpanProcessor
-from amazon.opentelemetry.distro.scoped_baggage_span_processor import (
-    _set_active_processor as _set_active_scoped_baggage_processor,
-)
-from amazon.opentelemetry.distro.scoped_baggage_span_processor import register_scoped_baggage_key
 from opentelemetry.environment_variables import OTEL_LOGS_EXPORTER, OTEL_METRICS_EXPORTER, OTEL_TRACES_EXPORTER
 from opentelemetry.exporter.otlp.proto.common._internal.metrics_encoder import OTLPMetricExporterMixin
 from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter as OTLPGrpcLogExporter
@@ -713,6 +711,33 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             os.environ["OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS"] = "tenant.id, aws.agent.lineage"
             self.assertEqual(_get_scoped_baggage_keys(), {})
 
+            # A customer scope for aws.agent.lineage replaces the default scope.
+            os.environ["OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS"] = "aws.agent.lineage:tools"
+            self.assertEqual(_get_scoped_baggage_keys(), {"aws.agent.lineage": "tools"})
+
+    def test_parse_baggage_span_attribute_keys(self):
+        with patch.dict(
+            os.environ,
+            {
+                "OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS": (
+                    " session.id , my.key:tools,other.key : inference ,empty:, ,dup:tools,dup"
+                )
+            },
+        ):
+            self.assertEqual(
+                _parse_baggage_span_attribute_keys(),
+                ({"session.id", "empty", "dup"}, {"my.key": "tools", "other.key": "inference"}),
+            )
+            # Keys with a scope are not copied to every span by BaggageSpanProcessor.
+            self.assertEqual(_parse_otel_baggage_keys_env_var(), {"session.id", "empty", "dup"})
+
+    def test_scoped_keys_from_env_install_the_processor_without_agent_observability(self):
+        with patch.dict(os.environ, {"OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS": "my.key:inference"}, clear=False):
+            os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
+            processors = self._init_tracing_processors()
+        scoped = next(p for p in processors if isinstance(p, ScopedBaggageSpanProcessor))
+        self.assertEqual(scoped._scoped_keys, {"my.key": "inference"})
+
     @staticmethod
     def _init_tracing_processors() -> list:
         trace_provider = MagicMock()
@@ -728,21 +753,10 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             _init_tracing({"otlp": MagicMock(return_value=exporter)})
         return [call.args[0] for call in trace_provider.add_span_processor.call_args_list]
 
-    def test_registered_scoped_baggage_key_reaches_installed_processor(self):
-        _set_active_scoped_baggage_processor(None)
-        try:
-            with patch.dict(os.environ, {"AGENT_OBSERVABILITY_ENABLED": "true"}):
-                processors = self._init_tracing_processors()
-            scoped = next(p for p in processors if isinstance(p, ScopedBaggageSpanProcessor))
-
-            self.assertTrue(register_scoped_baggage_key("my.key", "inference"))
-            self.assertIn("my.key", scoped._scoped_keys)
-        finally:
-            _set_active_scoped_baggage_processor(None)
-
     def test_scoped_baggage_processor_not_added_without_agent_observability(self):
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
+            os.environ.pop("OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS", None)
             processors = self._init_tracing_processors()
         self.assertFalse(any(isinstance(p, ScopedBaggageSpanProcessor) for p in processors))
 
@@ -756,9 +770,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             },
         ):
             processors = self._init_tracing_processors()
-            # The processor stays installed for registered keys, but without the lineage default.
-            scoped = next(p for p in processors if isinstance(p, ScopedBaggageSpanProcessor))
-            self.assertNotIn("aws.agent.lineage", scoped._scoped_keys)
+            self.assertFalse(any(isinstance(p, ScopedBaggageSpanProcessor) for p in processors))
 
             provider = MagicMock()
             _customize_span_processors(provider, Resource.get_empty(), MagicMock())

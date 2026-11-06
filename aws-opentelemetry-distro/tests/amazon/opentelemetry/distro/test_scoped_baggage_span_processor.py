@@ -10,10 +10,9 @@ from amazon.opentelemetry.distro.scoped_baggage_span_processor import (
     AWS_AGENT_LINEAGE,
     INFERENCE_SCOPE,
     ScopedBaggageSpanProcessor,
-    _claim_active_processor,
-    _set_active_processor,
+    _clear_registered_scopes,
     is_gen_ai_inference_span,
-    register_scoped_baggage_key,
+    register_baggage_scope,
 )
 from opentelemetry import baggage, context, trace
 from opentelemetry.processor.baggage import BaggageSpanProcessor
@@ -216,10 +215,19 @@ class TestScopedBaggageSpanProcessor(unittest.TestCase):
         self.assertFalse(finalizer.alive)
         span.end()
 
-    def test_unknown_scope_is_ignored(self):
-        with self.assertLogs("amazon.opentelemetry.distro.scoped_baggage_span_processor", level="WARNING"):
-            processor = ScopedBaggageSpanProcessor({"my.key": "no_such_scope"})
-        self.assertEqual(processor._scoped_keys, {})  # noqa: SLF001
+    def test_unknown_scope_skips_the_key_and_warns_once(self):
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(ScopedBaggageSpanProcessor({AWS_AGENT_LINEAGE: "no_such_scope"}))
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        tracer = provider.get_tracer("test")
+
+        with self.assertLogs("amazon.opentelemetry.distro.scoped_baggage_span_processor", level="WARNING") as logs:
+            for _ in range(3):
+                tracer.start_span("s").end()
+
+        self.assertEqual(len(logs.records), 1)
+        self.assertTrue(all(AWS_AGENT_LINEAGE not in span.attributes for span in exporter.get_finished_spans()))
 
     def test_only_innermost_client_span_gets_lineage_with_nested_processor(self):
         exporter = InMemorySpanExporter()
@@ -265,85 +273,90 @@ class TestScopedBaggageSpanProcessor(unittest.TestCase):
         self.assertEqual(spans["chat model"].attributes[AWS_AGENT_LINEAGE], LINEAGE)
 
 
-class TestRegisterScopedBaggageKey(unittest.TestCase):
+class TestRegisterBaggageScope(unittest.TestCase):
     def setUp(self):
         self.exporter = InMemorySpanExporter()
-        self.processor = ScopedBaggageSpanProcessor({})
         provider = TracerProvider()
-        provider.add_span_processor(self.processor)
+        # As configured from OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS=my.key:tools before the scope is registered.
+        provider.add_span_processor(ScopedBaggageSpanProcessor({"my.key": "tools"}))
         provider.add_span_processor(SimpleSpanProcessor(self.exporter))
         self.tracer = provider.get_tracer("test")
-        _set_active_processor(self.processor)
         self.token = context.attach(baggage.set_baggage("my.key", "v1"))
 
     def tearDown(self):
         context.detach(self.token)
-        _set_active_processor(None)
+        _clear_registered_scopes()
 
     def _finished(self, name):
         return next(s for s in self.exporter.get_finished_spans() if s.name == name)
 
-    def test_register_with_predicate(self):
-        def is_tool_span(span):
-            return (span.attributes or {}).get(GEN_AI_OPERATION_NAME) == "execute_tool"
+    @staticmethod
+    def _is_tool_span(span):
+        return (span.attributes or {}).get(GEN_AI_OPERATION_NAME) == "execute_tool"
 
-        self.assertTrue(register_scoped_baggage_key("my.key", is_tool_span))
+    def _tool_span(self, name="tool"):
+        span = self.tracer.start_span(name)
+        span.set_attribute(GEN_AI_OPERATION_NAME, "execute_tool")
+        return span
 
-        tool = self.tracer.start_span("tool")
-        tool.set_attribute(GEN_AI_OPERATION_NAME, "execute_tool")
-        tool.end()
+    def test_registered_scope_applies_to_keys_mapped_in_env(self):
+        self.assertTrue(register_baggage_scope("tools", self._is_tool_span))
+
+        self._tool_span().end()
         self.tracer.start_span("other").end()
 
         self.assertEqual(self._finished("tool").attributes["my.key"], "v1")
         self.assertNotIn("my.key", self._finished("other").attributes)
 
-    def test_register_with_builtin_scope_name(self):
-        self.assertTrue(register_scoped_baggage_key("my.key", INFERENCE_SCOPE))
+    def test_scope_registered_after_span_start_applies_at_end(self):
+        span = self._tool_span()
+        register_baggage_scope("tools", self._is_tool_span)
+        span.end()
 
-        chat = self.tracer.start_span("chat model", kind=SpanKind.CLIENT)
-        chat.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
-        chat.end()
+        self.assertEqual(self._finished("tool").attributes["my.key"], "v1")
 
-        self.assertEqual(self._finished("chat model").attributes["my.key"], "v1")
+    def test_key_not_copied_before_scope_is_registered(self):
+        with self.assertLogs("amazon.opentelemetry.distro.scoped_baggage_span_processor", level="WARNING"):
+            self._tool_span("before").end()
+        register_baggage_scope("tools", self._is_tool_span)
+        self._tool_span("after").end()
 
-    def test_unknown_scope_name_is_rejected(self):
-        self.assertFalse(register_scoped_baggage_key("my.key", "no_such_scope"))
-        self.assertEqual(self.processor._scoped_keys, {})  # noqa: SLF001
+        self.assertNotIn("my.key", self._finished("before").attributes)
+        self.assertEqual(self._finished("after").attributes["my.key"], "v1")
+
+    def test_re_registering_replaces_the_scope(self):
+        register_baggage_scope("tools", lambda span: False)
+        register_baggage_scope("tools", self._is_tool_span)
+        self._tool_span().end()
+
+        self.assertEqual(self._finished("tool").attributes["my.key"], "v1")
 
     def test_predicate_errors_skip_the_key(self):
         def broken(_span):
             raise ValueError("boom")
 
-        register_scoped_baggage_key("my.key", broken)
-        self.tracer.start_span("s").end()
+        register_baggage_scope("tools", broken)
+        self._tool_span().end()
 
-        self.assertNotIn("my.key", self._finished("s").attributes)
+        self.assertNotIn("my.key", self._finished("tool").attributes)
 
-    def test_registration_replaces_the_key_map(self):
-        before = self.processor._scoped_keys  # noqa: SLF001
-        register_scoped_baggage_key("my.key", INFERENCE_SCOPE)
-
-        self.assertEqual(before, {})
-        self.assertIn("my.key", self.processor._scoped_keys)  # noqa: SLF001
-
-    def test_first_processor_keeps_the_hook(self):
-        self.assertFalse(_claim_active_processor(ScopedBaggageSpanProcessor({})))
-        self.assertTrue(register_scoped_baggage_key("my.key", INFERENCE_SCOPE))
-        self.assertIn("my.key", self.processor._scoped_keys)  # noqa: SLF001
-
-    def test_shutdown_releases_the_hook(self):
-        self.processor.shutdown()
+    def test_invalid_registrations_are_rejected(self):
+        for name in ("", " tools", "a:b", "a,b", INFERENCE_SCOPE):
+            with self.assertLogs("amazon.opentelemetry.distro.scoped_baggage_span_processor", level="WARNING"):
+                self.assertFalse(register_baggage_scope(name, self._is_tool_span), name)
         with self.assertLogs("amazon.opentelemetry.distro.scoped_baggage_span_processor", level="WARNING"):
-            self.assertFalse(register_scoped_baggage_key("my.key", INFERENCE_SCOPE))
+            self.assertFalse(register_baggage_scope("tools", "not callable"))
 
-        replacement = ScopedBaggageSpanProcessor({})
-        self.assertTrue(_claim_active_processor(replacement))
-        self.assertTrue(register_scoped_baggage_key("my.key", INFERENCE_SCOPE))
-
-    def test_returns_false_without_active_processor(self):
-        _set_active_processor(None)
+    def test_builtin_scope_still_works_after_rejected_override(self):
         with self.assertLogs("amazon.opentelemetry.distro.scoped_baggage_span_processor", level="WARNING"):
-            self.assertFalse(register_scoped_baggage_key("my.key", INFERENCE_SCOPE))
+            register_baggage_scope(INFERENCE_SCOPE, lambda span: True)
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(ScopedBaggageSpanProcessor({"my.key": INFERENCE_SCOPE}))
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        provider.get_tracer("test").start_span("internal").end()
+
+        self.assertNotIn("my.key", exporter.get_finished_spans()[0].attributes)
 
 
 class TestIsGenAiInferenceSpan(unittest.TestCase):
