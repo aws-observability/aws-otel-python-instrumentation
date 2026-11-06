@@ -345,6 +345,11 @@ class OpenTelemetryEventHandler:
                 [self._to_input_message(m) for m in messages if isinstance(m, dict)]
             )
 
+        # same attribute the crew span sets in _on_crew_start
+        tools = first_not_none(getattr(event, "tools", None), getattr(agent, "tools", None))
+        if tools and (tool_defs := self._extract_tool_definitions(tools)):
+            attributes[GEN_AI_TOOL_DEFINITIONS] = serialize_to_json_string(tool_defs)
+
         self._start_span(
             span_name, event.event_id, attributes, self._get_parent_event_id(event), root_event_id=event.event_id
         )
