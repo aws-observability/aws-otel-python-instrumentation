@@ -350,6 +350,11 @@ class OpenTelemetryEventHandler:
         if tools and (tool_defs := self._extract_tool_definitions(tools)):
             attributes[GEN_AI_TOOL_DEFINITIONS] = serialize_to_json_string(tool_defs)
 
+        # Agent.kickoff() runs an agent on its own, without a Crew or Task, and emits LiteAgentExecution* events:
+        # https://docs.crewai.com/v1.15.35/en/concepts/agents#direct-agent-interaction-with-kickoff
+        # Unlike _on_agent_start, this passes its own root_event_id so _end_spans_for_root_event ends this span and
+        # its children when the kickoff completes. When kickoff() runs inside a crew (from a tool or a Task string
+        # guardrail), inheriting the crew's root would leave this span open until the crew ends.
         self._start_span(
             span_name, event.event_id, attributes, self._get_parent_event_id(event), root_event_id=event.event_id
         )
