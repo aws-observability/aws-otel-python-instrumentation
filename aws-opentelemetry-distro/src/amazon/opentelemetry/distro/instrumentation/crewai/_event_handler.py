@@ -120,6 +120,11 @@ class OpenTelemetryEventHandler:
 
     def __init__(self, tracer: trace.Tracer) -> None:  # pylint: disable=too-many-locals
         # pylint: disable=import-outside-toplevel
+        # CrewAI lets users run an agent with Agent.kickoff() without it belonging to a Crew. Those runs emit
+        # LiteAgentExecution* events instead of AgentExecution* events, see:
+        # https://docs.crewai.com/v1.15.35/en/concepts/agents#direct-agent-interaction-with-kickoff
+        # TODO: crewai 2.0 removes the deprecated LiteAgent class. When adding crewai 2.x support, check
+        # whether Agent.kickoff() still emits these events (or renamed them) and update these handlers.
         from crewai.events.types.agent_events import (
             AgentExecutionCompletedEvent,
             AgentExecutionErrorEvent,
