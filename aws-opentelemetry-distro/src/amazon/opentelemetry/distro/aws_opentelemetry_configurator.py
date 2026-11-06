@@ -637,7 +637,7 @@ def _customize_span_processors(provider: TracerProvider, resource: Resource, sam
     # and quality degradation that sampling could miss.
     if is_agent_observability_enabled():
         _export_unsampled_span_for_agent_observability(provider, resource)
-        baggage_keys.add("session.id")
+        baggage_keys.add(_SESSION_ID_BAGGAGE_KEY)
 
     provider.add_span_processor(BaggageSpanProcessor(lambda key: key in baggage_keys))
 
@@ -923,6 +923,9 @@ def _extract_endpoint_and_region_from_otlp_endpoint(endpoint: str):
     return endpoint, region
 
 
+_SESSION_ID_BAGGAGE_KEY = "session.id"
+
+
 def _parse_baggage_span_attribute_keys() -> tuple[set[str], dict[str, str]]:
     """Parse OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS into keys for every span and keys with a scope.
 
@@ -958,11 +961,19 @@ def _get_scoped_baggage_keys() -> dict[str, str]:
 
     These are the ``key:scope`` entries of OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS. Agent observability adds
     aws.agent.lineage on GenAI inference spans unless the customer lists aws.agent.lineage themselves, with
-    or without a scope, so explicit customer configuration wins over this default.
+    or without a scope, so explicit customer configuration wins over this default. Agent observability
+    always copies session.id to every span, so a scope on session.id is ignored in that mode.
     """
     all_span_keys, scoped_keys = _parse_baggage_span_attribute_keys()
-    if is_agent_observability_enabled() and AWS_AGENT_LINEAGE not in all_span_keys:
-        scoped_keys.setdefault(AWS_AGENT_LINEAGE, INFERENCE_SCOPE)
+    if is_agent_observability_enabled():
+        if scoped_keys.pop(_SESSION_ID_BAGGAGE_KEY, None) is not None:
+            _logger.warning(
+                "Ignoring the scope on %s in OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS. "
+                "Agent observability copies it to every span.",
+                _SESSION_ID_BAGGAGE_KEY,
+            )
+        if AWS_AGENT_LINEAGE not in all_span_keys:
+            scoped_keys.setdefault(AWS_AGENT_LINEAGE, INFERENCE_SCOPE)
     return scoped_keys
 
 

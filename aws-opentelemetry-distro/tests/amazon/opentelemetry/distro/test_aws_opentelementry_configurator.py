@@ -715,6 +715,18 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             os.environ["OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS"] = "aws.agent.lineage:tools"
             self.assertEqual(_get_scoped_baggage_keys(), {"aws.agent.lineage": "tools"})
 
+    def test_session_id_scope_follows_agent_observability(self):
+        with patch.dict(os.environ, {"OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS": "session.id:tools,my.key:tools"}, clear=False):
+            # Without agent observability, session.id is an ordinary scoped key.
+            os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
+            self.assertEqual(_get_scoped_baggage_keys(), {"session.id": "tools", "my.key": "tools"})
+
+            # Agent observability copies session.id to every span, so its scope is ignored with a warning.
+            os.environ["AGENT_OBSERVABILITY_ENABLED"] = "true"
+            with self.assertLogs("amazon.opentelemetry.distro.aws_opentelemetry_configurator", "WARNING") as logs:
+                self.assertEqual(_get_scoped_baggage_keys(), {"my.key": "tools", "aws.agent.lineage": "inference"})
+            self.assertIn("session.id", logs.output[0])
+
     def test_parse_baggage_span_attribute_keys(self):
         with patch.dict(
             os.environ,
