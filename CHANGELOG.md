@@ -16,6 +16,9 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   arguments or provider details, and made `error.type` unusable for grouping errors. The message is still
   recorded as the span status description.
   ([#962](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/962))
+- fix(langchain): record `gen_ai.tool.definitions` (name, description, and parameters) on LangChain/LangGraph
+  LLM spans for tools bound to the model, matching the upstream OpenTelemetry LangChain instrumentation
+  ([#966](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/966))
 - fix: in Lambda, treat `OTEL_EXPORTER_OTLP_ENDPOINT` as a custom trace endpoint, as the OTLP exporter
   spec requires. Setting only the generic endpoint previously fell back to the X-Ray UDP exporter, so
   traces never reached the configured collector
