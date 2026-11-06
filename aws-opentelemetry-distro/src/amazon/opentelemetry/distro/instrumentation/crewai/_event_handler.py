@@ -358,6 +358,9 @@ class OpenTelemetryEventHandler:
         self._start_span(
             span_name, event.event_id, attributes, self._get_parent_event_id(event), root_event_id=event.event_id
         )
+        # like _on_agent_start, so events that lose their CrewAI parent (e.g. native tool calls) still find this span
+        if (agent_entry := self._event_id_to_span.get(event.event_id)) and (agent_id := getattr(source, "id", None)):
+            self._event_id_to_span.put(str(agent_id), agent_entry)
 
     def _on_lite_agent_completed(
         self, source: "BaseAgent", event: "LiteAgentExecutionCompletedEvent"  # pylint: disable=unused-argument
