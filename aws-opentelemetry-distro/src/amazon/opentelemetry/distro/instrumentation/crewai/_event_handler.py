@@ -306,7 +306,7 @@ class OpenTelemetryEventHandler:
     # It is only used by Agent.Kickoff().
     # They carry less than crew agent events (no task, agent info as a plain dict), so this span is started
     # as its own root and paired with its end event by started_event_id.
-    def _on_lite_agent_started(  # pylint: disable=too-many-branches
+    def _on_lite_agent_started(  # pylint: disable=too-many-branches,too-many-locals
         self, source: "BaseAgent", event: "LiteAgentExecutionStartedEvent"  # pylint: disable=unused-argument
     ) -> None:
         agent = source

@@ -612,17 +612,34 @@ class TestCrewAIInstrumentor(TestCase):
 
         self.assertEqual(agent_span.status.status_code, StatusCode.OK)
         attributes = dict(agent_span.attributes)
+        input_messages = json.loads(attributes.pop(GEN_AI_INPUT_MESSAGES))
+        validate_otel_genai_schema(input_messages, "gen-ai-input-messages")
+        self.assertEqual(input_messages, [{"role": "user", "parts": [{"type": "text", "content": "What is A of 1?"}]}])
+        output_messages = json.loads(attributes.pop(GEN_AI_OUTPUT_MESSAGES))
+        validate_otel_genai_schema(output_messages, "gen-ai-output-messages")
         self.assertEqual(
-            json.loads(attributes.pop(GEN_AI_INPUT_MESSAGES)),
-            [{"role": "user", "parts": [{"type": "text", "content": "What is A of 1?"}]}],
-        )
-        self.assertEqual(
-            json.loads(attributes.pop(GEN_AI_OUTPUT_MESSAGES)),
+            output_messages,
             [
                 {
                     "role": "assistant",
                     "parts": [{"type": "text", "content": "Final Answer: Done!"}],
                     "finish_reason": "stop",
+                }
+            ],
+        )
+        self.assertEqual(
+            json.loads(attributes.pop(GEN_AI_TOOL_DEFINITIONS)),
+            [
+                {
+                    "type": "function",
+                    "name": "tool_a",
+                    "description": "Tool A.",
+                    "parameters": {
+                        "properties": {"value": {"title": "Value", "type": "string"}},
+                        "required": ["value"],
+                        "title": "Tool_A",
+                        "type": "object",
+                    },
                 }
             ],
         )
@@ -652,8 +669,10 @@ class TestCrewAIInstrumentor(TestCase):
 
         agent_span = self._find_span("invoke_agent Researcher")
         self.assertIsNotNone(agent_span)
+        input_messages = json.loads(agent_span.attributes[GEN_AI_INPUT_MESSAGES])
+        validate_otel_genai_schema(input_messages, "gen-ai-input-messages")
         self.assertEqual(
-            json.loads(agent_span.attributes[GEN_AI_INPUT_MESSAGES]),
+            input_messages,
             [
                 {"role": "user", "parts": [{"type": "text", "content": "Hi"}]},
                 {"role": "assistant", "parts": [{"type": "text", "content": "Hello"}]},
