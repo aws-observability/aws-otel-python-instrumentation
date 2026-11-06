@@ -44,6 +44,7 @@ from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 from langchain_core.tools import StructuredTool, tool
 
 from amazon.opentelemetry.distro.instrumentation.langchain import LangChainInstrumentor
+from amazon.opentelemetry.distro.instrumentation.langchain.callback_handler import OpenTelemetryCallbackHandler
 from amazon.opentelemetry.distro.instrumentation.langchain.wrapper import PregelWrapper
 from opentelemetry import context, trace
 from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY
@@ -1176,6 +1177,25 @@ class TestLangChainInstrumentor(TestCase):
         child_span = next(span for span in agent_spans if span.name == "invoke_agent RawChildStateGraph")
         self.assertEqual(child_span.context.trace_id, parent_span.context.trace_id)
         self.assertEqual(child_span.parent.span_id, parent_span.context.span_id)
+
+    def test_tool_calls_in_content_and_message_are_recorded_once(self):
+        first_call = {"type": "tool_call", "id": "call_1", "name": "get_weather", "args": {"city": "Paris"}}
+        second_call = {"type": "tool_call", "id": "call_2", "name": "get_weather", "args": {"city": "Rome"}}
+        message = AIMessage(
+            content=[{"type": "text", "text": "Let me check."}, first_call],
+            tool_calls=[first_call, second_call],
+        )
+        expected_parts = [
+            {"type": "text", "content": "Let me check."},
+            {"type": "tool_call", "id": "call_1", "name": "get_weather", "arguments": {"city": "Paris"}},
+            {"type": "tool_call", "id": "call_2", "name": "get_weather", "arguments": {"city": "Rome"}},
+        ]
+
+        _, input_messages = OpenTelemetryCallbackHandler._format_lc_messages([[message]])
+        output_messages = OpenTelemetryCallbackHandler._format_lc_llm_output([[ChatGeneration(message=message)]])
+
+        self.assertEqual(input_messages[0]["parts"], expected_parts)
+        self.assertEqual(output_messages[0]["parts"], expected_parts)
 
     def test_tool_span_has_all_attributes(self):
         def add_numbers(a: int, b: int) -> int:

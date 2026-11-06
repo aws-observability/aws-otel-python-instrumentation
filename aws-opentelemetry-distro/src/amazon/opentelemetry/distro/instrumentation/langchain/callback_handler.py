@@ -559,6 +559,12 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
                 elif content:
                     parts.extend(content_to_parts(content))
                 tool_calls: list[dict] = getattr(msg, "tool_calls", None) or []
+                if parts and tool_calls:
+                    # LangChain v1 can represent the same call in both content and tool_calls.
+                    tool_call_ids = {tc["id"] for tc in tool_calls if tc.get("id")}
+                    parts = [
+                        part for part in parts if part.get("type") != "tool_call" or part.get("id") not in tool_call_ids
+                    ]
                 for tc in tool_calls:
                     parts.append(
                         {
