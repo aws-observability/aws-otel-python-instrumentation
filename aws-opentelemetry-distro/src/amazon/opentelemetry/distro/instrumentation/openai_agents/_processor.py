@@ -712,20 +712,32 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
 
     @staticmethod
     def _set_tool_definitions(attributes: dict[str, AttributeValue], tools: Any) -> None:
+        # Adapted from opentelemetry-python-genai (Apache-2.0), get_tool_definitions in
+        # instrumentation/opentelemetry-instrumentation-genai-openai/src/opentelemetry/instrumentation/genai/openai/response_extractors.py
         definitions: list[dict[str, Any]] = []
         for tool in _GenAIMessageNormalizer._to_item_list(tools):
             if isinstance(tool, str):
+                # AgentSpanData.tools holds tool names only.
                 definitions.append({"type": "function", "name": tool})
                 continue
             tool_data = _GenAIMessageNormalizer._as_mapping(tool)
             if tool_data is None:
                 continue
+            tool_type = tool_data.get("type") or "function"
+            if not isinstance(tool_type, str):
+                continue
+            # Responses function tools are flat; Chat Completions nests them under "function".
             function = _GenAIMessageNormalizer._as_mapping(tool_data.get("function")) or {}
-            definition: dict[str, Any] = {"type": tool_data.get("type") or "function"}
-            for key, source_key in (("name", "name"), ("description", "description"), ("parameters", "parameters")):
-                value = first_not_none(tool_data.get(source_key), function.get(source_key))
-                if value is not None:
-                    definition[key] = value
+            name = first_not_none(tool_data.get("name"), function.get("name"))
+            if tool_type == "function":
+                definition: dict[str, Any] = {"type": "function", "name": name if isinstance(name, str) else ""}
+                for key in ("description", "parameters"):
+                    value = first_not_none(tool_data.get(key), function.get(key))
+                    if value is not None:
+                        definition[key] = value
+            else:
+                # Built-in tools (web_search, file_search, ...) carry no name, so they are keyed by their type.
+                definition = {"type": tool_type, "name": name if isinstance(name, str) else tool_type}
             definitions.append(definition)
         if definitions:
             attributes[GEN_AI_TOOL_DEFINITIONS] = serialize_to_json_string(definitions)
