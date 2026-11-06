@@ -11,6 +11,11 @@ For any change that affects end users of this package, please add an entry under
 If your change does not need a CHANGELOG entry, add the "skip changelog" label to your PR.
 
 ## Unreleased
+- fix: CrewAI error spans now set `error.type` to the exception class (for example `TimeoutError`), or `_OTHER`
+  when it is unknown, instead of the full error message. The message could contain task descriptions, tool
+  arguments or provider details, and made `error.type` unusable for grouping errors. The message is still
+  recorded as the span status description.
+  ([#962](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/962))
 - feat: with `AGENT_OBSERVABILITY_ENABLED`, copy the `aws.agent.lineage` baggage entry to GenAI inference
   spans only (CLIENT spans for chat, text_completion, generate_content and embeddings), so the backend can
   attribute model cost to agents. `session.id` and keys in `OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS` are still copied
