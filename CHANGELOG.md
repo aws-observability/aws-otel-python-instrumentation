@@ -11,6 +11,9 @@ For any change that affects end users of this package, please add an entry under
 If your change does not need a CHANGELOG entry, add the "skip changelog" label to your PR.
 
 ## Unreleased
+- fix(openai-agents): record built-in tools (web search, file search, code interpreter, ...) with a `name` in
+  `gen_ai.tool.definitions`, defaulting to the tool's type, so the attribute conforms to the semantic convention schema
+  ([#967](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/967))
 - fix: CrewAI error spans now set `error.type` to the exception class (for example `TimeoutError`), or `_OTHER`
   when it is unknown, instead of the full error message. The message could contain task descriptions, tool
   arguments or provider details, and made `error.type` unusable for grouping errors. The message is still

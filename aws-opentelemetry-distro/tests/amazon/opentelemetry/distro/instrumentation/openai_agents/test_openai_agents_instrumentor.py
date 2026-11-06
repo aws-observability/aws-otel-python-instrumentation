@@ -397,6 +397,44 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
             [{"type": "text", "content": "Be helpful."}],
         )
 
+    def test_response_span_tool_definitions_include_builtin_tools(self):
+        response = SimpleNamespace(
+            id="resp_tools",
+            model="gpt-response",
+            output=[],
+            tools=[
+                {
+                    "type": "function",
+                    "name": "get_weather",
+                    "description": "Get weather.",
+                    "parameters": {"type": "object"},
+                },
+                {"type": "web_search", "search_context_size": "medium"},
+                {"type": "file_search", "vector_store_ids": ["vs_1"]},
+            ],
+        )
+
+        with tracing.trace("Tools workflow"):
+            with tracing.agent_span("Tools agent", tools=["get_weather", "web_search", "file_search"]):
+                with tracing.response_span(response=response):
+                    pass
+
+        tool_defs = json.loads(self._spans_by_name()["chat gpt-response"].attributes[GEN_AI_TOOL_DEFINITIONS])
+        validate_otel_genai_schema(tool_defs, "gen-ai-tool-definitions")
+        self.assertEqual(
+            tool_defs,
+            [
+                {
+                    "type": "function",
+                    "name": "get_weather",
+                    "description": "Get weather.",
+                    "parameters": {"type": "object"},
+                },
+                {"type": "web_search", "name": "web_search"},
+                {"type": "file_search", "name": "file_search"},
+            ],
+        )
+
     def test_input_output_usage_styles_and_sensitive_data_none(self):
         completion_finish_reasons = ("length", "length", "stop")
         with tracing.trace("Generation variants"):
