@@ -50,8 +50,8 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_TOOL_CALL_ARGUMENTS,
     GEN_AI_TOOL_CALL_ID,
     GEN_AI_TOOL_CALL_RESULT,
-    GEN_AI_TOOL_DESCRIPTION,
     GEN_AI_TOOL_DEFINITIONS,
+    GEN_AI_TOOL_DESCRIPTION,
     GEN_AI_TOOL_NAME,
     GEN_AI_TOOL_TYPE,
     GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS,
@@ -94,6 +94,7 @@ class _SpanEntry:
     token: Token
     agent_content: Optional[_AgentContent] = None
 
+
 # Adapted from opentelemetry-python-genai (Apache-2.0):
 # https://github.com/open-telemetry/opentelemetry-python-genai/blob/main/instrumentation/opentelemetry-instrumentation-genai-langchain/src/opentelemetry/instrumentation/genai/langchain/utils.py
 def _get_property_value(obj: Any, property_name: str) -> Any:
@@ -101,6 +102,7 @@ def _get_property_value(obj: Any, property_name: str) -> Any:
         return obj.get(property_name)
 
     return getattr(obj, property_name, None)
+
 
 def _extract_tool_definitions(tools: Any) -> list[dict[str, Any]]:
     """Normalize LangChain provider tool formats to OTel gen_ai.tool.definitions entries."""
@@ -136,7 +138,8 @@ def _extract_tool_definitions(tools: Any) -> list[dict[str, Any]]:
             definition["parameters"] = parameters
         definitions.append(definition)
     return definitions
-    
+
+
 class _BaseCallbackManagerInitWrapper:
     """Wrapper for BaseCallbackManager.__init__ to inject OpenTelemetry callback handler."""
 
@@ -200,7 +203,6 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         self._set_span_attribute(span, GEN_AI_PROVIDER_NAME, provider)
         self._set_span_attribute(span, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
         self._set_span_attribute(span, GEN_AI_INPUT_MESSAGES, serialize_to_json_string(conversation))
-
 
         if system_instructions:
             self._set_span_attribute(span, GEN_AI_SYSTEM_INSTRUCTIONS, serialize_to_json_string(system_instructions))
@@ -900,9 +902,24 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
                 nested_additional_model_request_fields.get("streaming"),
             ),
         )
-        if tool_defs := _extract_tool_definitions(params.get("tools") or params.get("functions")):
+        tools = first_not_none(
+            params.get("tools"),
+            params.get("functions"),
+            params_model_kwargs.get("tools"),
+            params_model_kwargs.get("functions"),
+            (metadata or {}).get("tools"),
+            (metadata or {}).get("functions"),
+            config.get("tools"),
+            config.get("functions"),
+            config_model_kwargs.get("tools"),
+            config_model_kwargs.get("functions"),
+            additional_model_request_fields.get("tools"),
+            additional_model_request_fields.get("functions"),
+            nested_additional_model_request_fields.get("tools"),
+            nested_additional_model_request_fields.get("functions"),
+        )
+        if tool_defs := _extract_tool_definitions(tools):
             self._set_span_attribute(span, GEN_AI_TOOL_DEFINITIONS, serialize_to_json_string(tool_defs))
-
 
     def _should_skip_chain(
         self, serialized: dict[str, Any], name: Optional[str], metadata: Optional[dict] = None
