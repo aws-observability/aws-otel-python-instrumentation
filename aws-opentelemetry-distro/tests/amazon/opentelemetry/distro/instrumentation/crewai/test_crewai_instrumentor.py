@@ -22,7 +22,7 @@ if sys.version_info < (3, 10) or sys.version_info >= (3, 14):
 from crewai import LLM, Agent, Crew, Task
 from crewai.events import crewai_event_bus
 from crewai.events.types.agent_events import LiteAgentExecutionCompletedEvent, LiteAgentExecutionStartedEvent
-from crewai.events.types.llm_events import LLMCallCompletedEvent, LLMCallStartedEvent, LLMCallType
+from crewai.events.types.llm_events import LLMCallCompletedEvent, LLMCallFailedEvent, LLMCallStartedEvent, LLMCallType
 from crewai.flow.flow import Flow, start
 from crewai.llms.base_llm import BaseLLM, llm_call_context
 from crewai.tools import tool
@@ -744,7 +744,8 @@ class TestCrewAIInstrumentor(TestCase):
         self.assertIsNotNone(agent_span)
         self._assert_span_parent(agent_span, server_span)
         self.assertEqual(agent_span.status.status_code, StatusCode.ERROR)
-        self.assertIn("Service unavailable", agent_span.attributes[ERROR_TYPE])
+        self.assertEqual(agent_span.attributes[ERROR_TYPE], "RuntimeError")
+        self.assertIn("Service unavailable", agent_span.status.description)
         chat_span = self._find_span("chat gpt-4")
         self.assertIsNotNone(chat_span, "the in-flight chat span must still be ended and exported")
         self.assertEqual(chat_span.status.status_code, StatusCode.ERROR)
