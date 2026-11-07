@@ -531,6 +531,7 @@ class OpenTelemetryEventHandler:
     @staticmethod
     def _get_cumulative_token_usage(llm: Any) -> Optional[Tuple[int, int]]:
         # only BaseLLM exposes a usage summary; LLM events can also be emitted from other sources (e.g. customer code)
+        # but this is a minor edge case. Can be done if customer emits directly to event bus
         get_token_usage_summary = getattr(llm, "get_token_usage_summary", None)
         if not callable(get_token_usage_summary):
             return None
