@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import threading
+import time
 import unittest
 from typing import Any, Dict, Optional, Sequence
 from unittest import TestCase
@@ -73,6 +74,10 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
 )
 from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
 from opentelemetry.trace import SpanKind, StatusCode
+
+
+class ProviderRateLimitError(Exception):
+    pass
 
 
 # https://pypi.org/project/crewai/
@@ -485,7 +490,50 @@ class TestCrewAIInstrumentor(TestCase):
         spans = self.span_exporter.get_finished_spans()
         error_span = next((s for s in spans if s.status.status_code.name == "ERROR"), None)
         self.assertIsNotNone(error_span, "Expected at least one span with ERROR status")
-        self.assertIn("LLM call failed", error_span.attributes.get(ERROR_TYPE, ""))
+        self.assertEqual(error_span.attributes[ERROR_TYPE], "RuntimeError")
+        self.assertIn("LLM call failed", error_span.status.description)
+
+    # error.type must be a low-cardinality class name; the message (which can hold task text, tool arguments or
+    # provider details) belongs only in the status description
+    def test_error_type_for_task_timeout(self):
+        def slow_completion(*args, **kwargs):
+            time.sleep(2)
+            return self._mock_response("Final Answer: too late")
+
+        error_spans = self._kickoff_failing_crew(slow_completion, max_execution_time=1, max_retry_limit=0)
+        self._assert_error_type(error_spans, "invoke_agent", "TimeoutError", secret="SECRET-TASK-DESCRIPTION")
+
+    def test_error_type_for_tool_error(self):
+        @tool
+        def lookup(account: str) -> str:
+            """Look up an account."""
+            raise ValueError(f"no record for account {account}")
+
+        replies = [
+            self._mock_response(tool_calls=[self._mock_tool_call("c1", "lookup", '{"account": "ACCT-4111"}')]),
+            self._mock_response("Final Answer: not found"),
+        ]
+        error_spans = self._kickoff_failing_crew(replies, tools=[lookup])
+        self._assert_error_type(error_spans, "execute_tool lookup", "ValueError", secret="ACCT-4111")
+
+    def test_error_type_for_llm_error(self):
+        rate_limit = ProviderRateLimitError("429 for org-ABC123, request req_9f8e7d")
+        error_spans = self._kickoff_failing_crew(rate_limit, max_retry_limit=0)
+        self._assert_error_type(error_spans, "chat gpt-4", "ProviderRateLimitError", secret="org-ABC123")
+
+    def test_error_type_falls_back_to_other(self):
+        # a failure event emitted outside an except block has no exception to take the class from
+        llm = LLM(model="openai/gpt-4", is_litellm=True)
+        start_event = LLMCallStartedEvent(call_id="c1", messages=[{"role": "user", "content": "Hello"}])
+        crewai_event_bus.emit(llm, start_event)
+        crewai_event_bus.emit(
+            llm, LLMCallFailedEvent(call_id="c1", error="boom", started_event_id=start_event.event_id)
+        )
+
+        chat_span = self._find_span("chat gpt-4")
+        self.assertEqual(chat_span.attributes[ERROR_TYPE], "_OTHER")
+        self.assertEqual(chat_span.status.description, "boom")
+        self._assert_spans_all_ended()
 
     def test_text_based_tool_calling(self):
         mock_llm = MagicMock(spec=LLM)
@@ -1759,6 +1807,27 @@ class TestCrewAIInstrumentor(TestCase):
             (s.attributes[GEN_AI_USAGE_INPUT_TOKENS], s.attributes[GEN_AI_USAGE_OUTPUT_TOKENS]) for s in usage_spans
         )
         self.assertEqual(usage, [(100, 50), (200, 80)])
+
+    def _kickoff_failing_crew(self, completion_side_effect, **agent_kwargs):
+        """Run a one-task crew whose task text is a secret and return the spans that ended in error."""
+        llm = LLM(model="openai/gpt-4", is_litellm=True)
+        llm.supports_function_calling = lambda: True
+        agent = Agent(role="Worker", goal="Work", backstory="Agent.", llm=llm, **agent_kwargs)
+        task = Task(description="SECRET-TASK-DESCRIPTION", expected_output="Done.", agent=agent)
+        with patch("litellm.completion", side_effect=completion_side_effect):
+            try:
+                Crew(name="ErrorCrew", agents=[agent], tasks=[task]).kickoff()
+            except Exception:  # pylint: disable=broad-except
+                pass
+        self._assert_spans_all_ended()
+        return [s for s in self.span_exporter.get_finished_spans() if s.status.status_code.name == "ERROR"]
+
+    def _assert_error_type(self, error_spans, span_name: str, expected_type: str, secret: str):
+        span = next(s for s in error_spans if s.name.startswith(span_name))
+        self.assertEqual(span.attributes[ERROR_TYPE], expected_type)
+        self.assertIn(secret, span.status.description)
+        for error_span in error_spans:
+            self.assertNotIn(secret, error_span.attributes[ERROR_TYPE], f"content leaked on {error_span.name}")
 
     def _create_test_crew(self, model: str):
         test_tracer = self.tracer_provider.get_tracer("test")
