@@ -24,6 +24,11 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   returns normally; only telemetry for that event is lost. LLM events emitted from a source other than a CrewAI
   `BaseLLM` now produce a chat span without token usage instead of raising `AttributeError`.
   ([#953](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/953))
+- fix: CrewAI error spans now set `error.type` to the exception class (for example `TimeoutError`), or `_OTHER`
+  when it is unknown, instead of the full error message. The message could contain task descriptions, tool
+  arguments or provider details, and made `error.type` unusable for grouping errors. The message is still
+  recorded as the span status description.
+  ([#962](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/962))
 - fix: in Lambda, treat `OTEL_EXPORTER_OTLP_ENDPOINT` as a custom trace endpoint, as the OTLP exporter
   spec requires. Setting only the generic endpoint previously fell back to the X-Ray UDP exporter, so
   traces never reached the configured collector
