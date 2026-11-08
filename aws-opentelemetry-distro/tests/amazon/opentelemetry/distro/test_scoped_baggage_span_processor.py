@@ -208,7 +208,9 @@ class TestScopedBaggageSpanProcessor(unittest.TestCase):
 
     def test_shutdown_clears_pending_state_and_detaches_finalizers(self):
         span = self._start()
-        finalizer = self.processor._pending_by_span[(span.context.trace_id, span.context.span_id)][1]  # noqa: SLF001
+        finalizer = self.processor._pending_by_span[
+            (span.context.trace_id, span.context.span_id)
+        ].finalizer  # noqa: SLF001
         self.processor.shutdown()
 
         self.assertEqual(self.processor._pending_by_span, {})  # noqa: SLF001
@@ -248,6 +250,30 @@ class TestScopedBaggageSpanProcessor(unittest.TestCase):
         self.assertEqual(spans["framework chat"].kind, SpanKind.INTERNAL)
         self.assertNotIn(AWS_AGENT_LINEAGE, spans["framework chat"].attributes)
         self.assertEqual(spans["bedrock chat"].attributes[AWS_AGENT_LINEAGE], LINEAGE)
+
+    def _nested_chat_spans(self, tracer, outer_op=GenAiOperationNameValues.CHAT.value):
+        framework = tracer.start_span("framework", kind=SpanKind.CLIENT)
+        framework.set_attribute(GEN_AI_OPERATION_NAME, outer_op)
+        sdk = tracer.start_span("sdk", kind=SpanKind.CLIENT, context=trace.set_span_in_context(framework))
+        sdk.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
+        sdk.end()
+        framework.end()
+
+    def test_only_innermost_client_span_gets_lineage_without_nested_processor(self):
+        # Agent observability off: GenAINestedClientSpanProcessor is not installed, so both spans stay CLIENT.
+        self._nested_chat_spans(self.tracer)
+
+        self.assertEqual(self._finished("framework").kind, SpanKind.CLIENT)
+        self.assertNotIn(AWS_AGENT_LINEAGE, self._finished("framework").attributes)
+        self.assertEqual(self._finished("sdk").attributes[AWS_AGENT_LINEAGE], LINEAGE)
+        self.assertEqual(self.processor._pending_by_span, {})
+
+    def test_nested_inference_spans_with_different_operations_both_match(self):
+        # Same rule as GenAINestedClientSpanProcessor: only a child with the same operation demotes the parent.
+        self._nested_chat_spans(self.tracer, outer_op=GenAiOperationNameValues.EMBEDDINGS.value)
+
+        self.assertEqual(self._finished("framework").attributes[AWS_AGENT_LINEAGE], LINEAGE)
+        self.assertEqual(self._finished("sdk").attributes[AWS_AGENT_LINEAGE], LINEAGE)
 
     def test_unscoped_keys_still_copied_to_every_span(self):
         exporter = InMemorySpanExporter()
@@ -340,8 +366,46 @@ class TestRegisterBaggageScope(unittest.TestCase):
 
         self.assertNotIn("my.key", self._finished("tool").attributes)
 
+    def test_key_matching_any_of_its_scopes_is_copied(self):
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(ScopedBaggageSpanProcessor({"my.key": {"tools", INFERENCE_SCOPE, "no_such_scope"}}))
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        tracer = provider.get_tracer("test")
+        register_baggage_scope("tools", self._is_tool_span)
+
+        with self.assertLogs("amazon.opentelemetry.distro.scoped_baggage_span_processor", level="WARNING"):
+            tool = tracer.start_span("tool")
+            tool.set_attribute(GEN_AI_OPERATION_NAME, "execute_tool")
+            tool.end()
+            chat = tracer.start_span("chat", kind=SpanKind.CLIENT)
+            chat.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
+            chat.end()
+            tracer.start_span("other").end()
+
+        spans = {s.name: s for s in exporter.get_finished_spans()}
+        self.assertEqual(spans["tool"].attributes["my.key"], "v1")
+        self.assertEqual(spans["chat"].attributes["my.key"], "v1")
+        self.assertNotIn("my.key", spans["other"].attributes)
+
+    def test_predicate_error_does_not_block_other_scopes(self):
+        def broken(_span):
+            raise ValueError("boom")
+
+        register_baggage_scope("broken", broken)
+        register_baggage_scope("tools", self._is_tool_span)
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(ScopedBaggageSpanProcessor({"my.key": {"broken", "tools"}}))
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        tool = provider.get_tracer("test").start_span("tool")
+        tool.set_attribute(GEN_AI_OPERATION_NAME, "execute_tool")
+        tool.end()
+
+        self.assertEqual(exporter.get_finished_spans()[0].attributes["my.key"], "v1")
+
     def test_invalid_registrations_are_rejected(self):
-        for name in ("", " tools", "a:b", "a,b", INFERENCE_SCOPE):
+        for name in ("", " tools", "a:b", "a,b", INFERENCE_SCOPE, "aws.tools"):
             with self.assertLogs("amazon.opentelemetry.distro.scoped_baggage_span_processor", level="WARNING"):
                 self.assertFalse(register_baggage_scope(name, self._is_tool_span), name)
         with self.assertLogs("amazon.opentelemetry.distro.scoped_baggage_span_processor", level="WARNING"):
@@ -357,6 +421,9 @@ class TestRegisterBaggageScope(unittest.TestCase):
         provider.get_tracer("test").start_span("internal").end()
 
         self.assertNotIn("my.key", exporter.get_finished_spans()[0].attributes)
+
+    def test_unprefixed_inference_is_a_custom_scope_name(self):
+        self.assertTrue(register_baggage_scope("inference", self._is_tool_span))
 
 
 class TestIsGenAiInferenceSpan(unittest.TestCase):

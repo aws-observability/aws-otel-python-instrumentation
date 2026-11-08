@@ -38,7 +38,7 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     _customize_span_processors,
     _export_unsampled_span_for_agent_observability,
     _export_unsampled_span_for_lambda,
-    _get_scoped_baggage_keys,
+    _get_baggage_span_attribute_keys,
     _has_authorization_header,
     _has_custom_otlp_traces_endpoint,
     _init_logging,
@@ -52,7 +52,6 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     _is_wsgi_master_process,
     _parse_baggage_span_attribute_keys,
     _parse_config_string,
-    _parse_otel_baggage_keys_env_var,
     fetch_otlp_logs_header,
 )
 from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetryDistro
@@ -98,7 +97,7 @@ from opentelemetry.sdk.metrics.view import LastValueAggregation
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import Span, SpanProcessor, Tracer, TracerProvider
 from opentelemetry.sdk.trace.export import SpanExporter
-from opentelemetry.sdk.trace.sampling import DEFAULT_ON, Sampler
+from opentelemetry.sdk.trace.sampling import ALWAYS_ON, DEFAULT_ON, Sampler
 from opentelemetry.semconv.resource import ResourceAttributes
 from opentelemetry.trace import get_tracer_provider
 
@@ -698,57 +697,99 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
         os.environ.pop("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", None)
 
-    def test_scoped_baggage_keys(self):
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
-            os.environ.pop("OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS", None)
-            self.assertEqual(_get_scoped_baggage_keys(), {})
+    def test_baggage_span_attribute_keys(self):
+        lineage_default = {"aws.agent.lineage": frozenset({"aws.inference"})}
+        cases = [
+            # (env var, agent observability, expected every-span keys, expected scoped keys)
+            ("", False, set(), {}),
+            ("", True, {"session.id"}, lineage_default),
+            ("k,k:tools", False, {"k"}, {}),
+            ("k:tools,k", False, {"k"}, {}),
+            ("k:aws.inference,k:tools", False, set(), {"k": frozenset({"aws.inference", "tools"})}),
+            ("aws.agent.lineage", False, {"aws.agent.lineage"}, {}),
+            ("aws.agent.lineage", True, {"aws.agent.lineage", "session.id"}, {}),
+            ("aws.agent.lineage:tools", True, {"session.id"}, {"aws.agent.lineage": frozenset({"tools"})}),
+            ("session.id:tools", False, set(), {"session.id": frozenset({"tools"})}),
+            ("session.id,session.id:tools", False, {"session.id"}, {}),
+        ]
+        for env, agent_observability, all_span_keys, scoped_keys in cases:
+            with self.subTest(env=env, agent_observability=agent_observability), patch.dict(
+                os.environ, {"OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS": env}, clear=False
+            ):
+                if agent_observability:
+                    os.environ["AGENT_OBSERVABILITY_ENABLED"] = "true"
+                else:
+                    os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
+                self.assertEqual(_get_baggage_span_attribute_keys(), (all_span_keys, scoped_keys))
 
-            os.environ["AGENT_OBSERVABILITY_ENABLED"] = "true"
-            self.assertEqual(_get_scoped_baggage_keys(), {"aws.agent.lineage": "inference"})
-
-            # A key the customer allowlists is copied to every span instead, so the scoped default steps aside.
-            os.environ["OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS"] = "tenant.id, aws.agent.lineage"
-            self.assertEqual(_get_scoped_baggage_keys(), {})
-
-            # A customer scope for aws.agent.lineage replaces the default scope.
-            os.environ["OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS"] = "aws.agent.lineage:tools"
-            self.assertEqual(_get_scoped_baggage_keys(), {"aws.agent.lineage": "tools"})
-
-    def test_session_id_scope_follows_agent_observability(self):
-        with patch.dict(os.environ, {"OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS": "session.id:tools,my.key:tools"}, clear=False):
-            # Without agent observability, session.id is an ordinary scoped key.
-            os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
-            self.assertEqual(_get_scoped_baggage_keys(), {"session.id": "tools", "my.key": "tools"})
-
-            # Agent observability copies session.id to every span, so its scope is ignored with a warning.
-            os.environ["AGENT_OBSERVABILITY_ENABLED"] = "true"
+    def test_session_id_scopes_ignored_under_agent_observability(self):
+        env = {
+            "OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS": "session.id:tools,my.key:tools",
+            "AGENT_OBSERVABILITY_ENABLED": "true",
+        }
+        with patch.dict(os.environ, env, clear=False):
             with self.assertLogs("amazon.opentelemetry.distro.aws_opentelemetry_configurator", "WARNING") as logs:
-                self.assertEqual(_get_scoped_baggage_keys(), {"my.key": "tools", "aws.agent.lineage": "inference"})
+                self.assertEqual(
+                    _get_baggage_span_attribute_keys(),
+                    (
+                        {"session.id"},
+                        {"my.key": frozenset({"tools"}), "aws.agent.lineage": frozenset({"aws.inference"})},
+                    ),
+                )
             self.assertIn("session.id", logs.output[0])
 
     def test_parse_baggage_span_attribute_keys(self):
-        with patch.dict(
-            os.environ,
-            {
-                "OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS": (
-                    " session.id , my.key:tools,other.key : inference ,empty:, ,dup:tools,dup"
-                )
-            },
-        ):
+        env = {"OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS": " session.id , my.key:tools,other.key : b ,empty:, ,dup:tools,dup"}
+        with patch.dict(os.environ, env):
             self.assertEqual(
                 _parse_baggage_span_attribute_keys(),
-                ({"session.id", "empty", "dup"}, {"my.key": "tools", "other.key": "inference"}),
+                {"session.id": {""}, "my.key": {"tools"}, "other.key": {"b"}, "empty": {""}, "dup": {"tools", ""}},
             )
-            # Keys with a scope are not copied to every span by BaggageSpanProcessor.
-            self.assertEqual(_parse_otel_baggage_keys_env_var(), {"session.id", "empty", "dup"})
 
     def test_scoped_keys_from_env_install_the_processor_without_agent_observability(self):
-        with patch.dict(os.environ, {"OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS": "my.key:inference"}, clear=False):
+        with patch.dict(os.environ, {"OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS": "my.key:aws.inference"}, clear=False):
             os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
             processors = self._init_tracing_processors()
         scoped = next(p for p in processors if isinstance(p, ScopedBaggageSpanProcessor))
-        self.assertEqual(scoped._scoped_keys, {"my.key": "inference"})
+        self.assertEqual(scoped._scoped_keys, {"my.key": frozenset({"aws.inference"})})
+
+    def test_inference_scope_stamps_only_innermost_span_without_agent_observability(self):
+        # pylint: disable=import-outside-toplevel
+        from opentelemetry import baggage, context
+        from opentelemetry import trace as trace_api
+        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+        from opentelemetry.trace import SpanKind
+
+        set_provider = MagicMock()
+        env = {"OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS": "tenant.id:aws.inference"}
+        with patch.dict(os.environ, env, clear=False), patch(
+            "amazon.opentelemetry.distro.aws_opentelemetry_configurator.set_tracer_provider", set_provider
+        ):
+            os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
+            # The class setup configures a 1% sampler, so pass one that records every span.
+            _init_tracing({}, sampler=ALWAYS_ON)
+        provider = set_provider.call_args.args[0]
+        exporter = InMemorySpanExporter()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        tracer = provider.get_tracer("test")
+
+        token = context.attach(baggage.set_baggage("tenant.id", "t1"))
+        try:
+            framework = tracer.start_span("framework", kind=SpanKind.CLIENT)
+            framework.set_attribute("gen_ai.operation.name", "chat")
+            sdk = tracer.start_span("sdk", kind=SpanKind.CLIENT, context=trace_api.set_span_in_context(framework))
+            sdk.set_attribute("gen_ai.operation.name", "chat")
+            sdk.end()
+            framework.end()
+        finally:
+            context.detach(token)
+            provider.shutdown()
+
+        spans = {span.name: span for span in exporter.get_finished_spans()}
+        self.assertEqual(spans["framework"].kind, SpanKind.CLIENT)
+        self.assertNotIn("tenant.id", spans["framework"].attributes)
+        self.assertEqual(spans["sdk"].attributes["tenant.id"], "t1")
 
     @staticmethod
     def _init_tracing_processors() -> list:

@@ -10,7 +10,7 @@ import re
 from importlib.metadata import version
 from logging import Logger, getLogger
 from pathlib import Path
-from typing import ClassVar, Dict, List, Optional, Type, Union
+from typing import ClassVar, Dict, FrozenSet, List, Optional, Set, Tuple, Type, Union
 
 import yaml
 from typing_extensions import override
@@ -354,7 +354,7 @@ def _init_tracing(
 
     # This processor adds attributes in on_end, so it must run after GenAINestedClientSpanProcessor
     # (its scopes check the corrected span kind) and before the redacting and batch processors.
-    scoped_baggage_keys = _get_scoped_baggage_keys()
+    all_span_baggage_keys, scoped_baggage_keys = _get_baggage_span_attribute_keys()
     if scoped_baggage_keys:
         trace_provider.add_span_processor(ScopedBaggageSpanProcessor(scoped_baggage_keys))
 
@@ -370,7 +370,7 @@ def _init_tracing(
             BatchSpanProcessor(span_exporter=span_exporter, max_export_batch_size=_span_export_batch_size())
         )
 
-    _customize_span_processors(trace_provider, resource, original_sampler)
+    _customize_span_processors(trace_provider, resource, original_sampler, all_span_baggage_keys)
 
     set_tracer_provider(trace_provider)
 
@@ -622,14 +622,22 @@ def _customize_logs_exporter(log_exporter: LogRecordExporter) -> LogRecordExport
     return log_exporter
 
 
-def _customize_span_processors(provider: TracerProvider, resource: Resource, sampler: Sampler) -> None:
+def _customize_span_processors(
+    provider: TracerProvider,
+    resource: Resource,
+    sampler: Sampler,
+    all_span_baggage_keys: Optional[Set[str]] = None,
+) -> None:
     # Add LambdaSpanProcessor to list of processors regardless of application signals.
     if is_lambda_environment():
         provider.add_span_processor(AwsLambdaSpanProcessor())
 
-    # Propagates baggage entries listed without a scope in OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS into the
-    # attributes of every span. Entries with a scope are handled by ScopedBaggageSpanProcessor.
-    baggage_keys: set[str] = _parse_otel_baggage_keys_env_var()
+    # Propagates baggage keys that go to every span (listed without a scope in
+    # OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS, and session.id under agent observability) into span attributes.
+    # Keys with only scopes are handled by ScopedBaggageSpanProcessor.
+    if all_span_baggage_keys is None:
+        all_span_baggage_keys = _get_baggage_span_attribute_keys()[0]
+    baggage_keys = set(all_span_baggage_keys)
 
     # We always send 100% spans to AgentCore Runtime platform for agent observability because
     # AI applications typically have low throughput traffic patterns and require
@@ -637,7 +645,6 @@ def _customize_span_processors(provider: TracerProvider, resource: Resource, sam
     # and quality degradation that sampling could miss.
     if is_agent_observability_enabled():
         _export_unsampled_span_for_agent_observability(provider, resource)
-        baggage_keys.add(_SESSION_ID_BAGGAGE_KEY)
 
     provider.add_span_processor(BaggageSpanProcessor(lambda key: key in baggage_keys))
 
@@ -924,57 +931,48 @@ def _extract_endpoint_and_region_from_otlp_endpoint(endpoint: str):
 
 
 _SESSION_ID_BAGGAGE_KEY = "session.id"
+# Scope name used internally for an entry without a scope: the key goes to every span. Registered scope
+# names cannot be empty, so it cannot collide with one.
+_EVERY_SPAN = ""
 
 
-def _parse_baggage_span_attribute_keys() -> tuple[set[str], dict[str, str]]:
-    """Parse OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS into keys for every span and keys with a scope.
+def _parse_baggage_span_attribute_keys() -> Dict[str, Set[str]]:
+    """Parse OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS into a mapping of baggage key to scope names.
 
-    Each comma-separated entry is ``key`` (copied to every span) or ``key:scope`` (copied only to spans
-    matching the scope). W3C baggage keys cannot contain ``:`` or ``,``, so the delimiters never appear in
-    a key. An entry with an empty scope (``key:``) is treated as having no scope. A key listed both with
-    and without a scope is copied to every span.
+    Each comma-separated entry is ``key`` (every span) or ``key:scope`` (spans matching the scope). W3C
+    baggage keys cannot contain ``:`` or ``,``, so the delimiters never appear in a key. An entry without a
+    scope, or with an empty one (``key:``), adds ``_EVERY_SPAN``. A key listed more than once collects all
+    its scopes.
     """
-    raw: str = os.environ.get(OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS, "")
-    all_span_keys: set[str] = set()
-    scoped_keys: dict[str, str] = {}
-    for entry in raw.split(","):
+    keys: Dict[str, Set[str]] = {}
+    for entry in os.environ.get(OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS, "").split(","):
         key, _, scope = entry.partition(":")
-        key, scope = key.strip(), scope.strip()
-        if not key:
-            continue
-        if scope:
-            scoped_keys[key] = scope
-        else:
-            all_span_keys.add(key)
-    for key in all_span_keys:
-        scoped_keys.pop(key, None)
-    return all_span_keys, scoped_keys
+        key = key.strip()
+        if key:
+            keys.setdefault(key, set()).add(scope.strip())
+    return keys
 
 
-def _parse_otel_baggage_keys_env_var() -> set[str]:
-    """Keys in OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS that are copied to every span (entries without a scope)."""
-    return _parse_baggage_span_attribute_keys()[0]
+def _get_baggage_span_attribute_keys() -> Tuple[Set[str], Dict[str, FrozenSet[str]]]:
+    """Baggage keys to copy to span attributes, as (keys for every span, scoped keys).
 
-
-def _get_scoped_baggage_keys() -> dict[str, str]:
-    """Baggage keys copied only to spans matching a scope, as a mapping of key to scope name.
-
-    These are the ``key:scope`` entries of OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS. Agent observability adds
-    aws.agent.lineage on GenAI inference spans unless the customer lists aws.agent.lineage themselves, with
-    or without a scope, so explicit customer configuration wins over this default. Agent observability
-    always copies session.id to every span, so a scope on session.id is ignored in that mode.
+    A key goes to every span if any of its entries has no scope. Otherwise it goes to spans matching any of
+    its scopes. Agent observability always copies session.id to every span, so scopes on it are ignored, and
+    copies aws.agent.lineage to GenAI inference spans unless the customer lists aws.agent.lineage.
     """
-    all_span_keys, scoped_keys = _parse_baggage_span_attribute_keys()
+    keys = _parse_baggage_span_attribute_keys()
     if is_agent_observability_enabled():
-        if scoped_keys.pop(_SESSION_ID_BAGGAGE_KEY, None) is not None:
+        if keys.get(_SESSION_ID_BAGGAGE_KEY, {_EVERY_SPAN}) != {_EVERY_SPAN}:
             _logger.warning(
-                "Ignoring the scope on %s in OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS. "
+                "Ignoring scopes on %s in OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS. "
                 "Agent observability copies it to every span.",
                 _SESSION_ID_BAGGAGE_KEY,
             )
-        if AWS_AGENT_LINEAGE not in all_span_keys:
-            scoped_keys.setdefault(AWS_AGENT_LINEAGE, INFERENCE_SCOPE)
-    return scoped_keys
+        keys[_SESSION_ID_BAGGAGE_KEY] = {_EVERY_SPAN}
+        keys.setdefault(AWS_AGENT_LINEAGE, {INFERENCE_SCOPE})
+    all_span_keys = {key for key, scopes in keys.items() if _EVERY_SPAN in scopes}
+    scoped_keys = {key: frozenset(scopes) for key, scopes in keys.items() if _EVERY_SPAN not in scopes}
+    return all_span_keys, scoped_keys
 
 
 def _get_metric_export_interval():
