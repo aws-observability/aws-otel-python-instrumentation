@@ -23,7 +23,7 @@ from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY
 from opentelemetry.trace import set_span_in_context
 
 
-class TestDictWithLock(TestCase):
+class TestInstrumentationUtils(TestCase):
     def test_dict_update_if_present_does_not_create_missing_entry(self):
         state = DictWithLock()
         updater = Mock()
@@ -61,8 +61,6 @@ class TestDictWithLock(TestCase):
 
         predicate.assert_not_called()
 
-
-class TestInstrumentationUtils(TestCase):
     def test_first_not_none_and_get_value(self):
         object_source = Mock()
         object_source.temperature = 0.0
