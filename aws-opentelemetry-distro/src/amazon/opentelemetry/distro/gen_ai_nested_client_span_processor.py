@@ -17,7 +17,7 @@ from opentelemetry.trace import SpanKind
 class _ParentSpanState(NamedTuple):
     """Record a local CLIENT span and the operations of its completed GenAI CLIENT children."""
 
-    # Removes the span's map entry when the span is garbage collected.
+    # Add a weak reference to remove the span's map entry when the span is garbage collected.
     span_ref: ReferenceType[Span]
     # Inference operation names from completed GenAI CLIENT children.
     # The parent becomes INTERNAL if its own inference operation is in this set.
