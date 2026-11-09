@@ -58,6 +58,7 @@ class GenAINestedClientSpanProcessor(SpanProcessor):
         if not span.context:
             return
 
+        # Clean up before early returns so child state cannot leak for non-GenAI parents.
         state = self._active_parent_span_id_and_operation_to_gen_ai_client_child.pop(
             (span.context.trace_id, span.context.span_id)
         )
@@ -70,8 +71,12 @@ class GenAINestedClientSpanProcessor(SpanProcessor):
         if operation not in gen_ai_inference_operations:
             return
 
-        # The conditional update is atomic with parent cleanup. A late child
-        # must never recreate an ended parent's state.
+        # A child may finish after its parent, e.g. in another thread or async task.
+        # A separate parent lookup followed by put() could race with the parent's
+        # pop(): the parent removes its state after the lookup, then the child
+        # recreates it. The parent will not end again to remove that stale entry.
+        # update_if_present checks and updates under the same lock as pop(), so
+        # a late child cannot recreate an entry that its parent already removed.
         if span.parent and not span.parent.is_remote:
             self._active_parent_span_id_and_operation_to_gen_ai_client_child.update_if_present(
                 (span.context.trace_id, span.parent.span_id),
