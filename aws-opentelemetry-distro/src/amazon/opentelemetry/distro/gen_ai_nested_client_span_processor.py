@@ -19,8 +19,8 @@ class _ParentSpanState(NamedTuple):
 
     # Add a weak reference to remove the span's map entry when the span is garbage collected.
     span_ref: ReferenceType[Span]
-    # Inference operation names from completed GenAI CLIENT children.
-    # The parent becomes INTERNAL if its own inference operation is in this set.
+    # Record inference operation names from completed GenAI CLIENT children.
+    # Convert the parent to INTERNAL if its own inference operation is in this set.
     child_operations: set[str]
 
 
@@ -33,10 +33,8 @@ class GenAINestedClientSpanProcessor(SpanProcessor):
 
     def __init__(self) -> None:
         # Tracks which parent spans have a GenAI CLIENT child for each operation.
-        # Add local CLIENT spans in on_start(); remove their entries in on_end().
-        # Children can update only a parent that still has an entry in this map.
-        # The stored weak reference does not keep the span alive. If the span is
-        # garbage collected without end(), its callback removes the entry instead.
+        # Add local CLIENT spans in on_start() and remove their entries in on_end().
+        # Add a weak reference to remove each entry when its span is garbage collected.
         self._active_parent_span_id_and_operation_to_gen_ai_client_child: DictWithLock = DictWithLock()
 
     def on_start(self, span: Span, parent_context=None) -> None:
@@ -46,9 +44,8 @@ class GenAINestedClientSpanProcessor(SpanProcessor):
         span_key = (span.context.trace_id, span.context.span_id)
 
         def remove_collected_span(span_ref: ReferenceType[Span]) -> None:
-            # Delete only the entry containing this span's weak reference.
-            # If its key was overwritten, this callback must leave the newer
-            # span's state alone.
+            # Remove the entry only if it still contains this span's weak reference.
+            # Keep any newer entry that has replaced it under the same key.
             self._active_parent_span_id_and_operation_to_gen_ai_client_child.pop_if_matches(
                 span_key, lambda state: state.span_ref is span_ref
             )
@@ -80,12 +77,10 @@ class GenAINestedClientSpanProcessor(SpanProcessor):
         if operation not in gen_ai_inference_operations:
             return
 
-        # A child may finish after its parent, e.g. in another thread or async task.
-        # A separate parent lookup followed by put() could race with the parent's
-        # pop(): the parent removes its state after the lookup, then the child
-        # recreates it. The parent will not end again to remove that stale entry.
-        # update_if_present checks and updates under the same lock as pop(), so
-        # a late child cannot recreate an entry that its parent already removed.
+        # Check and update the parent entry under the same lock used by pop().
+        # A child in another thread or async task could otherwise look up its parent,
+        # race with the parent's end() removing that entry, then put() it back.
+        # Update only an existing entry so the child cannot recreate an ended parent.
         if span.parent and not span.parent.is_remote:
             self._active_parent_span_id_and_operation_to_gen_ai_client_child.update_if_present(
                 (span.context.trace_id, span.parent.span_id),
