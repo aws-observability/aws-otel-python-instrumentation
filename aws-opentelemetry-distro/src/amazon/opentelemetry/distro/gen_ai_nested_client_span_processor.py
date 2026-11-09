@@ -35,12 +35,14 @@ class GenAINestedClientSpanProcessor(SpanProcessor):
     # State is kept only for local parents that are still open when a CLIENT child starts, and is
     # released when the parent ends or is garbage-collected. A remote parent, or a parent that has
     # already ended, gets no state, so children of such parents cannot leave entries behind.
-    # Garbage collection can run a finalizer at any allocation, including while this processor holds
-    # its lock, so the finalizer never takes the lock. It only queues the parent's key on a
-    # thread-safe deque, which every lifecycle call drains.
+    # Garbage collection can run at any allocation of a tracked object and can end spans on this thread,
+    # for example by closing an abandoned generator that holds a span open, which calls on_end again.
+    # Objects are therefore built before the lock is taken, and the lock is re-entrant, so a span ended
+    # from inside a collection cannot deadlock on it. The finalizer never takes the lock. It only queues
+    # the parent's key on a thread-safe deque, which every lifecycle call drains.
 
     def __init__(self):
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         # (trace_id, span_id) of an open local parent -> (inference operations of its ended CLIENT
         # children, finalizer). Guarded by _lock.
         self._parents: Dict[_SpanKey, Tuple[Set[str], weakref.finalize]] = {}
@@ -60,21 +62,35 @@ class GenAINestedClientSpanProcessor(SpanProcessor):
         key = (parent_span_context.trace_id, parent_span_context.span_id)
         with self._lock:
             self._remove_collected_locked()
-            if key not in self._parents:
-                finalizer = weakref.finalize(parent, self._collected.append, key)
-                finalizer.atexit = False
-                self._parents[key] = (set(), finalizer)
+            tracked = key in self._parents
+        if tracked:
+            return
+        finalizer = weakref.finalize(parent, self._collected.append, key)
+        finalizer.atexit = False
+        entry: Tuple[Set[str], weakref.finalize] = (set(), finalizer)
+        with self._lock:
+            # Another child of the same parent may have started in between.
+            added = self._parents.setdefault(key, entry) is entry
+        if not added:
+            finalizer.detach()
+        elif not parent.is_recording():
+            # The parent ended on another thread after the check above, so its on_end may already have run.
+            with self._lock:
+                if self._parents.get(key) is entry:
+                    del self._parents[key]
+            finalizer.detach()
 
     def on_end(self, span: ReadableSpan) -> None:
         operation = _client_inference_operation(span)
-        parent = span.parent
+        key = (span.context.trace_id, span.context.span_id) if span.context else None
+        parent_key = (span.parent.trace_id, span.parent.span_id) if operation and span.parent else None
         with self._lock:
             self._remove_collected_locked()
-            entry = self._parents.pop((span.context.trace_id, span.context.span_id), None) if span.context else None
-            if operation is not None and parent is not None:
+            entry = self._parents.pop(key, None) if key else None
+            if parent_key is not None:
                 # Only an open tracked parent records the child. A parent that already ended has no entry,
                 # and none is created for it.
-                parent_entry = self._parents.get((parent.trace_id, parent.span_id))
+                parent_entry = self._parents.get(parent_key)
                 if parent_entry is not None:
                     parent_entry[0].add(operation)
         if entry is None:

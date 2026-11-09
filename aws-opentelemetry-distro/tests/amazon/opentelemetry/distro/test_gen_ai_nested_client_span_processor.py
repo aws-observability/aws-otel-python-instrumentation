@@ -3,6 +3,9 @@
 
 import gc
 import random
+import subprocess
+import sys
+import textwrap
 import threading
 import unittest
 
@@ -232,6 +235,75 @@ class TestGenAINestedClientSpanProcessor(unittest.TestCase):
         worker.join(timeout=5)
         self.assertFalse(worker.is_alive(), "finalizer deadlocked on the processor lock")
         self.assertEqual(len(self.processor._collected), 1)  # noqa: SLF001
+
+    def test_span_ended_while_lock_is_held_on_the_same_thread_does_not_deadlock(self):
+        # Garbage collection can end a span on the thread that holds the processor's lock, for example by
+        # closing an abandoned generator that holds a span open. on_end must be able to re-enter.
+        parent = self.tracer.start_span("agent")
+        child = self._make_llm_span(ctx=trace.set_span_in_context(parent))
+
+        def end_inside_lock():
+            with self.processor._lock:  # noqa: SLF001
+                child.end()
+                parent.end()
+
+        worker = threading.Thread(target=end_inside_lock, daemon=True)
+        worker.start()
+        worker.join(timeout=5)
+        self.assertFalse(worker.is_alive(), "on_end deadlocked on the processor lock")
+        self.assertEqual(self.processor._parents, {})  # noqa: SLF001
+
+    def test_spans_ended_by_garbage_collection_do_not_deadlock(self):
+        # Abandoned streaming generators that hold a span open are closed by the cyclic collector, which can
+        # run inside this processor's own calls and end a span on the same thread. Runs in a subprocess so a
+        # deadlock fails the test instead of hanging the test run.
+        script = textwrap.dedent(
+            """
+            import gc, os, threading
+            from opentelemetry import trace
+            from opentelemetry.sdk.trace import TracerProvider
+            from opentelemetry.trace import SpanKind
+            from amazon.opentelemetry.distro.gen_ai_nested_client_span_processor import (
+                GenAINestedClientSpanProcessor,
+            )
+
+            gc.set_threshold(50)
+            provider = TracerProvider()
+            provider.add_span_processor(GenAINestedClientSpanProcessor())
+            tracer = provider.get_tracer("t")
+
+            def stream():
+                with tracer.start_as_current_span("stream", kind=SpanKind.CLIENT) as span:
+                    span.set_attribute("gen_ai.operation.name", "chat")
+                    yield 1
+                    yield 2
+
+            def run():
+                for _ in range(200):
+                    parent = tracer.start_span("agent")
+                    ctx = trace.set_span_in_context(parent)
+                    for _ in range(20):
+                        generator = stream()
+                        next(generator)
+                        cycle = [generator]
+                        cycle.append(cycle)
+                        del generator, cycle
+                        chat = tracer.start_span("chat", kind=SpanKind.CLIENT, context=ctx)
+                        chat.set_attribute("gen_ai.operation.name", "chat")
+                        chat.end()
+                    parent.end()
+
+            worker = threading.Thread(target=run, daemon=True)
+            worker.start()
+            worker.join(20)
+            os._exit(1 if worker.is_alive() else 0)
+            """
+        )
+        try:
+            result = subprocess.run([sys.executable, "-c", script], timeout=40, check=False)
+        except subprocess.TimeoutExpired:
+            self.fail("subprocess did not finish")
+        self.assertEqual(result.returncode, 0, "a span ended by garbage collection deadlocked the processor")
 
     def test_shutdown_clears_state(self):
         parent = self.tracer.start_span("agent")
