@@ -93,7 +93,7 @@ class GenAINestedClientSpanProcessor(SpanProcessor):
     ) -> Mapping[tuple[int, int], frozenset[str]]:
         """Return an immutable snapshot of active parent span operations."""
         return MappingProxyType(
-            self._active_parent_span_id_and_operation_to_gen_ai_client_child.snapshot(
+            self._active_parent_span_id_and_operation_to_gen_ai_client_child.get_dict(
                 lambda state: frozenset(state.child_operations)
             )
         )

@@ -61,11 +61,11 @@ class TestInstrumentationUtils(TestCase):
 
         predicate.assert_not_called()
 
-    def test_dict_with_lock_snapshot_returns_independent_values(self):
+    def test_dict_with_lock_get_dict_returns_independent_values(self):
         state = DictWithLock()
         state.put("parent", {"chat"})
 
-        snapshot = state.snapshot(frozenset)
+        snapshot = state.get_dict(frozenset)
         state.update_if_present("parent", lambda operations: operations.add("embeddings"))
         state.clear()
 
