@@ -15,7 +15,13 @@ from opentelemetry.trace import SpanKind
 
 
 class _ParentSpanState(NamedTuple):
+    """Record a local CLIENT span and the operations of its completed GenAI CLIENT children."""
+
+    # Do not keep the span alive. Its weak-reference callback removes the map
+    # entry if the span is collected without end() being called.
     span_ref: ReferenceType[Span]
+    # Inference operation names from completed GenAI CLIENT children.
+    # The parent becomes INTERNAL if its own inference operation is in this set.
     child_operations: set[str]
 
 
@@ -28,8 +34,10 @@ class GenAINestedClientSpanProcessor(SpanProcessor):
 
     def __init__(self) -> None:
         # Tracks which parent spans have a GenAI CLIENT child for each operation.
-        # State belongs only to active local CLIENT spans. Weak references also
-        # release it when a span is garbage collected without being ended.
+        # Add local CLIENT spans in on_start(); remove their entries in on_end().
+        # Children can update only a parent that still has an entry in this map.
+        # The stored weak reference does not keep the span alive. If the span is
+        # garbage collected without end(), its callback removes the entry instead.
         self._active_parent_span_id_and_operation_to_gen_ai_client_child: DictWithLock = DictWithLock()
 
     def on_start(self, span: Span, parent_context=None) -> None:
@@ -39,7 +47,9 @@ class GenAINestedClientSpanProcessor(SpanProcessor):
         span_key = (span.context.trace_id, span.context.span_id)
 
         def remove_collected_span(span_ref: ReferenceType[Span]) -> None:
-            # A stale callback must not remove a replacement with the same key.
+            # Delete only the entry containing this span's weak reference.
+            # If its key was overwritten, this callback must leave the newer
+            # span's state alone.
             self._active_parent_span_id_and_operation_to_gen_ai_client_child.pop_if_matches(
                 span_key, lambda state: state.span_ref is span_ref
             )
