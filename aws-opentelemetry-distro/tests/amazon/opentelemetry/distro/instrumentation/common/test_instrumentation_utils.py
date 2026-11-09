@@ -24,7 +24,7 @@ from opentelemetry.trace import set_span_in_context
 
 
 class TestInstrumentationUtils(TestCase):
-    def test_dict_update_if_present_does_not_create_missing_entry(self):
+    def test_dict_with_lock_update_if_present_does_not_create_missing_entry(self):
         state = DictWithLock()
         updater = Mock()
 
@@ -33,7 +33,7 @@ class TestInstrumentationUtils(TestCase):
         updater.assert_not_called()
         self.assertEqual(len(state), 0)
 
-    def test_dict_update_if_present_updates_existing_value(self):
+    def test_dict_with_lock_update_if_present_updates_existing_value(self):
         state = DictWithLock()
         state.put("parent", set())
 
@@ -41,7 +41,7 @@ class TestInstrumentationUtils(TestCase):
 
         self.assertEqual(state.pop("parent"), {"chat"})
 
-    def test_dict_pop_if_matches_preserves_replaced_value(self):
+    def test_dict_with_lock_pop_if_matches_preserves_replaced_value(self):
         state = DictWithLock()
         old_value = object()
         new_value = object()
@@ -53,7 +53,7 @@ class TestInstrumentationUtils(TestCase):
         self.assertIs(state.pop_if_matches("span", lambda value: value is new_value), new_value)
         self.assertEqual(len(state), 0)
 
-    def test_dict_pop_if_matches_does_not_call_predicate_for_missing_entry(self):
+    def test_dict_with_lock_pop_if_matches_does_not_call_predicate_for_missing_entry(self):
         state = DictWithLock()
         predicate = Mock()
 
