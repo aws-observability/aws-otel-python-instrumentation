@@ -118,10 +118,13 @@ class ScopedBaggageSpanProcessor(SpanProcessor):
     span kind, and before the batch processors, so exporters see the new attribute.
 
     Pending baggage is released when the span ends, or when the span is garbage-collected without
-    ending, so abandoned spans do not retain it. Garbage collection can run a finalizer at any
-    allocation, including while this processor holds its lock, so the finalizer never takes the lock.
-    It only queues the span's key on a thread-safe deque. Every lifecycle call (``on_start``,
-    ``on_end``, ``force_flush``) removes queued entries, whether or not the span carries scoped baggage.
+    ending, so abandoned spans do not retain it. Garbage collection can run at any allocation of a
+    tracked object, including while this processor holds its lock, and can end spans on the same
+    thread, for example by closing an abandoned generator that holds a span open. Objects are therefore
+    built before the lock is taken, and the lock is re-entrant, so a span ended from inside a collection
+    cannot deadlock on it. The finalizer never takes the lock. It only queues the span's key on a
+    thread-safe deque. Every lifecycle call (``on_start``, ``on_end``, ``force_flush``) removes queued
+    entries, whether or not the span carries scoped baggage.
 
     A key is only set when the span does not already have it, so a value set by the instrumentation wins.
     """
@@ -137,7 +140,7 @@ class ScopedBaggageSpanProcessor(SpanProcessor):
             key: frozenset([scopes] if isinstance(scopes, str) else scopes) for key, scopes in scoped_keys.items()
         }
         self._warned_scopes: Set[str] = set()
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         # (trace_id, span_id) -> pending state. Guarded by _lock.
         self._pending_by_span: Dict[Tuple[int, int], _PendingSpan] = {}
         # Keys of spans collected without ending. Appended by finalizers without the lock.
@@ -158,17 +161,19 @@ class ScopedBaggageSpanProcessor(SpanProcessor):
         # finalizer queues the key for removal if the span is garbage-collected without ending.
         finalizer = weakref.finalize(span, self._collected.append, span_key)
         finalizer.atexit = False
+        entry = _PendingSpan(pending, finalizer)
         with self._lock:
             self._remove_collected_locked()
-            self._pending_by_span[span_key] = _PendingSpan(pending, finalizer)
+            self._pending_by_span[span_key] = entry
 
     @override
     def on_end(self, span: ReadableSpan) -> None:
         if span.context is None:
             return
+        span_key = _span_key(span)
         with self._lock:
             self._remove_collected_locked()
-            entry = self._pending_by_span.pop(_span_key(span), None)
+            entry = self._pending_by_span.pop(span_key, None)
         if entry is None:
             return
         entry.finalizer.detach()

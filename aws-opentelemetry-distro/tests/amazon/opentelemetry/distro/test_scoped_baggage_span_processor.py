@@ -198,6 +198,22 @@ class TestScopedBaggageSpanProcessor(unittest.TestCase):
         self.processor.shutdown()
         self.assertEqual(self.processor._pending_by_span, {})  # noqa: SLF001
 
+    def test_span_ended_while_lock_is_held_on_the_same_thread_does_not_deadlock(self):
+        # Garbage collection can end a span on the thread that holds the processor's lock, for example by
+        # closing an abandoned generator that holds a span open. on_end must be able to re-enter.
+        span = self._start()
+
+        def end_inside_lock():
+            with self.processor._lock:  # noqa: SLF001
+                span.end()
+
+        worker = threading.Thread(target=end_inside_lock, daemon=True)
+        worker.start()
+        worker.join(timeout=5)
+        self.assertFalse(worker.is_alive(), "on_end deadlocked on the processor lock")
+        self.assertEqual(self._finished("chat model").attributes[AWS_AGENT_LINEAGE], LINEAGE)
+        self.assertEqual(self.processor._pending_by_span, {})  # noqa: SLF001
+
     def test_span_promoted_to_client_after_start_still_matches(self):
         # A span can start as INTERNAL and be changed to CLIENT before it ends.
         span = self._start(kind=SpanKind.INTERNAL)
