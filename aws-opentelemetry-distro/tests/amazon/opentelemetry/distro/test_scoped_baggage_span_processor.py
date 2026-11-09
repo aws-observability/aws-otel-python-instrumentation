@@ -251,30 +251,6 @@ class TestScopedBaggageSpanProcessor(unittest.TestCase):
         self.assertNotIn(AWS_AGENT_LINEAGE, spans["framework chat"].attributes)
         self.assertEqual(spans["bedrock chat"].attributes[AWS_AGENT_LINEAGE], LINEAGE)
 
-    def _nested_chat_spans(self, tracer, outer_op=GenAiOperationNameValues.CHAT.value):
-        framework = tracer.start_span("framework", kind=SpanKind.CLIENT)
-        framework.set_attribute(GEN_AI_OPERATION_NAME, outer_op)
-        sdk = tracer.start_span("sdk", kind=SpanKind.CLIENT, context=trace.set_span_in_context(framework))
-        sdk.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
-        sdk.end()
-        framework.end()
-
-    def test_only_innermost_client_span_gets_lineage_without_nested_processor(self):
-        # Agent observability off: GenAINestedClientSpanProcessor is not installed, so both spans stay CLIENT.
-        self._nested_chat_spans(self.tracer)
-
-        self.assertEqual(self._finished("framework").kind, SpanKind.CLIENT)
-        self.assertNotIn(AWS_AGENT_LINEAGE, self._finished("framework").attributes)
-        self.assertEqual(self._finished("sdk").attributes[AWS_AGENT_LINEAGE], LINEAGE)
-        self.assertEqual(self.processor._pending_by_span, {})
-
-    def test_nested_inference_spans_with_different_operations_both_match(self):
-        # Same rule as GenAINestedClientSpanProcessor: only a child with the same operation demotes the parent.
-        self._nested_chat_spans(self.tracer, outer_op=GenAiOperationNameValues.EMBEDDINGS.value)
-
-        self.assertEqual(self._finished("framework").attributes[AWS_AGENT_LINEAGE], LINEAGE)
-        self.assertEqual(self._finished("sdk").attributes[AWS_AGENT_LINEAGE], LINEAGE)
-
     def test_unscoped_keys_still_copied_to_every_span(self):
         exporter = InMemorySpanExporter()
         provider = TracerProvider()

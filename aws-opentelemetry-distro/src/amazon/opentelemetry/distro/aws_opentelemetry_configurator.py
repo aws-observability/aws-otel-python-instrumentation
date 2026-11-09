@@ -349,8 +349,7 @@ def _init_tracing(
 
     # This processor modifies span kind in on_end, so it must run before batch
     # processors to ensure exporters observe the updated kind.
-    if is_agent_observability_enabled():
-        trace_provider.add_span_processor(GenAINestedClientSpanProcessor())
+    trace_provider.add_span_processor(GenAINestedClientSpanProcessor())
 
     # This processor adds attributes in on_end, so it must run after GenAINestedClientSpanProcessor
     # (its scopes check the corrected span kind) and before the redacting and batch processors.

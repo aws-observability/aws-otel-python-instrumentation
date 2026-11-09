@@ -787,7 +787,8 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             provider.shutdown()
 
         spans = {span.name: span for span in exporter.get_finished_spans()}
-        self.assertEqual(spans["framework"].kind, SpanKind.CLIENT)
+        # GenAINestedClientSpanProcessor is installed without agent observability and demotes the outer span.
+        self.assertEqual(spans["framework"].kind, SpanKind.INTERNAL)
         self.assertNotIn("tenant.id", spans["framework"].attributes)
         self.assertEqual(spans["sdk"].attributes["tenant.id"], "t1")
 
@@ -806,11 +807,12 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             _init_tracing({"otlp": MagicMock(return_value=exporter)})
         return [call.args[0] for call in trace_provider.add_span_processor.call_args_list]
 
-    def test_scoped_baggage_processor_not_added_without_agent_observability(self):
+    def test_without_agent_observability_nested_processor_added_and_scoped_processor_not(self):
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
             os.environ.pop("OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS", None)
             processors = self._init_tracing_processors()
+        self.assertIsInstance(processors[0], GenAINestedClientSpanProcessor)
         self.assertFalse(any(isinstance(p, ScopedBaggageSpanProcessor) for p in processors))
 
     def test_customer_allowlisted_lineage_goes_to_every_span(self):

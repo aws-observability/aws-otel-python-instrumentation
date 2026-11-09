@@ -26,20 +26,23 @@ RESERVED_SCOPE_PREFIX = "aws."
 INFERENCE_SCOPE = "aws.inference"
 
 
-def _gen_ai_inference_operation(span: ReadableSpan) -> Optional[str]:
-    """The GenAI inference operation of a CLIENT span, or None."""
-    if span.kind != SpanKind.CLIENT:
-        return None
-    operation = (span.attributes or {}).get(GEN_AI_OPERATION_NAME)
-    return operation if operation in GEN_AI_INFERENCE_OPERATIONS else None
-
-
 def is_gen_ai_inference_span(span: ReadableSpan) -> bool:
-    """A CLIENT span for a GenAI inference operation (chat, text_completion, generate_content, embeddings)."""
-    return _gen_ai_inference_operation(span) is not None
+    """A CLIENT span for a GenAI inference operation (chat, text_completion, generate_content, embeddings).
+
+    When a framework span wraps the model SDK span with the same operation, GenAINestedClientSpanProcessor
+    demotes the outer span to INTERNAL before this check runs, so only the innermost span matches.
+    """
+    if span.kind != SpanKind.CLIENT:
+        return False
+    return (span.attributes or {}).get(GEN_AI_OPERATION_NAME) in GEN_AI_INFERENCE_OPERATIONS
 
 
 ScopePredicate = Callable[[ReadableSpan], bool]
+
+# Built-in scopes: scope name -> predicate evaluated when the span ends. Names use the reserved prefix.
+_BUILTIN_SCOPES: Mapping[str, ScopePredicate] = {
+    INFERENCE_SCOPE: is_gen_ai_inference_span,
+}
 
 # Scopes registered by applications with register_baggage_scope(). Replaced as a whole on registration
 # (copy-on-write), so span processing reads it without a lock.
@@ -85,16 +88,18 @@ def _clear_registered_scopes() -> None:
         _registered_scopes = {}
 
 
+def _get_scope(name: str) -> Optional[ScopePredicate]:
+    return _BUILTIN_SCOPES.get(name) or _registered_scopes.get(name)
+
+
 class _PendingSpan:
     """Baggage captured at span start, held until the span ends."""
 
-    __slots__ = ("baggage", "finalizer", "inference_child_operations")
+    __slots__ = ("baggage", "finalizer")
 
     def __init__(self, captured: Dict[str, str], finalizer: weakref.finalize) -> None:
         self.baggage = captured
         self.finalizer = finalizer
-        # Inference operations of CLIENT child spans that have ended. Guarded by the processor lock.
-        self.inference_child_operations: Set[str] = set()
 
 
 class ScopedBaggageSpanProcessor(SpanProcessor):
@@ -117,10 +122,6 @@ class ScopedBaggageSpanProcessor(SpanProcessor):
     allocation, including while this processor holds its lock, so the finalizer never takes the lock.
     It only queues the span's key on a thread-safe deque. Every lifecycle call (``on_start``,
     ``on_end``, ``force_flush``) removes queued entries, whether or not the span carries scoped baggage.
-
-    The built-in ``aws.inference`` scope matches only the innermost span of nested CLIENT inference spans
-    with the same operation, such as a framework span wrapping the model SDK span. The processor tracks
-    this itself, so the result does not depend on GenAINestedClientSpanProcessor being installed.
 
     A key is only set when the span does not already have it, so a value set by the instrumentation wins.
     """
@@ -165,30 +166,18 @@ class ScopedBaggageSpanProcessor(SpanProcessor):
     def on_end(self, span: ReadableSpan) -> None:
         if span.context is None:
             return
-        inference_operation = _gen_ai_inference_operation(span)
-        parent = span.parent
         with self._lock:
             self._remove_collected_locked()
             entry = self._pending_by_span.pop(_span_key(span), None)
-            if inference_operation is not None and parent is not None:
-                # Record this span on its parent, so a parent with the same operation does not match
-                # aws.inference. Children end before their parents.
-                parent_entry = self._pending_by_span.get((parent.trace_id, parent.span_id))
-                if parent_entry is not None:
-                    parent_entry.inference_child_operations.add(inference_operation)
         if entry is None:
             return
         entry.finalizer.detach()
-        # The entry is no longer in _pending_by_span, so no child can change it now.
         for key, value in entry.baggage.items():
-            if any(self._scope_matches(scope, span, entry) for scope in self._scoped_keys[key]):
+            if any(self._scope_matches(scope, span) for scope in self._scoped_keys[key]):
                 _set_attribute_if_absent(span, key, value)
 
-    def _scope_matches(self, scope_name: str, span: ReadableSpan, entry: _PendingSpan) -> bool:
-        if scope_name == INFERENCE_SCOPE:
-            operation = _gen_ai_inference_operation(span)
-            return operation is not None and operation not in entry.inference_child_operations
-        predicate = _registered_scopes.get(scope_name)
+    def _scope_matches(self, scope_name: str, span: ReadableSpan) -> bool:
+        predicate = _get_scope(scope_name)
         if predicate is None:
             self._warn_unknown_scope(scope_name)
             return False

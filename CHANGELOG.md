@@ -21,6 +21,10 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   attribute model cost to agents. `session.id` and keys in `OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS` are still copied
   to every span
   ([#965](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/965))
+- feat: run `GenAINestedClientSpanProcessor` with or without `AGENT_OBSERVABILITY_ENABLED`. When a framework
+  span wraps the model SDK span for the same GenAI inference call, the outer span is now INTERNAL instead of
+  CLIENT, so the call is not counted twice as a dependency
+  ([#965](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/965))
 - fix: in Lambda, treat `OTEL_EXPORTER_OTLP_ENDPOINT` as a custom trace endpoint, as the OTLP exporter
   spec requires. Setting only the generic endpoint previously fell back to the X-Ray UDP exporter, so
   traces never reached the configured collector
