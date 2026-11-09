@@ -1,6 +1,9 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import gc
+import random
+import threading
 import unittest
 
 from amazon.opentelemetry.distro.gen_ai_nested_client_span_processor import GenAINestedClientSpanProcessor
@@ -12,14 +15,15 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_OPERATION_NAME,
     GenAiOperationNameValues,
 )
-from opentelemetry.trace import SpanKind
+from opentelemetry.trace import NonRecordingSpan, SpanContext, SpanKind, TraceFlags
 
 
 class TestGenAINestedClientSpanProcessor(unittest.TestCase):
     def setUp(self):
         self.exporter = InMemorySpanExporter()
         self.provider = TracerProvider()
-        self.provider.add_span_processor(GenAINestedClientSpanProcessor())
+        self.processor = GenAINestedClientSpanProcessor()
+        self.provider.add_span_processor(self.processor)
         self.provider.add_span_processor(SimpleSpanProcessor(self.exporter))
         self.tracer = self.provider.get_tracer("test")
 
@@ -147,12 +151,98 @@ class TestGenAINestedClientSpanProcessor(unittest.TestCase):
         spans = self.exporter.get_finished_spans()
         self.assertEqual(spans[0].kind, SpanKind.CLIENT)
 
+    def _finished(self, name):
+        return next(s for s in self.exporter.get_finished_spans() if s.name == name)
+
+    def test_three_levels_demote_all_but_innermost(self):
+        top = self._make_llm_span("top")
+        middle = self._make_llm_span("middle", ctx=trace.set_span_in_context(top))
+        inner = self._make_llm_span("inner", ctx=trace.set_span_in_context(middle))
+        inner.end()
+        middle.end()
+        top.end()
+
+        self.assertEqual(self._finished("top").kind, SpanKind.INTERNAL)
+        self.assertEqual(self._finished("middle").kind, SpanKind.INTERNAL)
+        self.assertEqual(self._finished("inner").kind, SpanKind.CLIENT)
+        self.assertEqual(self.processor._parents, {})  # noqa: SLF001
+
+    def test_remote_parent_keeps_no_state(self):
+        for _ in range(100):
+            remote = SpanContext(
+                random.getrandbits(128), random.getrandbits(64), is_remote=True, trace_flags=TraceFlags(1)
+            )
+            self._make_llm_span(ctx=trace.set_span_in_context(NonRecordingSpan(remote))).end()
+
+        self.assertEqual(self.processor._parents, {})  # noqa: SLF001
+
+    def test_child_ending_after_parent_keeps_no_state(self):
+        for _ in range(100):
+            parent = self.tracer.start_span("agent")
+            child = self._make_llm_span(ctx=trace.set_span_in_context(parent))
+            parent.end()
+            child.end()
+            # A child that starts after its parent ended.
+            self._make_llm_span(ctx=trace.set_span_in_context(parent)).end()
+
+        self.assertEqual(self.processor._parents, {})  # noqa: SLF001
+
+    def test_non_client_children_keep_no_state(self):
+        parent = self.tracer.start_span("agent")
+        self.tracer.start_span("step", context=trace.set_span_in_context(parent))
+
+        self.assertEqual(self.processor._parents, {})  # noqa: SLF001
+
+    def _abandon_parents(self, count):
+        # Parents that never end, each with a CLIENT child that does end. Dropped together, like requests.
+        parents = [self.tracer.start_span("agent") for _ in range(count)]
+        for parent in parents:
+            self._make_llm_span(ctx=trace.set_span_in_context(parent)).end()
+        del parents
+        gc.collect()
+
+    def test_state_released_for_parents_collected_without_ending(self):
+        self._abandon_parents(100)
+        self.assertEqual(len(self.processor._collected), 100)  # noqa: SLF001
+
+        # Any later span, even one that does not touch this processor's state, releases the collected entries.
+        self.tracer.start_span("unrelated").end()
+
+        self.assertEqual(self.processor._parents, {})  # noqa: SLF001
+        self.assertEqual(len(self.processor._collected), 0)  # noqa: SLF001
+
+    def test_force_flush_releases_collected_parents(self):
+        self._abandon_parents(10)
+        self.assertTrue(self.processor.force_flush())
+        self.assertEqual(self.processor._parents, {})  # noqa: SLF001
+
+    def test_finalizer_does_not_deadlock_while_processor_holds_its_lock(self):
+        parent = self.tracer.start_span("agent")
+        self._make_llm_span(ctx=trace.set_span_in_context(parent)).end()
+        cycle = [parent]
+        cycle.append(cycle)  # Keep the parent alive until the cyclic collector runs.
+        del parent, cycle
+
+        def collect_inside_lock():
+            with self.processor._lock:  # noqa: SLF001
+                gc.collect()
+
+        worker = threading.Thread(target=collect_inside_lock, daemon=True)
+        worker.start()
+        worker.join(timeout=5)
+        self.assertFalse(worker.is_alive(), "finalizer deadlocked on the processor lock")
+        self.assertEqual(len(self.processor._collected), 1)  # noqa: SLF001
+
     def test_shutdown_clears_state(self):
-        processor = GenAINestedClientSpanProcessor()
-        processor._parent_span_id_and_operation_to_gen_ai_client_child.put(123, True)
-        self.assertEqual(len(processor._parent_span_id_and_operation_to_gen_ai_client_child), 1)
-        processor.shutdown()
-        self.assertEqual(len(processor._parent_span_id_and_operation_to_gen_ai_client_child), 0)
+        parent = self.tracer.start_span("agent")
+        self._make_llm_span(ctx=trace.set_span_in_context(parent))
+        self.assertEqual(len(self.processor._parents), 1)  # noqa: SLF001
+        finalizer = next(iter(self.processor._parents.values()))[1]  # noqa: SLF001
+
+        self.processor.shutdown()
+
+        self.assertEqual(self.processor._parents, {})  # noqa: SLF001
+        self.assertFalse(finalizer.alive)
 
     def test_force_flush_returns_true(self):
         processor = GenAINestedClientSpanProcessor()
