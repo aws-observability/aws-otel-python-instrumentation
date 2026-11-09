@@ -14,7 +14,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
 from opentelemetry.trace import SpanKind
 
 
-class _ClientSpanState(NamedTuple):
+class _ParentSpanState(NamedTuple):
     span_ref: ReferenceType[Span]
     child_operations: set[str]
 
@@ -45,7 +45,7 @@ class GenAINestedClientSpanProcessor(SpanProcessor):
             )
 
         self._active_parent_span_id_and_operation_to_gen_ai_client_child.put(
-            span_key, _ClientSpanState(ref(span, remove_collected_span), set())
+            span_key, _ParentSpanState(ref(span, remove_collected_span), set())
         )
 
     def on_end(self, span: ReadableSpan) -> None:
