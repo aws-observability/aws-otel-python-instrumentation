@@ -115,6 +115,14 @@ class DictWithLock:
                     del self._data[key]
             return matching_items
 
+    def snapshot(self, value_mapper: Callable[[Any], Any]) -> Dict[Any, Any]:
+        """Copy entries with their values transformed while holding the lock.
+
+        The value mapper must not call methods on this DictWithLock instance.
+        """
+        with self._lock:
+            return {key: value_mapper(value) for key, value in self._data.items()}
+
     def clear(self) -> None:
         with self._lock:
             self._data.clear()

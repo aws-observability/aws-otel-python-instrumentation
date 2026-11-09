@@ -31,15 +31,12 @@ class TestGenAINestedClientSpanProcessor(unittest.TestCase):  # pylint: disable=
         self.provider.add_span_processor(SimpleSpanProcessor(self.exporter))
         self.tracer = self.provider.get_tracer("test")
 
-    def _make_llm_span(self, name="chat model", op=GenAiOperationNameValues.CHAT.value, kind=SpanKind.CLIENT, ctx=None):
-        span = self.tracer.start_span(name, kind=kind, context=ctx)
-        span.set_attribute(GEN_AI_OPERATION_NAME, op)
-        return span
-
-    def test_nested_llm_client_child_converts_parent_to_internal(self):
-        parent = self._make_llm_span()
+    def test_on_end_nested_llm_client_child_converts_parent_to_internal(self):
+        parent = self.tracer.start_span("chat model", kind=SpanKind.CLIENT)
+        parent.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
         ctx = trace.set_span_in_context(parent)
-        child = self._make_llm_span(ctx=ctx)
+        child = self.tracer.start_span("chat model", kind=SpanKind.CLIENT, context=ctx)
+        child.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
         child.end()
         parent.end()
 
@@ -49,8 +46,9 @@ class TestGenAINestedClientSpanProcessor(unittest.TestCase):  # pylint: disable=
         self.assertEqual(child_span.kind, SpanKind.CLIENT)
         self.assertEqual(parent_span.kind, SpanKind.INTERNAL)
 
-    def test_http_child_leaves_parent_client(self):
-        parent = self._make_llm_span()
+    def test_on_end_http_child_leaves_parent_client(self):
+        parent = self.tracer.start_span("chat model", kind=SpanKind.CLIENT)
+        parent.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
         ctx = trace.set_span_in_context(parent)
         child = self.tracer.start_span("POST", kind=SpanKind.CLIENT, context=ctx)
         child.end()
@@ -60,18 +58,21 @@ class TestGenAINestedClientSpanProcessor(unittest.TestCase):  # pylint: disable=
         parent_span = next(s for s in spans if s.name == "chat model")
         self.assertEqual(parent_span.kind, SpanKind.CLIENT)
 
-    def test_no_child_stays_client(self):
-        span = self._make_llm_span()
+    def test_on_end_no_child_stays_client(self):
+        span = self.tracer.start_span("chat model", kind=SpanKind.CLIENT)
+        span.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
         span.end()
 
         spans = self.exporter.get_finished_spans()
         self.assertEqual(len(spans), 1)
         self.assertEqual(spans[0].kind, SpanKind.CLIENT)
 
-    def test_text_completion_converted_by_child(self):
-        parent = self._make_llm_span(op=GenAiOperationNameValues.TEXT_COMPLETION.value)
+    def test_on_end_text_completion_converted_by_child(self):
+        parent = self.tracer.start_span("chat model", kind=SpanKind.CLIENT)
+        parent.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.TEXT_COMPLETION.value)
         ctx = trace.set_span_in_context(parent)
-        child = self._make_llm_span(op=GenAiOperationNameValues.TEXT_COMPLETION.value, ctx=ctx)
+        child = self.tracer.start_span("chat model", kind=SpanKind.CLIENT, context=ctx)
+        child.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.TEXT_COMPLETION.value)
         child.end()
         parent.end()
 
@@ -79,10 +80,12 @@ class TestGenAINestedClientSpanProcessor(unittest.TestCase):  # pylint: disable=
         self.assertEqual(spans[0].kind, SpanKind.CLIENT)
         self.assertEqual(spans[1].kind, SpanKind.INTERNAL)
 
-    def test_embeddings_converted_by_child(self):
-        parent = self._make_llm_span(op=GenAiOperationNameValues.EMBEDDINGS.value)
+    def test_on_end_embeddings_converted_by_child(self):
+        parent = self.tracer.start_span("chat model", kind=SpanKind.CLIENT)
+        parent.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.EMBEDDINGS.value)
         ctx = trace.set_span_in_context(parent)
-        child = self._make_llm_span(op=GenAiOperationNameValues.EMBEDDINGS.value, ctx=ctx)
+        child = self.tracer.start_span("chat model", kind=SpanKind.CLIENT, context=ctx)
+        child.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.EMBEDDINGS.value)
         child.end()
         parent.end()
 
@@ -90,10 +93,12 @@ class TestGenAINestedClientSpanProcessor(unittest.TestCase):  # pylint: disable=
         self.assertEqual(spans[0].kind, SpanKind.CLIENT)
         self.assertEqual(spans[1].kind, SpanKind.INTERNAL)
 
-    def test_generate_content_converted_by_child(self):
-        parent = self._make_llm_span(op=GenAiOperationNameValues.GENERATE_CONTENT.value)
+    def test_on_end_generate_content_converted_by_child(self):
+        parent = self.tracer.start_span("chat model", kind=SpanKind.CLIENT)
+        parent.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.GENERATE_CONTENT.value)
         ctx = trace.set_span_in_context(parent)
-        child = self._make_llm_span(op=GenAiOperationNameValues.GENERATE_CONTENT.value, ctx=ctx)
+        child = self.tracer.start_span("chat model", kind=SpanKind.CLIENT, context=ctx)
+        child.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.GENERATE_CONTENT.value)
         child.end()
         parent.end()
 
@@ -101,12 +106,11 @@ class TestGenAINestedClientSpanProcessor(unittest.TestCase):  # pylint: disable=
         self.assertEqual(spans[0].kind, SpanKind.CLIENT)
         self.assertEqual(spans[1].kind, SpanKind.INTERNAL)
 
-    def test_different_llm_operation_child_leaves_parent_client(self):
-        parent = self._make_llm_span()
-        child = self._make_llm_span(
-            op=GenAiOperationNameValues.EMBEDDINGS.value,
-            ctx=trace.set_span_in_context(parent),
-        )
+    def test_on_end_different_llm_operation_child_leaves_parent_client(self):
+        parent = self.tracer.start_span("chat model", kind=SpanKind.CLIENT)
+        parent.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
+        child = self.tracer.start_span("chat model", kind=SpanKind.CLIENT, context=trace.set_span_in_context(parent))
+        child.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.EMBEDDINGS.value)
         child.end()
         parent.end()
 
@@ -114,7 +118,7 @@ class TestGenAINestedClientSpanProcessor(unittest.TestCase):  # pylint: disable=
         self.assertEqual(spans[0].kind, SpanKind.CLIENT)
         self.assertEqual(spans[1].kind, SpanKind.CLIENT)
 
-    def test_non_llm_operation_ignored(self):
+    def test_on_end_non_llm_operation_ignored(self):
         span = self.tracer.start_span("invoke_agent MyAgent", kind=SpanKind.CLIENT)
         span.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.INVOKE_AGENT.value)
         span.end()
@@ -122,10 +126,11 @@ class TestGenAINestedClientSpanProcessor(unittest.TestCase):  # pylint: disable=
         spans = self.exporter.get_finished_spans()
         self.assertEqual(spans[0].kind, SpanKind.CLIENT)
 
-    def test_llm_child_leaves_non_llm_parent_client(self):
+    def test_on_end_llm_child_leaves_non_llm_parent_client(self):
         parent = self.tracer.start_span("invoke_agent MyAgent", kind=SpanKind.CLIENT)
         parent.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.INVOKE_AGENT.value)
-        child = self._make_llm_span(ctx=trace.set_span_in_context(parent))
+        child = self.tracer.start_span("chat model", kind=SpanKind.CLIENT, context=trace.set_span_in_context(parent))
+        child.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
         child.end()
         parent.end()
 
@@ -133,7 +138,7 @@ class TestGenAINestedClientSpanProcessor(unittest.TestCase):  # pylint: disable=
         self.assertEqual(spans[0].kind, SpanKind.CLIENT)
         self.assertEqual(spans[1].kind, SpanKind.CLIENT)
 
-    def test_internal_span_ignored(self):
+    def test_on_end_internal_span_ignored(self):
         span = self.tracer.start_span("chat model", kind=SpanKind.INTERNAL)
         span.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
         span.end()
@@ -141,109 +146,124 @@ class TestGenAINestedClientSpanProcessor(unittest.TestCase):  # pylint: disable=
         spans = self.exporter.get_finished_spans()
         self.assertEqual(spans[0].kind, SpanKind.INTERNAL)
 
-    def test_span_without_gen_ai_attr_ignored(self):
+    def test_on_end_span_without_gen_ai_attr_ignored(self):
         span = self.tracer.start_span("some-span", kind=SpanKind.CLIENT)
         span.end()
 
         spans = self.exporter.get_finished_spans()
         self.assertEqual(spans[0].kind, SpanKind.CLIENT)
 
-    def test_no_parent_stays_client(self):
-        span = self._make_llm_span()
+    def test_on_end_no_parent_stays_client(self):
+        span = self.tracer.start_span("chat model", kind=SpanKind.CLIENT)
+        span.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
         span.end()
 
         spans = self.exporter.get_finished_spans()
         self.assertEqual(spans[0].kind, SpanKind.CLIENT)
 
-    def _assert_no_state(self):
-        self.assertEqual(len(self.processor._active_parent_span_id_and_operation_to_gen_ai_client_child), 0)
-
-    def test_remote_parents_do_not_accumulate_state(self):
+    def test_on_end_remote_parents_do_not_accumulate_state(self):
         for span_id in range(1, 1001):
             parent = NonRecordingSpan(
                 SpanContext(
                     trace_id=span_id, span_id=span_id, is_remote=True, trace_flags=TraceFlags(TraceFlags.SAMPLED)
                 )
             )
-            child = self._make_llm_span(ctx=trace.set_span_in_context(parent))
+            child = self.tracer.start_span(
+                "chat model", kind=SpanKind.CLIENT, context=trace.set_span_in_context(parent)
+            )
+            child.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
             child.end()
 
-        self._assert_no_state()
+        self.assertEqual(len(self.processor.get_active_parent_span_id_and_operation_to_gen_ai_client_child()), 0)
 
-    def test_nonrecording_local_parent_does_not_accumulate_state(self):
+    def test_on_end_nonrecording_local_parent_does_not_accumulate_state(self):
         parent = NonRecordingSpan(
             SpanContext(trace_id=1, span_id=1, is_remote=False, trace_flags=TraceFlags(TraceFlags.SAMPLED))
         )
-        child = self._make_llm_span(ctx=trace.set_span_in_context(parent))
+        child = self.tracer.start_span("chat model", kind=SpanKind.CLIENT, context=trace.set_span_in_context(parent))
+        child.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
         child.end()
 
-        self._assert_no_state()
+        self.assertEqual(len(self.processor.get_active_parent_span_id_and_operation_to_gen_ai_client_child()), 0)
 
-    def test_parent_from_another_provider_does_not_accumulate_state(self):
+    def test_on_end_parent_from_another_provider_does_not_accumulate_state(self):
         other_provider = TracerProvider(sampler=ALWAYS_ON)
         self.addCleanup(other_provider.shutdown)
         parent = other_provider.get_tracer("other").start_span("parent", kind=SpanKind.CLIENT)
-        child = self._make_llm_span(ctx=trace.set_span_in_context(parent))
+        child = self.tracer.start_span("chat model", kind=SpanKind.CLIENT, context=trace.set_span_in_context(parent))
+        child.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
         child.end()
         parent.end()
 
-        self._assert_no_state()
+        self.assertEqual(len(self.processor.get_active_parent_span_id_and_operation_to_gen_ai_client_child()), 0)
 
-    def test_child_ending_after_parent_does_not_recreate_state(self):
-        parent = self._make_llm_span()
-        child = self._make_llm_span(ctx=trace.set_span_in_context(parent))
+    def test_on_end_child_ending_after_parent_does_not_recreate_state(self):
+        parent = self.tracer.start_span("chat model", kind=SpanKind.CLIENT)
+        parent.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
+        child = self.tracer.start_span("chat model", kind=SpanKind.CLIENT, context=trace.set_span_in_context(parent))
+        child.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
         parent.end()
         child.end()
 
-        self._assert_no_state()
+        self.assertEqual(len(self.processor.get_active_parent_span_id_and_operation_to_gen_ai_client_child()), 0)
         self.assertTrue(all(span.kind == SpanKind.CLIENT for span in self.exporter.get_finished_spans()))
 
-    def test_nonclient_parent_does_not_accumulate_state(self):
+    def test_on_end_nonclient_parent_does_not_accumulate_state(self):
         parent = self.tracer.start_span("parent", kind=SpanKind.INTERNAL)
-        child = self._make_llm_span(ctx=trace.set_span_in_context(parent))
+        child = self.tracer.start_span("chat model", kind=SpanKind.CLIENT, context=trace.set_span_in_context(parent))
+        child.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
         child.end()
 
-        self._assert_no_state()
+        self.assertEqual(len(self.processor.get_active_parent_span_id_and_operation_to_gen_ai_client_child()), 0)
         parent.end()
-        self._assert_no_state()
+        self.assertEqual(len(self.processor.get_active_parent_span_id_and_operation_to_gen_ai_client_child()), 0)
 
-    def test_non_llm_client_parent_cleans_up_child_state(self):
+    def test_on_end_non_llm_client_parent_cleans_up_child_state(self):
         parent = self.tracer.start_span("parent", kind=SpanKind.CLIENT)
-        child = self._make_llm_span(ctx=trace.set_span_in_context(parent))
+        child = self.tracer.start_span("chat model", kind=SpanKind.CLIENT, context=trace.set_span_in_context(parent))
+        child.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
         child.end()
         parent.end()
 
-        self._assert_no_state()
+        self.assertEqual(len(self.processor.get_active_parent_span_id_and_operation_to_gen_ai_client_child()), 0)
 
-    def test_abandoned_parent_releases_child_state(self):
-        parent = self._make_llm_span()
-        child = self._make_llm_span(ctx=trace.set_span_in_context(parent))
+    def test_on_start_abandoned_parent_releases_child_state(self):
+        parent = self.tracer.start_span("chat model", kind=SpanKind.CLIENT)
+        parent.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
+        child = self.tracer.start_span("chat model", kind=SpanKind.CLIENT, context=trace.set_span_in_context(parent))
+        child.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
         child.end()
         parent_ref = weakref.ref(parent)
-        self.assertEqual(len(self.processor._active_parent_span_id_and_operation_to_gen_ai_client_child), 1)
+        self.assertEqual(len(self.processor.get_active_parent_span_id_and_operation_to_gen_ai_client_child()), 1)
 
         del parent
         gc.collect()
 
         self.assertIsNone(parent_ref())
-        self._assert_no_state()
+        self.assertEqual(len(self.processor.get_active_parent_span_id_and_operation_to_gen_ai_client_child()), 0)
 
-    def test_abandoned_child_releases_state(self):
-        child = self._make_llm_span()
+    def test_on_start_abandoned_child_releases_state(self):
+        child = self.tracer.start_span("chat model", kind=SpanKind.CLIENT)
+        child.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
         child_ref = weakref.ref(child)
 
         del child
         gc.collect()
 
         self.assertIsNone(child_ref())
-        self._assert_no_state()
+        self.assertEqual(len(self.processor.get_active_parent_span_id_and_operation_to_gen_ai_client_child()), 0)
 
-    def test_same_span_id_in_different_traces_does_not_share_state(self):
+    def test_on_end_same_span_id_in_different_traces_does_not_share_state(self):
         with patch.object(self.provider.id_generator, "generate_trace_id", side_effect=[1, 2]):
             with patch.object(self.provider.id_generator, "generate_span_id", return_value=123):
-                first_parent = self._make_llm_span(name="first parent")
-                second_parent = self._make_llm_span(name="second parent")
-        child = self._make_llm_span(ctx=trace.set_span_in_context(first_parent))
+                first_parent = self.tracer.start_span("first parent", kind=SpanKind.CLIENT)
+                first_parent.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
+                second_parent = self.tracer.start_span("second parent", kind=SpanKind.CLIENT)
+                second_parent.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
+        child = self.tracer.start_span(
+            "chat model", kind=SpanKind.CLIENT, context=trace.set_span_in_context(first_parent)
+        )
+        child.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
         child.end()
         first_parent.end()
         second_parent.end()
@@ -251,12 +271,17 @@ class TestGenAINestedClientSpanProcessor(unittest.TestCase):  # pylint: disable=
         parents = {span.name: span for span in self.exporter.get_finished_spans()}
         self.assertEqual(parents["first parent"].kind, SpanKind.INTERNAL)
         self.assertEqual(parents["second parent"].kind, SpanKind.CLIENT)
-        self._assert_no_state()
+        self.assertEqual(len(self.processor.get_active_parent_span_id_and_operation_to_gen_ai_client_child()), 0)
 
-    def test_three_nested_llm_clients_preserve_conversion(self):
-        parent = self._make_llm_span()
-        child = self._make_llm_span(ctx=trace.set_span_in_context(parent))
-        grandchild = self._make_llm_span(ctx=trace.set_span_in_context(child))
+    def test_on_end_three_nested_llm_clients_preserve_conversion(self):
+        parent = self.tracer.start_span("chat model", kind=SpanKind.CLIENT)
+        parent.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
+        child = self.tracer.start_span("chat model", kind=SpanKind.CLIENT, context=trace.set_span_in_context(parent))
+        child.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
+        grandchild = self.tracer.start_span(
+            "chat model", kind=SpanKind.CLIENT, context=trace.set_span_in_context(child)
+        )
+        grandchild.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
         grandchild.end()
         child.end()
         parent.end()
@@ -265,55 +290,106 @@ class TestGenAINestedClientSpanProcessor(unittest.TestCase):  # pylint: disable=
             [span.kind for span in self.exporter.get_finished_spans()],
             [SpanKind.CLIENT, SpanKind.INTERNAL, SpanKind.INTERNAL],
         )
-        self._assert_no_state()
+        self.assertEqual(len(self.processor.get_active_parent_span_id_and_operation_to_gen_ai_client_child()), 0)
 
-    def test_concurrent_parent_and_child_endings_do_not_leave_state(self):
+    def test_on_end_concurrent_parent_and_child_endings_do_not_leave_state(self):
         def end_span(span, barrier):
             barrier.wait(timeout=5)
             span.end()
 
         with ThreadPoolExecutor(max_workers=2) as pool:
             for _ in range(100):
-                parent = self._make_llm_span()
-                child = self._make_llm_span(ctx=trace.set_span_in_context(parent))
+                parent = self.tracer.start_span("chat model", kind=SpanKind.CLIENT)
+                parent.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
+                child = self.tracer.start_span(
+                    "chat model", kind=SpanKind.CLIENT, context=trace.set_span_in_context(parent)
+                )
+                child.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
                 barrier = Barrier(2)
 
                 parent_end = pool.submit(end_span, parent, barrier)
                 child_end = pool.submit(end_span, child, barrier)
                 parent_end.result(timeout=5)
                 child_end.result(timeout=5)
-                self._assert_no_state()
+                self.assertEqual(
+                    len(self.processor.get_active_parent_span_id_and_operation_to_gen_ai_client_child()), 0
+                )
 
     def test_shutdown_clears_state(self):
-        parent = self._make_llm_span()
-        child = self._make_llm_span(ctx=trace.set_span_in_context(parent))
+        parent = self.tracer.start_span("chat model", kind=SpanKind.CLIENT)
+        parent.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
+        child = self.tracer.start_span("chat model", kind=SpanKind.CLIENT, context=trace.set_span_in_context(parent))
+        child.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
         child.end()
-        self.assertEqual(len(self.processor._active_parent_span_id_and_operation_to_gen_ai_client_child), 1)
-        state = self.processor._active_parent_span_id_and_operation_to_gen_ai_client_child.get(
+        self.assertEqual(len(self.processor.get_active_parent_span_id_and_operation_to_gen_ai_client_child()), 1)
+        child_operations = self.processor.get_active_parent_span_id_and_operation_to_gen_ai_client_child().get(
             (parent.context.trace_id, parent.context.span_id)
         )
-        self.assertEqual(state.child_operations, {GenAiOperationNameValues.CHAT.value})
+        self.assertEqual(child_operations, frozenset({GenAiOperationNameValues.CHAT.value}))
 
         self.processor.shutdown()
 
-        self._assert_no_state()
+        self.assertEqual(len(self.processor.get_active_parent_span_id_and_operation_to_gen_ai_client_child()), 0)
         parent.end()
-        self._assert_no_state()
+        self.assertEqual(len(self.processor.get_active_parent_span_id_and_operation_to_gen_ai_client_child()), 0)
 
     def test_force_flush_returns_true(self):
         processor = GenAINestedClientSpanProcessor()
         self.assertTrue(processor.force_flush())
 
     def test_force_flush_preserves_active_parent_state(self):
-        parent = self._make_llm_span()
-        child = self._make_llm_span(ctx=trace.set_span_in_context(parent))
+        parent = self.tracer.start_span("chat model", kind=SpanKind.CLIENT)
+        parent.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
+        child = self.tracer.start_span("chat model", kind=SpanKind.CLIENT, context=trace.set_span_in_context(parent))
+        child.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
         child.end()
 
         self.assertTrue(self.processor.force_flush())
         parent.end()
 
         self.assertEqual(self.exporter.get_finished_spans()[-1].kind, SpanKind.INTERNAL)
-        self._assert_no_state()
+        self.assertEqual(len(self.processor.get_active_parent_span_id_and_operation_to_gen_ai_client_child()), 0)
+
+    def test_get_active_parent_span_id_and_operation_to_gen_ai_client_child_returns_immutable_snapshot(self):
+        parent = self.tracer.start_span("chat model", kind=SpanKind.CLIENT)
+        parent.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
+        child = self.tracer.start_span("chat model", kind=SpanKind.CLIENT, context=trace.set_span_in_context(parent))
+        child.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
+        child.end()
+        span_key = (parent.context.trace_id, parent.context.span_id)
+        snapshot = self.processor.get_active_parent_span_id_and_operation_to_gen_ai_client_child()
+
+        with self.assertRaises(TypeError):
+            snapshot[span_key] = frozenset()
+        with self.assertRaises(AttributeError):
+            snapshot[span_key].add(GenAiOperationNameValues.EMBEDDINGS.value)
+
+        parent.end()
+        self.assertEqual(self.exporter.get_finished_spans()[-1].kind, SpanKind.INTERNAL)
+        self.assertEqual(len(self.processor.get_active_parent_span_id_and_operation_to_gen_ai_client_child()), 0)
+
+    def test_get_active_parent_span_id_and_operation_to_gen_ai_client_child_returns_independent_snapshot(self):
+        parent = self.tracer.start_span("chat model", kind=SpanKind.CLIENT)
+        parent.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
+        child = self.tracer.start_span("chat model", kind=SpanKind.CLIENT, context=trace.set_span_in_context(parent))
+        child.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
+        child.end()
+        span_key = (parent.context.trace_id, parent.context.span_id)
+        snapshot = self.processor.get_active_parent_span_id_and_operation_to_gen_ai_client_child()
+        embeddings_child = self.tracer.start_span(
+            "embeddings model", kind=SpanKind.CLIENT, context=trace.set_span_in_context(parent)
+        )
+        embeddings_child.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.EMBEDDINGS.value)
+        embeddings_child.end()
+
+        self.assertEqual(snapshot[span_key], frozenset({GenAiOperationNameValues.CHAT.value}))
+        self.assertEqual(
+            self.processor.get_active_parent_span_id_and_operation_to_gen_ai_client_child()[span_key],
+            frozenset({GenAiOperationNameValues.CHAT.value, GenAiOperationNameValues.EMBEDDINGS.value}),
+        )
+        parent.end()
+        self.assertEqual(len(self.processor.get_active_parent_span_id_and_operation_to_gen_ai_client_child()), 0)
+        self.assertEqual(snapshot[span_key], frozenset({GenAiOperationNameValues.CHAT.value}))
 
 
 if __name__ == "__main__":

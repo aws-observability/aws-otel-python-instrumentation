@@ -1,7 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from typing import NamedTuple
+from types import MappingProxyType
+from typing import Mapping, NamedTuple
 from weakref import ReferenceType, ref
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import DictWithLock
@@ -85,3 +86,14 @@ class GenAINestedClientSpanProcessor(SpanProcessor):
 
     def force_flush(self, timeout_millis: int = 30000) -> bool:  # pylint: disable=no-self-use
         return True
+
+    # Used by tests to inspect tracked operations without changing processor state.
+    def get_active_parent_span_id_and_operation_to_gen_ai_client_child(
+        self,
+    ) -> Mapping[tuple[int, int], frozenset[str]]:
+        """Return an immutable snapshot of active parent span operations."""
+        return MappingProxyType(
+            self._active_parent_span_id_and_operation_to_gen_ai_client_child.snapshot(
+                lambda state: frozenset(state.child_operations)
+            )
+        )

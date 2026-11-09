@@ -61,6 +61,17 @@ class TestInstrumentationUtils(TestCase):
 
         predicate.assert_not_called()
 
+    def test_dict_with_lock_snapshot_returns_independent_values(self):
+        state = DictWithLock()
+        state.put("parent", {"chat"})
+
+        snapshot = state.snapshot(frozenset)
+        state.update_if_present("parent", lambda operations: operations.add("embeddings"))
+        state.clear()
+
+        self.assertEqual(snapshot, {"parent": frozenset({"chat"})})
+        self.assertEqual(len(state), 0)
+
     def test_first_not_none_and_get_value(self):
         object_source = Mock()
         object_source.temperature = 0.0
