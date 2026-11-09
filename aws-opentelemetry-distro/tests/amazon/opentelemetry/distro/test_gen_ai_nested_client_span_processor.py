@@ -1,25 +1,33 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import gc
 import unittest
+import weakref
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
+from unittest.mock import patch
 
 from amazon.opentelemetry.distro.gen_ai_nested_client_span_processor import GenAINestedClientSpanProcessor
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from opentelemetry.sdk.trace.sampling import ALWAYS_ON
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_OPERATION_NAME,
     GenAiOperationNameValues,
 )
-from opentelemetry.trace import SpanKind
+from opentelemetry.trace import NonRecordingSpan, SpanContext, SpanKind, TraceFlags
 
 
-class TestGenAINestedClientSpanProcessor(unittest.TestCase):
+class TestGenAINestedClientSpanProcessor(unittest.TestCase):  # pylint: disable=too-many-public-methods
     def setUp(self):
         self.exporter = InMemorySpanExporter()
         self.provider = TracerProvider()
-        self.provider.add_span_processor(GenAINestedClientSpanProcessor())
+        self.addCleanup(self.provider.shutdown)
+        self.processor = GenAINestedClientSpanProcessor()
+        self.provider.add_span_processor(self.processor)
         self.provider.add_span_processor(SimpleSpanProcessor(self.exporter))
         self.tracer = self.provider.get_tracer("test")
 
@@ -147,16 +155,163 @@ class TestGenAINestedClientSpanProcessor(unittest.TestCase):
         spans = self.exporter.get_finished_spans()
         self.assertEqual(spans[0].kind, SpanKind.CLIENT)
 
+    def _assert_no_state(self):
+        self.assertEqual(len(self.processor._active_client_spans), 0)
+
+    def test_remote_parents_do_not_accumulate_state(self):
+        for span_id in range(1, 1001):
+            parent = NonRecordingSpan(
+                SpanContext(
+                    trace_id=span_id, span_id=span_id, is_remote=True, trace_flags=TraceFlags(TraceFlags.SAMPLED)
+                )
+            )
+            child = self._make_llm_span(ctx=trace.set_span_in_context(parent))
+            child.end()
+
+        self._assert_no_state()
+
+    def test_nonrecording_local_parent_does_not_accumulate_state(self):
+        parent = NonRecordingSpan(
+            SpanContext(trace_id=1, span_id=1, is_remote=False, trace_flags=TraceFlags(TraceFlags.SAMPLED))
+        )
+        child = self._make_llm_span(ctx=trace.set_span_in_context(parent))
+        child.end()
+
+        self._assert_no_state()
+
+    def test_parent_from_another_provider_does_not_accumulate_state(self):
+        other_provider = TracerProvider(sampler=ALWAYS_ON)
+        self.addCleanup(other_provider.shutdown)
+        parent = other_provider.get_tracer("other").start_span("parent", kind=SpanKind.CLIENT)
+        child = self._make_llm_span(ctx=trace.set_span_in_context(parent))
+        child.end()
+        parent.end()
+
+        self._assert_no_state()
+
+    def test_child_ending_after_parent_does_not_recreate_state(self):
+        parent = self._make_llm_span()
+        child = self._make_llm_span(ctx=trace.set_span_in_context(parent))
+        parent.end()
+        child.end()
+
+        self._assert_no_state()
+        self.assertTrue(all(span.kind == SpanKind.CLIENT for span in self.exporter.get_finished_spans()))
+
+    def test_nonclient_parent_does_not_accumulate_state(self):
+        parent = self.tracer.start_span("parent", kind=SpanKind.INTERNAL)
+        child = self._make_llm_span(ctx=trace.set_span_in_context(parent))
+        child.end()
+
+        self._assert_no_state()
+        parent.end()
+        self._assert_no_state()
+
+    def test_non_llm_client_parent_cleans_up_child_state(self):
+        parent = self.tracer.start_span("parent", kind=SpanKind.CLIENT)
+        child = self._make_llm_span(ctx=trace.set_span_in_context(parent))
+        child.end()
+        parent.end()
+
+        self._assert_no_state()
+
+    def test_abandoned_parent_releases_child_state(self):
+        parent = self._make_llm_span()
+        child = self._make_llm_span(ctx=trace.set_span_in_context(parent))
+        child.end()
+        parent_ref = weakref.ref(parent)
+        self.assertEqual(len(self.processor._active_client_spans), 1)
+
+        del parent
+        gc.collect()
+
+        self.assertIsNone(parent_ref())
+        self._assert_no_state()
+
+    def test_abandoned_child_releases_state(self):
+        child = self._make_llm_span()
+        child_ref = weakref.ref(child)
+
+        del child
+        gc.collect()
+
+        self.assertIsNone(child_ref())
+        self._assert_no_state()
+
+    def test_same_span_id_in_different_traces_does_not_share_state(self):
+        with patch.object(self.provider.id_generator, "generate_trace_id", side_effect=[1, 2]):
+            with patch.object(self.provider.id_generator, "generate_span_id", return_value=123):
+                first_parent = self._make_llm_span(name="first parent")
+                second_parent = self._make_llm_span(name="second parent")
+        child = self._make_llm_span(ctx=trace.set_span_in_context(first_parent))
+        child.end()
+        first_parent.end()
+        second_parent.end()
+
+        parents = {span.name: span for span in self.exporter.get_finished_spans()}
+        self.assertEqual(parents["first parent"].kind, SpanKind.INTERNAL)
+        self.assertEqual(parents["second parent"].kind, SpanKind.CLIENT)
+        self._assert_no_state()
+
+    def test_three_nested_llm_clients_preserve_conversion(self):
+        parent = self._make_llm_span()
+        child = self._make_llm_span(ctx=trace.set_span_in_context(parent))
+        grandchild = self._make_llm_span(ctx=trace.set_span_in_context(child))
+        grandchild.end()
+        child.end()
+        parent.end()
+
+        self.assertEqual(
+            [span.kind for span in self.exporter.get_finished_spans()],
+            [SpanKind.CLIENT, SpanKind.INTERNAL, SpanKind.INTERNAL],
+        )
+        self._assert_no_state()
+
+    def test_concurrent_parent_and_child_endings_do_not_leave_state(self):
+        def end_span(span, barrier):
+            barrier.wait(timeout=5)
+            span.end()
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            for _ in range(100):
+                parent = self._make_llm_span()
+                child = self._make_llm_span(ctx=trace.set_span_in_context(parent))
+                barrier = Barrier(2)
+
+                parent_end = pool.submit(end_span, parent, barrier)
+                child_end = pool.submit(end_span, child, barrier)
+                parent_end.result(timeout=5)
+                child_end.result(timeout=5)
+                self._assert_no_state()
+
     def test_shutdown_clears_state(self):
-        processor = GenAINestedClientSpanProcessor()
-        processor._parent_span_id_and_operation_to_gen_ai_client_child.put(123, True)
-        self.assertEqual(len(processor._parent_span_id_and_operation_to_gen_ai_client_child), 1)
-        processor.shutdown()
-        self.assertEqual(len(processor._parent_span_id_and_operation_to_gen_ai_client_child), 0)
+        parent = self._make_llm_span()
+        child = self._make_llm_span(ctx=trace.set_span_in_context(parent))
+        child.end()
+        self.assertEqual(len(self.processor._active_client_spans), 1)
+        state = self.processor._active_client_spans.get((parent.context.trace_id, parent.context.span_id))
+        self.assertEqual(state.child_operations, {GenAiOperationNameValues.CHAT.value})
+
+        self.processor.shutdown()
+
+        self._assert_no_state()
+        parent.end()
+        self._assert_no_state()
 
     def test_force_flush_returns_true(self):
         processor = GenAINestedClientSpanProcessor()
         self.assertTrue(processor.force_flush())
+
+    def test_force_flush_preserves_active_parent_state(self):
+        parent = self._make_llm_span()
+        child = self._make_llm_span(ctx=trace.set_span_in_context(parent))
+        child.end()
+
+        self.assertTrue(self.processor.force_flush())
+        parent.end()
+
+        self.assertEqual(self.exporter.get_finished_spans()[-1].kind, SpanKind.INTERNAL)
+        self._assert_no_state()
 
 
 if __name__ == "__main__":

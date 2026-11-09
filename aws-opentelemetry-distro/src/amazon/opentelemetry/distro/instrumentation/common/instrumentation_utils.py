@@ -77,9 +77,30 @@ class DictWithLock:
         with self._lock:
             self._data[key] = value
 
+    def update_if_present(self, key: Any, updater: Callable[[Any], None]) -> bool:
+        """Update an existing value in place while holding the lock.
+
+        The updater must not call methods on this DictWithLock instance.
+        """
+        with self._lock:
+            if key not in self._data:
+                return False
+            updater(self._data[key])
+            return True
+
     def pop(self, key: Any) -> Any:
         with self._lock:
             return self._data.pop(key, None)
+
+    def pop_if_matches(self, key: Any, predicate: Callable[[Any], bool]) -> Any:
+        """Remove a value only if it matches while holding the lock.
+
+        The predicate must not call methods on this DictWithLock instance.
+        """
+        with self._lock:
+            if key in self._data and predicate(self._data[key]):
+                return self._data.pop(key)
+            return None
 
     def pop_items_if_matches(self, predicate: Callable[[Any, Any], bool]) -> list[tuple[Any, Any]]:
         """Remove matching items while holding the lock.

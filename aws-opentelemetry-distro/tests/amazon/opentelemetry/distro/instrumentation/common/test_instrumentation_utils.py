@@ -1,9 +1,13 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 import json
 from base64 import b64encode
 from unittest import TestCase
 from unittest.mock import Mock
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
+    DictWithLock,
     content_to_parts,
     first_not_none,
     get_value,
@@ -17,6 +21,45 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
 from opentelemetry import context
 from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY
 from opentelemetry.trace import set_span_in_context
+
+
+class TestDictWithLock(TestCase):
+    def test_dict_update_if_present_does_not_create_missing_entry(self):
+        state = DictWithLock()
+        updater = Mock()
+
+        self.assertFalse(state.update_if_present("missing", updater))
+
+        updater.assert_not_called()
+        self.assertEqual(len(state), 0)
+
+    def test_dict_update_if_present_updates_existing_value(self):
+        state = DictWithLock()
+        state.put("parent", set())
+
+        self.assertTrue(state.update_if_present("parent", lambda operations: operations.add("chat")))
+
+        self.assertEqual(state.pop("parent"), {"chat"})
+
+    def test_dict_pop_if_matches_preserves_replaced_value(self):
+        state = DictWithLock()
+        old_value = object()
+        new_value = object()
+        state.put("span", old_value)
+        state.put("span", new_value)
+
+        self.assertIsNone(state.pop_if_matches("span", lambda value: value is old_value))
+        self.assertIs(state.get("span"), new_value)
+        self.assertIs(state.pop_if_matches("span", lambda value: value is new_value), new_value)
+        self.assertEqual(len(state), 0)
+
+    def test_dict_pop_if_matches_does_not_call_predicate_for_missing_entry(self):
+        state = DictWithLock()
+        predicate = Mock()
+
+        self.assertIsNone(state.pop_if_matches("missing", predicate))
+
+        predicate.assert_not_called()
 
 
 class TestInstrumentationUtils(TestCase):
