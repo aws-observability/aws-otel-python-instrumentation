@@ -4,8 +4,6 @@
 import gc
 import unittest
 import weakref
-from concurrent.futures import ThreadPoolExecutor
-from threading import Barrier
 from unittest.mock import patch
 
 from amazon.opentelemetry.distro.gen_ai_nested_client_span_processor import GenAINestedClientSpanProcessor
@@ -292,29 +290,6 @@ class TestGenAINestedClientSpanProcessor(unittest.TestCase):  # pylint: disable=
         )
         self.assertEqual(len(self.processor.get_active_parent_span_id_and_operation_to_gen_ai_client_child()), 0)
 
-    def test_on_end_concurrent_parent_and_child_endings_do_not_leave_state(self):
-        def end_span(span, barrier):
-            barrier.wait(timeout=5)
-            span.end()
-
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            for _ in range(100):
-                parent = self.tracer.start_span("chat model", kind=SpanKind.CLIENT)
-                parent.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
-                child = self.tracer.start_span(
-                    "chat model", kind=SpanKind.CLIENT, context=trace.set_span_in_context(parent)
-                )
-                child.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
-                barrier = Barrier(2)
-
-                parent_end = pool.submit(end_span, parent, barrier)
-                child_end = pool.submit(end_span, child, barrier)
-                parent_end.result(timeout=5)
-                child_end.result(timeout=5)
-                self.assertEqual(
-                    len(self.processor.get_active_parent_span_id_and_operation_to_gen_ai_client_child()), 0
-                )
-
     def test_shutdown_clears_state(self):
         parent = self.tracer.start_span("chat model", kind=SpanKind.CLIENT)
         parent.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
@@ -367,29 +342,6 @@ class TestGenAINestedClientSpanProcessor(unittest.TestCase):  # pylint: disable=
         parent.end()
         self.assertEqual(self.exporter.get_finished_spans()[-1].kind, SpanKind.INTERNAL)
         self.assertEqual(len(self.processor.get_active_parent_span_id_and_operation_to_gen_ai_client_child()), 0)
-
-    def test_get_active_parent_span_id_and_operation_to_gen_ai_client_child_returns_independent_snapshot(self):
-        parent = self.tracer.start_span("chat model", kind=SpanKind.CLIENT)
-        parent.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
-        child = self.tracer.start_span("chat model", kind=SpanKind.CLIENT, context=trace.set_span_in_context(parent))
-        child.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
-        child.end()
-        span_key = (parent.context.trace_id, parent.context.span_id)
-        snapshot = self.processor.get_active_parent_span_id_and_operation_to_gen_ai_client_child()
-        embeddings_child = self.tracer.start_span(
-            "embeddings model", kind=SpanKind.CLIENT, context=trace.set_span_in_context(parent)
-        )
-        embeddings_child.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.EMBEDDINGS.value)
-        embeddings_child.end()
-
-        self.assertEqual(snapshot[span_key], frozenset({GenAiOperationNameValues.CHAT.value}))
-        self.assertEqual(
-            self.processor.get_active_parent_span_id_and_operation_to_gen_ai_client_child()[span_key],
-            frozenset({GenAiOperationNameValues.CHAT.value, GenAiOperationNameValues.EMBEDDINGS.value}),
-        )
-        parent.end()
-        self.assertEqual(len(self.processor.get_active_parent_span_id_and_operation_to_gen_ai_client_child()), 0)
-        self.assertEqual(snapshot[span_key], frozenset({GenAiOperationNameValues.CHAT.value}))
 
 
 if __name__ == "__main__":

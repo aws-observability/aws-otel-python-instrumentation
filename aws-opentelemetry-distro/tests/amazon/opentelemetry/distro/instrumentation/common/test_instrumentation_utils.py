@@ -2,7 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+import subprocess
+import sys
 from base64 import b64encode
+from concurrent.futures import ThreadPoolExecutor
+from textwrap import dedent
+from threading import Event
 from unittest import TestCase
 from unittest.mock import Mock
 
@@ -41,6 +46,36 @@ class TestInstrumentationUtils(TestCase):
 
         self.assertEqual(state.pop("parent"), {"chat"})
 
+    def test_dict_with_lock_update_if_present_blocks_parent_cleanup(self):
+        state = DictWithLock()
+        state.put("parent", set())
+        updater_started = Event()
+        release_updater = Event()
+
+        def update(operations):
+            updater_started.set()
+            if not release_updater.wait(timeout=5):
+                raise TimeoutError("Updater was not released")
+            operations.add("chat")
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            update_result = pool.submit(state.update_if_present, "parent", update)
+            try:
+                self.assertTrue(updater_started.wait(timeout=5))
+                # Check the lock from another thread while the updater is paused.
+                acquired = state._lock.acquire(blocking=False)  # pylint: disable=protected-access
+                if acquired:
+                    state._lock.release()  # pylint: disable=protected-access
+                self.assertFalse(acquired)
+                cleanup_result = pool.submit(state.pop, "parent")
+                self.assertFalse(cleanup_result.done())
+            finally:
+                release_updater.set()
+
+            self.assertTrue(update_result.result(timeout=5))
+            self.assertEqual(cleanup_result.result(timeout=5), {"chat"})
+        self.assertEqual(len(state), 0)
+
     def test_dict_with_lock_pop_if_matches_preserves_replaced_value(self):
         state = DictWithLock()
         old_value = object()
@@ -71,6 +106,41 @@ class TestInstrumentationUtils(TestCase):
 
         self.assertEqual(snapshot, {"parent": frozenset({"chat"})})
         self.assertEqual(len(state), 0)
+
+    def test_dict_with_lock_get_dict_handles_weak_reference_cleanup(self):
+        # Run GC in a subprocess so a lock regression cannot hang the test suite.
+        script = dedent(
+            """
+            import gc
+            import weakref
+            from unittest.mock import Mock
+            from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import DictWithLock
+
+            gc.disable()
+            def collect_and_map(span_ref):
+                gc.collect()
+                return span_ref() is None
+
+            for get_snapshot in (False, True):
+                state = DictWithLock()
+                value = Mock()
+                value.cycle = value
+                value_ref = weakref.ref(
+                    value, lambda span_ref: state.pop_if_matches("span", lambda stored: stored is span_ref)
+                )
+                state.put("span", value_ref)
+                del value
+
+                if get_snapshot:
+                    assert state.get_dict(collect_and_map) == {"span": True}
+                else:
+                    assert state.update_if_present("span", collect_and_map)
+                assert value_ref() is None
+                assert len(state) == 0
+            """
+        )
+        result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=10, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_first_not_none_and_get_value(self):
         object_source = Mock()

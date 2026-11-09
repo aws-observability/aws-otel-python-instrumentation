@@ -66,7 +66,8 @@ class _JsonEncoder(json.JSONEncoder):
 
 class DictWithLock:
     def __init__(self):
-        self._lock = threading.Lock()
+        # Allow weak-reference cleanup to acquire the lock during garbage collection.
+        self._lock = threading.RLock()
         self._data: Dict[Any, Any] = {}
 
     def get(self, key: Any) -> Any:
@@ -83,9 +84,11 @@ class DictWithLock:
         The updater must not call methods on this DictWithLock instance.
         """
         with self._lock:
-            if key not in self._data:
+            try:
+                value = self._data[key]
+            except KeyError:
                 return False
-            updater(self._data[key])
+            updater(value)
             return True
 
     def pop(self, key: Any) -> Any:
@@ -98,8 +101,13 @@ class DictWithLock:
         The predicate must not call methods on this DictWithLock instance.
         """
         with self._lock:
-            if key in self._data and predicate(self._data[key]):
-                return self._data.pop(key)
+            try:
+                value = self._data[key]
+            except KeyError:
+                return None
+            # Keep any replacement added by weak-reference cleanup during the predicate.
+            if predicate(value) and self._data.get(key) is value:
+                return self._data.pop(key, None)
             return None
 
     def pop_items_if_matches(self, predicate: Callable[[Any, Any], bool]) -> list[tuple[Any, Any]]:
@@ -121,7 +129,9 @@ class DictWithLock:
         The value mapper must not call methods on this DictWithLock instance.
         """
         with self._lock:
-            return {key: value_mapper(value) for key, value in self._data.items()}
+            # Copy entries before the mapper can trigger weak-reference cleanup.
+            entries = self._data.copy()
+            return {key: value_mapper(value) for key, value in entries.items()}
 
     def clear(self) -> None:
         with self._lock:
