@@ -156,7 +156,7 @@ class TestGenAINestedClientSpanProcessor(unittest.TestCase):  # pylint: disable=
         self.assertEqual(spans[0].kind, SpanKind.CLIENT)
 
     def _assert_no_state(self):
-        self.assertEqual(len(self.processor._active_client_spans), 0)
+        self.assertEqual(len(self.processor._active_parent_span_id_and_operation_to_gen_ai_client_child), 0)
 
     def test_remote_parents_do_not_accumulate_state(self):
         for span_id in range(1, 1001):
@@ -220,7 +220,7 @@ class TestGenAINestedClientSpanProcessor(unittest.TestCase):  # pylint: disable=
         child = self._make_llm_span(ctx=trace.set_span_in_context(parent))
         child.end()
         parent_ref = weakref.ref(parent)
-        self.assertEqual(len(self.processor._active_client_spans), 1)
+        self.assertEqual(len(self.processor._active_parent_span_id_and_operation_to_gen_ai_client_child), 1)
 
         del parent
         gc.collect()
@@ -288,8 +288,10 @@ class TestGenAINestedClientSpanProcessor(unittest.TestCase):  # pylint: disable=
         parent = self._make_llm_span()
         child = self._make_llm_span(ctx=trace.set_span_in_context(parent))
         child.end()
-        self.assertEqual(len(self.processor._active_client_spans), 1)
-        state = self.processor._active_client_spans.get((parent.context.trace_id, parent.context.span_id))
+        self.assertEqual(len(self.processor._active_parent_span_id_and_operation_to_gen_ai_client_child), 1)
+        state = self.processor._active_parent_span_id_and_operation_to_gen_ai_client_child.get(
+            (parent.context.trace_id, parent.context.span_id)
+        )
         self.assertEqual(state.child_operations, {GenAiOperationNameValues.CHAT.value})
 
         self.processor.shutdown()

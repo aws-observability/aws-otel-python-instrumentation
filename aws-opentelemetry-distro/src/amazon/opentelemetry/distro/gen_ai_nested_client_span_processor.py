@@ -26,9 +26,10 @@ class GenAINestedClientSpanProcessor(SpanProcessor):
     # the same GenAI inference operation.
 
     def __init__(self) -> None:
+        # Tracks which parent spans have a GenAI CLIENT child for each operation.
         # State belongs only to active local CLIENT spans. Weak references also
         # release it when a span is garbage collected without being ended.
-        self._active_client_spans: DictWithLock = DictWithLock()
+        self._active_parent_span_id_and_operation_to_gen_ai_client_child: DictWithLock = DictWithLock()
 
     def on_start(self, span: Span, parent_context=None) -> None:
         if span.kind != SpanKind.CLIENT or not span.context:
@@ -38,9 +39,13 @@ class GenAINestedClientSpanProcessor(SpanProcessor):
 
         def remove_collected_span(span_ref: ReferenceType[Span]) -> None:
             # A stale callback must not remove a replacement with the same key.
-            self._active_client_spans.pop_if_matches(span_key, lambda state: state.span_ref is span_ref)
+            self._active_parent_span_id_and_operation_to_gen_ai_client_child.pop_if_matches(
+                span_key, lambda state: state.span_ref is span_ref
+            )
 
-        self._active_client_spans.put(span_key, _ClientSpanState(ref(span, remove_collected_span), set()))
+        self._active_parent_span_id_and_operation_to_gen_ai_client_child.put(
+            span_key, _ClientSpanState(ref(span, remove_collected_span), set())
+        )
 
     def on_end(self, span: ReadableSpan) -> None:
         gen_ai_inference_operations = (
@@ -52,7 +57,9 @@ class GenAINestedClientSpanProcessor(SpanProcessor):
         if not span.context:
             return
 
-        state = self._active_client_spans.pop((span.context.trace_id, span.context.span_id))
+        state = self._active_parent_span_id_and_operation_to_gen_ai_client_child.pop(
+            (span.context.trace_id, span.context.span_id)
+        )
         child_operations = state.child_operations if state else set()
 
         if span.kind != SpanKind.CLIENT:
@@ -65,7 +72,7 @@ class GenAINestedClientSpanProcessor(SpanProcessor):
         # The conditional update is atomic with parent cleanup. A late child
         # must never recreate an ended parent's state.
         if span.parent and not span.parent.is_remote:
-            self._active_client_spans.update_if_present(
+            self._active_parent_span_id_and_operation_to_gen_ai_client_child.update_if_present(
                 (span.context.trace_id, span.parent.span_id),
                 lambda parent_state: parent_state.child_operations.add(operation),
             )
@@ -74,7 +81,7 @@ class GenAINestedClientSpanProcessor(SpanProcessor):
             span._kind = SpanKind.INTERNAL  # noqa: SLF001
 
     def shutdown(self) -> None:
-        self._active_client_spans.clear()
+        self._active_parent_span_id_and_operation_to_gen_ai_client_child.clear()
 
     def force_flush(self, timeout_millis: int = 30000) -> bool:  # pylint: disable=no-self-use
         return True
