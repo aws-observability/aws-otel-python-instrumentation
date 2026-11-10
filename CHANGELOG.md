@@ -16,6 +16,9 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   by standalone `Agent.kickoff()` / `kickoff_async()`, so these runs produce an `invoke_agent` span and their LLM
   and tool spans stay in the caller's trace instead of each starting a new trace.
   ([#955](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/955))
+- fix: prevent the GenAI nested CLIENT span processor from retaining state for remote or untracked parents,
+  abandoned spans, or children that end after their parents.
+  ([#971](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/971))
 - fix: CrewAI error spans now set `error.type` to the exception class (for example `TimeoutError`), or `_OTHER`
   when it is unknown, instead of the full error message. The message could contain task descriptions, tool
   arguments or provider details, and made `error.type` unusable for grouping errors. The message is still
