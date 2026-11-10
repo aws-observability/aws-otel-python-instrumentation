@@ -24,6 +24,9 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   returns normally; only telemetry for that event is lost. LLM events emitted from a source other than a CrewAI
   `BaseLLM` now produce a chat span without token usage instead of raising `AttributeError`.
   ([#953](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/953))
+- fix: prevent the GenAI nested CLIENT span processor from retaining state for remote or untracked parents,
+  abandoned spans, or children that end after their parents.
+  ([#971](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/971))
 - fix: CrewAI error spans now set `error.type` to the exception class (for example `TimeoutError`), or `_OTHER`
   when it is unknown, instead of the full error message. The message could contain task descriptions, tool
   arguments or provider details, and made `error.type` unusable for grouping errors. The message is still
