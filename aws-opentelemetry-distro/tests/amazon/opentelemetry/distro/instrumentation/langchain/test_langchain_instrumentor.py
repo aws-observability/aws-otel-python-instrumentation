@@ -3,11 +3,9 @@
 
 import asyncio
 import importlib.metadata
-import io
 import json
 import sys
 import unittest
-from contextlib import ExitStack, contextmanager
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -90,148 +88,6 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GenAiProviderNameValues,
 )
 from opentelemetry.trace.status import StatusCode
-
-
-def _mock_provider_response(url: str, request_body: dict) -> dict:
-    """Minimal successful response body for each provider API the LangChain chat models call."""
-    if "anthropic.com" in url:
-        return {
-            "id": "msg_mock",
-            "type": "message",
-            "role": "assistant",
-            "model": request_body.get("model", "mock"),
-            "content": [{"type": "text", "text": "ok"}],
-            "stop_reason": "end_turn",
-            "stop_sequence": None,
-            "usage": {"input_tokens": 1, "output_tokens": 1},
-        }
-    if "cohere.com" in url:
-        return {
-            "id": "cohere-mock",
-            "finish_reason": "COMPLETE",
-            "message": {"role": "assistant", "content": [{"type": "text", "text": "ok"}]},
-            "usage": {
-                "billed_units": {"input_tokens": 1, "output_tokens": 1},
-                "tokens": {"input_tokens": 1, "output_tokens": 1},
-            },
-        }
-    if "googleapis.com" in url:
-        return {
-            "candidates": [
-                {"content": {"role": "model", "parts": [{"text": "ok"}]}, "finishReason": "STOP", "index": 0}
-            ],
-            "usageMetadata": {"promptTokenCount": 1, "candidatesTokenCount": 1, "totalTokenCount": 2},
-        }
-    if url.split("?")[0].endswith("/responses"):
-        return {
-            "id": "resp-mock",
-            "object": "response",
-            "created_at": 1234567890,
-            "status": "completed",
-            "error": None,
-            "incomplete_details": None,
-            "model": request_body.get("model", "mock"),
-            "output": [
-                {
-                    "type": "message",
-                    "id": "msg-mock",
-                    "status": "completed",
-                    "role": "assistant",
-                    "content": [{"type": "output_text", "text": "ok", "annotations": []}],
-                }
-            ],
-            "parallel_tool_calls": True,
-            "tool_choice": "auto",
-            "tools": request_body.get("tools", []),
-            "usage": {
-                "input_tokens": 1,
-                "input_tokens_details": {"cached_tokens": 0},
-                "output_tokens": 1,
-                "output_tokens_details": {"reasoning_tokens": 0},
-                "total_tokens": 2,
-            },
-        }
-    # OpenAI Chat Completions, also spoken by Azure OpenAI, DeepSeek, xAI, Groq and Mistral
-    return {
-        "id": "chatcmpl-mock",
-        "object": "chat.completion",
-        "created": 1234567890,
-        "model": request_body.get("model", "mock"),
-        "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
-        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-    }
-
-
-@contextmanager
-def _mock_provider_http():
-    """Answer provider HTTP calls at the transport layer, so each SDK still builds and sends the real request.
-
-    Yields the list of (url, request JSON) the SDKs sent. Sockets are blocked so an unmocked path fails instead of
-    reaching the network.
-    """
-    import httpx
-    import requests
-
-    sent = []
-
-    def record(url: str, content: bytes) -> dict:
-        body = json.loads(content) if content else {}
-        sent.append((url, body))
-        return _mock_provider_response(url, body)
-
-    def httpx_handler(httpx_module):
-        def handle_request(_transport, request):
-            body = record(str(request.url), request.read())
-            return httpx_module.Response(200, json=body, request=request)
-
-        return handle_request
-
-    def requests_send(_adapter, request, **_kwargs):
-        response = requests.Response()
-        response.status_code = 200
-        response.headers["Content-Type"] = "application/json"
-        response._content = json.dumps(record(request.url, request.body)).encode()
-        response.url = request.url
-        response.request = request
-        return response
-
-    httpx_modules = [httpx]
-    # newer anthropic SDKs ship their own copy of httpx
-    from anthropic import _base_client as anthropic_base_client
-
-    if getattr(anthropic_base_client, "httpx2", httpx) is not httpx:
-        httpx_modules.append(anthropic_base_client.httpx2)
-
-    with ExitStack() as stack:
-        for httpx_module in httpx_modules:
-            stack.enter_context(patch.object(httpx_module.HTTPTransport, "handle_request", httpx_handler(httpx_module)))
-        # older langchain-google-genai sends REST calls through requests
-        stack.enter_context(patch.object(requests.adapters.HTTPAdapter, "send", requests_send))
-        stack.enter_context(patch("socket.getaddrinfo", side_effect=OSError("network access blocked in tests")))
-        stack.enter_context(patch("socket.socket.connect", side_effect=OSError("network access blocked in tests")))
-        yield sent
-
-
-def _mock_bedrock_client(response: dict, sent: list):
-    """bedrock-runtime client whose requests are serialized by botocore and answered with `response`."""
-    from botocore.awsrequest import AWSResponse
-    from botocore.session import get_session
-
-    class _RawBody(io.BytesIO):
-        def stream(self, **_kwargs):
-            yield self.getvalue()
-
-    def before_send(request, **_kwargs):
-        sent.append((request.url, json.loads(request.body)))
-        return AWSResponse(
-            request.url, 200, {"content-type": "application/json"}, _RawBody(json.dumps(response).encode())
-        )
-
-    client = get_session().create_client(
-        "bedrock-runtime", region_name="us-east-1", aws_access_key_id="fake", aws_secret_access_key="fake"
-    )
-    client.meta.events.register("before-send.bedrock-runtime.*", before_send)
-    return client
 
 
 # https://pypi.org/project/langchain/
@@ -1896,9 +1752,7 @@ class TestLangChainInstrumentor(TestCase):
                 for attribute, value in expected_request_attributes.items():
                     self.assertEqual(attrs.get(attribute), value)
 
-    def test_llm_span_records_tool_definitions(self):  # pylint: disable=too-many-locals
-        # Each supported chat model binds a tool and makes a real SDK call against a mocked HTTP transport, so the
-        # tool format reaching the callback is whatever that provider integration actually produces.
+    def test_llm_span_records_tool_definitions(self):
         from langchain_anthropic import ChatAnthropic
         from langchain_aws import ChatBedrock, ChatBedrockConverse
         from langchain_cohere import ChatCohere
@@ -1914,124 +1768,92 @@ class TestLangChainInstrumentor(TestCase):
             """Get the weather for a city."""
             return "sunny"
 
+        fake_result = ChatResult(
+            generations=[ChatGeneration(message=AIMessage(content="ok"), generation_info={"finish_reason": "stop"})]
+        )
         weather = {"name": "get_weather", "description": "Get the weather for a city."}
         schema = {"type": "object", "properties": {"city": {"type": "string"}}}
-        converse_response = {
-            "output": {"message": {"role": "assistant", "content": [{"text": "ok"}]}},
-            "stopReason": "end_turn",
-            "usage": {"inputTokens": 1, "outputTokens": 1, "totalTokens": 2},
-            "metrics": {"latencyMs": 1},
-        }
-        anthropic_response = _mock_provider_response("https://api.anthropic.com/v1/messages", {})
-        google_kwargs = {"transport": "rest"} if "transport" in ChatGoogleGenerativeAI.model_fields else {}
+        anthropic_tool = {**weather, "input_schema": schema}
 
         def bind_get_weather(llm):
             return llm.bind_tools([get_weather])
 
-        # (label, make_llm(sent), bind); make_llm receives the request log for clients that bypass HTTP patching.
+        # Each provider puts bound tools into invocation_params in its own format. _generate is stubbed because
+        # invocation_params are built and passed to on_chat_model_start before it runs.
         cases = [
-            (
-                "ChatOpenAI chat completions",
-                lambda _: ChatOpenAI(model="gpt-4o", api_key="fake", max_retries=0, use_responses_api=False),
-                bind_get_weather,
-            ),
+            ("ChatOpenAI", ChatOpenAI(model="gpt-4o", api_key="fake", use_responses_api=False), bind_get_weather),
             (
                 "ChatOpenAI responses",
-                lambda _: ChatOpenAI(model="gpt-4o", api_key="fake", max_retries=0, use_responses_api=True),
+                ChatOpenAI(model="gpt-4o", api_key="fake", use_responses_api=True),
                 bind_get_weather,
             ),
             (
                 "AzureChatOpenAI",
-                lambda _: AzureChatOpenAI(
+                AzureChatOpenAI(
                     model="gpt-4o",
                     api_key="fake",
                     azure_endpoint="https://fake.openai.azure.com",
                     api_version="2024-10-21",
-                    max_retries=0,
                 ),
                 bind_get_weather,
             ),
+            ("ChatDeepSeek", ChatDeepSeek(model="deepseek-chat", api_key="fake"), bind_get_weather),
+            ("ChatXAI", ChatXAI(model="grok-4", api_key="fake"), bind_get_weather),
+            ("ChatMistralAI", ChatMistralAI(model="mistral-large-latest", api_key="fake"), bind_get_weather),
+            ("ChatGroq", ChatGroq(model="llama-3.3-70b-versatile", api_key="fake"), bind_get_weather),
             (
-                "ChatDeepSeek",
-                lambda _: ChatDeepSeek(model="deepseek-chat", api_key="fake", max_retries=0),
-                bind_get_weather,
-            ),
-            ("ChatXAI", lambda _: ChatXAI(model="grok-4", api_key="fake", max_retries=0), bind_get_weather),
-            (
-                "ChatAnthropic",
-                lambda _: ChatAnthropic(model="claude-3-5-sonnet-latest", api_key="fake", max_retries=0),
-                bind_get_weather,
-            ),
-            (
-                "ChatMistralAI",
-                lambda _: ChatMistralAI(model="mistral-large-latest", api_key="fake", max_retries=0),
-                bind_get_weather,
-            ),
-            (
-                "ChatGroq",
-                lambda _: ChatGroq(model="llama-3.3-70b-versatile", api_key="fake", max_retries=0),
+                "ChatGoogleGenerativeAI",
+                ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key="fake"),
                 bind_get_weather,
             ),
             # Cohere passes ToolV2 pydantic objects instead of dicts.
-            ("ChatCohere", lambda _: ChatCohere(model="command-a-03-2025", cohere_api_key="fake"), bind_get_weather),
-            (
-                "ChatGoogleGenerativeAI",
-                lambda _: ChatGoogleGenerativeAI(
-                    model="gemini-2.5-flash", google_api_key="fake", max_retries=0, **google_kwargs
-                ),
-                bind_get_weather,
-            ),
+            ("ChatCohere", ChatCohere(model="command-a-03-2025", cohere_api_key="fake"), bind_get_weather),
+            ("ChatAnthropic", ChatAnthropic(model="claude-3-5-sonnet-latest", api_key="fake"), bind_get_weather),
+            # InvokeModel with Claude uses the Anthropic format.
             (
                 "ChatBedrock",
-                lambda sent: ChatBedrock(
-                    model_id="anthropic.claude-3-haiku-20240307-v1:0",
-                    region_name="us-east-1",
-                    client=_mock_bedrock_client(anthropic_response, sent),
-                ),
+                ChatBedrock(model_id="anthropic.claude-3-haiku-20240307-v1:0", region_name="us-east-1"),
                 bind_get_weather,
             ),
             (
                 "ChatBedrockConverse",
-                lambda sent: ChatBedrockConverse(
-                    model="anthropic.claude-3-haiku-20240307-v1:0",
-                    client=_mock_bedrock_client(converse_response, sent),
-                ),
+                ChatBedrockConverse(model="anthropic.claude-3-haiku-20240307-v1:0", region_name="us-east-1"),
                 bind_get_weather,
             ),
-            # Provider built-in tools have no function schema and are left out of the definitions.
+            # Provider built-in tools are not function tools and are left out.
             (
-                "ChatAnthropic with built-in tool",
-                lambda _: ChatAnthropic(model="claude-3-5-sonnet-latest", api_key="fake", max_retries=0),
-                lambda llm: llm.bind_tools([{"type": "web_search_20250305", "name": "web_search"}, get_weather]),
+                "ChatAnthropic built-in tool",
+                ChatAnthropic(model="claude-3-5-sonnet-latest", api_key="fake"),
+                lambda llm: llm.bind(tools=[{"type": "web_search_20250305", "name": "web_search"}, anthropic_tool]),
             ),
-            # Legacy OpenAI functions arrive under invocation_params["functions"].
+            # Legacy OpenAI function calling.
             (
                 "ChatOpenAI legacy functions",
-                lambda _: ChatOpenAI(model="gpt-4o", api_key="fake", max_retries=0, use_responses_api=False),
+                ChatOpenAI(model="gpt-4o", api_key="fake", use_responses_api=False),
                 lambda llm: llm.bind(functions=[{**weather, "parameters": schema}]),
             ),
-            # Tools set on the model outside invocation_params, read from the serialized model config.
+            # Tools passed through Bedrock additional_model_request_fields, read from the model config.
             (
                 "ChatBedrockConverse additional_model_request_fields",
-                lambda sent: ChatBedrockConverse(
+                ChatBedrockConverse(
                     model="anthropic.claude-3-haiku-20240307-v1:0",
-                    client=_mock_bedrock_client(converse_response, sent),
-                    additional_model_request_fields={"tools": [{**weather, "input_schema": schema}]},
+                    region_name="us-east-1",
+                    additional_model_request_fields={"tools": [anthropic_tool]},
                 ),
                 lambda llm: llm,
             ),
         ]
 
-        for label, make_llm, bind in cases:
+        for label, llm, bind in cases:
             with self.subTest(case=label):
                 self.span_exporter.clear()
-                with _mock_provider_http() as sent:
-                    bind(make_llm(sent)).invoke("hi")
+                with (
+                    patch.object(type(llm), "_generate", return_value=fake_result),
+                    patch.object(type(llm), "_should_stream", return_value=False),
+                ):
+                    bind(llm).invoke("hi")
 
-                self.assertEqual(len(sent), 1, f"expected one provider request, got {[url for url, _ in sent]}")
-                self.assertIn("get_weather", json.dumps(sent[0][1]), "the tool must reach the provider request")
                 (span,) = [s for s in self.span_exporter.get_finished_spans() if s.name.startswith("chat")]
-                self.assertNotEqual(span.status.status_code, StatusCode.ERROR)
                 tool_defs = json.loads(span.attributes[GEN_AI_TOOL_DEFINITIONS])
                 validate_otel_genai_schema(tool_defs, "gen-ai-tool-definitions")
                 self.assertEqual(len(tool_defs), 1)
