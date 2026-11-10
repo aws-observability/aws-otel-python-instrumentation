@@ -38,6 +38,8 @@ class GenAINestedClientSpanProcessor(SpanProcessor):
         self._active_trace_id_and_span_id_to_parent_span_state: DictWithLock = DictWithLock()
 
     def on_start(self, span: Span, parent_context=None) -> None:
+        # Span kind is fixed at start in this SDK, so only spans that start as CLIENT are tracked and can be
+        # demoted. If a processor ever changes a span to CLIENT after start, that span is not tracked.
         if span.kind != SpanKind.CLIENT or not span.context:
             return
 
