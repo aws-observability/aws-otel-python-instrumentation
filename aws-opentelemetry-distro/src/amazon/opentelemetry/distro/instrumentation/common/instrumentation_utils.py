@@ -95,21 +95,6 @@ class DictWithLock:
         with self._lock:
             return self._data.pop(key, None)
 
-    def pop_if_matches(self, key: Any, predicate: Callable[[Any], bool]) -> Any:
-        """Remove a value only if it matches while holding the lock.
-
-        The predicate must not call methods on this DictWithLock instance.
-        """
-        with self._lock:
-            try:
-                value = self._data[key]
-            except KeyError:
-                return None
-            # Keep any replacement added by weak-reference cleanup during the predicate.
-            if predicate(value) and self._data.get(key) is value:
-                return self._data.pop(key, None)
-            return None
-
     def pop_items_if_matches(self, predicate: Callable[[Any, Any], bool]) -> list[tuple[Any, Any]]:
         """Remove matching items while holding the lock.
 

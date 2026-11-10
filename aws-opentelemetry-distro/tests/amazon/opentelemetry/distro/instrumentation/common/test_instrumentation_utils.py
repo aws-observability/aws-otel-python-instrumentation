@@ -76,26 +76,6 @@ class TestInstrumentationUtils(TestCase):
             self.assertEqual(cleanup_result.result(timeout=5), {"chat"})
         self.assertEqual(len(state), 0)
 
-    def test_dict_with_lock_pop_if_matches_preserves_replaced_value(self):
-        state = DictWithLock()
-        old_value = object()
-        new_value = object()
-        state.put("span", old_value)
-        state.put("span", new_value)
-
-        self.assertIsNone(state.pop_if_matches("span", lambda value: value is old_value))
-        self.assertIs(state.get("span"), new_value)
-        self.assertIs(state.pop_if_matches("span", lambda value: value is new_value), new_value)
-        self.assertEqual(len(state), 0)
-
-    def test_dict_with_lock_pop_if_matches_does_not_call_predicate_for_missing_entry(self):
-        state = DictWithLock()
-        predicate = Mock()
-
-        self.assertIsNone(state.pop_if_matches("missing", predicate))
-
-        predicate.assert_not_called()
-
     def test_dict_with_lock_get_dict_returns_independent_values(self):
         state = DictWithLock()
         state.put("parent", {"chat"})
@@ -125,9 +105,7 @@ class TestInstrumentationUtils(TestCase):
                 state = DictWithLock()
                 value = Mock()
                 value.cycle = value
-                value_ref = weakref.ref(
-                    value, lambda span_ref: state.pop_if_matches("span", lambda stored: stored is span_ref)
-                )
+                value_ref = weakref.ref(value, lambda _: state.pop("span"))
                 state.put("span", value_ref)
                 del value
 

@@ -46,12 +46,10 @@ class GenAINestedClientSpanProcessor(SpanProcessor):
         # Track every CLIENT span because GenAI attributes can be added after on_start().
         span_key = (span.context.trace_id, span.context.span_id)
 
-        def remove_collected_span(span_ref: ReferenceType[Span]) -> None:
-            # Remove the entry only if it still contains this span's weak reference.
-            # Keep any newer entry that has replaced it under the same key.
-            self._active_trace_id_and_span_id_to_parent_span_state.pop_if_matches(
-                span_key, lambda state: state.span_ref is span_ref
-            )
+        def remove_collected_span(_span_ref: ReferenceType[Span]) -> None:
+            # Remove the entry of a span collected without ending. The weak reference lives only in this entry,
+            # so this callback runs only while the entry is still present.
+            self._active_trace_id_and_span_id_to_parent_span_state.pop(span_key)
 
         self._active_trace_id_and_span_id_to_parent_span_state.put(
             span_key, _ParentSpanState(ref(span, remove_collected_span), set())
