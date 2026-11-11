@@ -137,42 +137,6 @@ class DictWithLock:
             return len(self._data)
 
 
-# Adapted from opentelemetry-python-genai (Apache-2.0), prepare_tool_definitions in
-# https://github.com/open-telemetry/opentelemetry-python-genai/blob/main/instrumentation/opentelemetry-instrumentation-genai-langchain/src/opentelemetry/instrumentation/genai/langchain/utils.py
-def extract_tool_definitions(tools: Any) -> list[dict[str, Any]]:
-    """Normalize LangChain provider tool formats to OTel gen_ai.tool.definitions entries."""
-    if not tools:
-        return []
-    definitions = []
-    for tool in tools:
-        tool_type = get_value(tool, "type")
-        if tool_type == "function":
-            # OpenAI format (ChatOpenAI, ChatBedrockConverse, Gemini, Mistral, Cohere, ...):
-            # {"type": "function", "function": {"name", "description", "parameters"}}
-            spec = get_value(tool, "function") or {}
-            parameters = get_value(spec, "parameters")
-        elif tool_type is None:
-            # Flat formats with no "type":
-            #   Legacy OpenAI functions: {"name", "description", "parameters"}
-            #   Anthropic (ChatAnthropic, ChatBedrock InvokeModel): {"name", "description", "input_schema"}
-            spec = tool
-            parameters = get_value(spec, "parameters") or get_value(spec, "input_schema")
-        else:
-            # Provider built-in tools (e.g. web search) are not function tools.
-            continue
-
-        name = get_value(spec, "name")
-        if not name:
-            continue
-        definition = {"type": "function", "name": name}
-        if description := get_value(spec, "description"):
-            definition["description"] = description
-        if parameters:
-            definition["parameters"] = parameters
-        definitions.append(definition)
-    return definitions
-
-
 def first_not_none(*values: Any) -> Any:
     # Return the first non-None value while preserving falsy values.
     return next((value for value in values if value is not None), None)
@@ -184,6 +148,7 @@ def get_value(source: Any, name: str) -> Any:
 
 
 def serialize_to_json_string(value: Any, max_depth: int = 10) -> str:
+    # Values nested deeper than max_depth are replaced with "..."; pass sys.maxsize for no practical limit.
     json_safe_types = (str, int, float, bool, bytes, dict, list, tuple, type(None))
 
     def _sanitize(obj: Any, depth: int) -> Any:
@@ -199,6 +164,9 @@ def serialize_to_json_string(value: Any, max_depth: int = 10) -> str:
         return json.dumps(_sanitize(value, max_depth), default=lambda o: b64encode(o).decode())
     except (TypeError, ValueError):
         return str(value)
+    except RecursionError:
+        # With a very large max_depth, a value that contains itself recurses until Python's recursion limit.
+        return '"..."'
 
 
 def to_tool_attribute_value(value: Any) -> Union[str, int, float, bool, bytes, None]:

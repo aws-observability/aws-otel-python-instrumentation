@@ -4,8 +4,8 @@
 
 from __future__ import annotations
 
-import json
 import logging
+import sys
 from contextvars import Token
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, Optional
@@ -19,8 +19,8 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
     PROVIDER_MAP,
     DictWithLock,
     content_to_parts,
-    extract_tool_definitions,
     first_not_none,
+    get_value,
     serialize_to_json_string,
     skip_instrumentation_if_suppressed,
     to_tool_attribute_value,
@@ -875,10 +875,11 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             nested_additional_model_request_fields.get("tools"),
             nested_additional_model_request_fields.get("functions"),
         )
-        if tool_defs := extract_tool_definitions(tools):
-            # Not serialize_to_json_string: its max_depth truncates nested parameter schemas, and these
-            # definitions are already JSON-safe values taken from the provider request.
-            self._set_span_attribute(span, GEN_AI_TOOL_DEFINITIONS, json.dumps(tool_defs, default=str))
+        if tool_defs := self._extract_tool_definitions(tools):
+            # No depth limit: the default truncates nested tool parameter schemas.
+            self._set_span_attribute(
+                span, GEN_AI_TOOL_DEFINITIONS, serialize_to_json_string(tool_defs, max_depth=sys.maxsize)
+            )
 
     def _should_skip_chain(
         self, serialized: dict[str, Any], name: Optional[str], metadata: Optional[dict] = None
@@ -1072,6 +1073,42 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
                 return provider
 
         return None
+
+    # Adapted from opentelemetry-python-genai (Apache-2.0), prepare_tool_definitions in
+    # https://github.com/open-telemetry/opentelemetry-python-genai/blob/main/instrumentation/opentelemetry-instrumentation-genai-langchain/src/opentelemetry/instrumentation/genai/langchain/utils.py
+    @staticmethod
+    def _extract_tool_definitions(tools: Any) -> list[dict[str, Any]]:
+        """Normalize LangChain provider tool formats to OTel gen_ai.tool.definitions entries."""
+        if not tools:
+            return []
+        definitions = []
+        for tool in tools:
+            tool_type = get_value(tool, "type")
+            if tool_type == "function":
+                # OpenAI format (ChatOpenAI, ChatBedrockConverse, Gemini, Mistral, Cohere, ...):
+                # {"type": "function", "function": {"name", "description", "parameters"}}
+                spec = get_value(tool, "function") or {}
+                parameters = get_value(spec, "parameters")
+            elif tool_type is None:
+                # Flat formats with no "type":
+                #   Legacy OpenAI functions: {"name", "description", "parameters"}
+                #   Anthropic (ChatAnthropic, ChatBedrock InvokeModel): {"name", "description", "input_schema"}
+                spec = tool
+                parameters = get_value(spec, "parameters") or get_value(spec, "input_schema")
+            else:
+                # Provider built-in tools (e.g. web search) are not function tools.
+                continue
+
+            name = get_value(spec, "name")
+            if not name:
+                continue
+            definition = {"type": "function", "name": name}
+            if description := get_value(spec, "description"):
+                definition["description"] = description
+            if parameters:
+                definition["parameters"] = parameters
+            definitions.append(definition)
+        return definitions
 
     def _update_agent_span_content(
         self,

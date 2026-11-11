@@ -154,6 +154,16 @@ class TestInstrumentationUtils(TestCase):
         result = serialize_to_json_string(deep, max_depth=2)
         self.assertIn("...", result)
 
+    def test_serialize_unlimited_depth(self):
+        deep = {"a": {"b": {"c": {"d": "value"}}}}
+        self.assertEqual(json.loads(serialize_to_json_string(deep, max_depth=sys.maxsize)), deep)
+        self.assertIn("...", serialize_to_json_string(deep, max_depth=2))
+
+    def test_serialize_unlimited_depth_stops_on_self_reference(self):
+        cyclic = {"name": "tool"}
+        cyclic["self"] = cyclic
+        self.assertEqual(serialize_to_json_string(cyclic, max_depth=sys.maxsize), '"..."')
+
     def test_serialize_nested_structures(self):
         data = {"items": [{"name": "test", "nested": {"deep": True}}]}
         result = serialize_to_json_string(data, max_depth=5)
