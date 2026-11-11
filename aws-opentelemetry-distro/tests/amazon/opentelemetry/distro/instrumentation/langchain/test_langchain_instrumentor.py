@@ -1756,36 +1756,53 @@ class TestLangChainInstrumentor(TestCase):
         from langchain_anthropic import ChatAnthropic
         from langchain_aws import ChatBedrock, ChatBedrockConverse
         from langchain_cohere import ChatCohere
+        from langchain_core.utils.function_calling import convert_to_openai_tool
         from langchain_deepseek import ChatDeepSeek
         from langchain_google_genai import ChatGoogleGenerativeAI
         from langchain_groq import ChatGroq
         from langchain_mistralai import ChatMistralAI
         from langchain_openai import AzureChatOpenAI, ChatOpenAI
         from langchain_xai import ChatXAI
+        from pydantic import BaseModel
+
+        class Address(BaseModel):
+            street: str
+            city: str
+
+        class Item(BaseModel):
+            sku: str
+            ship_to: Address
 
         @tool
         def get_weather(city: str) -> str:
             """Get the weather for a city."""
             return "sunny"
 
+        @tool
+        def create_order(items: list[Item]) -> str:
+            """Create an order."""
+            return "created"
+
         fake_result = ChatResult(
             generations=[ChatGeneration(message=AIMessage(content="ok"), generation_info={"finish_reason": "stop"})]
         )
-        weather = {"name": "get_weather", "description": "Get the weather for a city."}
-        schema = {"type": "object", "properties": {"city": {"type": "string"}}}
-        anthropic_tool = {**weather, "input_schema": schema}
+        # The same two tools as raw request entries, for the cases that bypass bind_tools.
+        functions = [convert_to_openai_tool(t)["function"] for t in (get_weather, create_order)]
+        anthropic_tools = [
+            {"name": f["name"], "description": f["description"], "input_schema": f["parameters"]} for f in functions
+        ]
 
-        def bind_get_weather(llm):
-            return llm.bind_tools([get_weather])
+        def bind_tools(llm):
+            return llm.bind_tools([get_weather, create_order])
 
         # Each provider puts bound tools into invocation_params in its own format. _generate is stubbed because
         # invocation_params are built and passed to on_chat_model_start before it runs.
         cases = [
-            ("ChatOpenAI", ChatOpenAI(model="gpt-4o", api_key="fake", use_responses_api=False), bind_get_weather),
+            ("ChatOpenAI", ChatOpenAI(model="gpt-4o", api_key="fake", use_responses_api=False), bind_tools),
             (
                 "ChatOpenAI responses",
                 ChatOpenAI(model="gpt-4o", api_key="fake", use_responses_api=True),
-                bind_get_weather,
+                bind_tools,
             ),
             (
                 "AzureChatOpenAI",
@@ -1795,42 +1812,42 @@ class TestLangChainInstrumentor(TestCase):
                     azure_endpoint="https://fake.openai.azure.com",
                     api_version="2024-10-21",
                 ),
-                bind_get_weather,
+                bind_tools,
             ),
-            ("ChatDeepSeek", ChatDeepSeek(model="deepseek-chat", api_key="fake"), bind_get_weather),
-            ("ChatXAI", ChatXAI(model="grok-4", api_key="fake"), bind_get_weather),
-            ("ChatMistralAI", ChatMistralAI(model="mistral-large-latest", api_key="fake"), bind_get_weather),
-            ("ChatGroq", ChatGroq(model="llama-3.3-70b-versatile", api_key="fake"), bind_get_weather),
+            ("ChatDeepSeek", ChatDeepSeek(model="deepseek-chat", api_key="fake"), bind_tools),
+            ("ChatXAI", ChatXAI(model="grok-4", api_key="fake"), bind_tools),
+            ("ChatMistralAI", ChatMistralAI(model="mistral-large-latest", api_key="fake"), bind_tools),
+            ("ChatGroq", ChatGroq(model="llama-3.3-70b-versatile", api_key="fake"), bind_tools),
             (
                 "ChatGoogleGenerativeAI",
                 ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key="fake"),
-                bind_get_weather,
+                bind_tools,
             ),
             # Cohere passes ToolV2 pydantic objects instead of dicts.
-            ("ChatCohere", ChatCohere(model="command-a-03-2025", cohere_api_key="fake"), bind_get_weather),
-            ("ChatAnthropic", ChatAnthropic(model="claude-3-5-sonnet-latest", api_key="fake"), bind_get_weather),
+            ("ChatCohere", ChatCohere(model="command-a-03-2025", cohere_api_key="fake"), bind_tools),
+            ("ChatAnthropic", ChatAnthropic(model="claude-3-5-sonnet-latest", api_key="fake"), bind_tools),
             # InvokeModel with Claude uses the Anthropic format.
             (
                 "ChatBedrock",
                 ChatBedrock(model_id="anthropic.claude-3-haiku-20240307-v1:0", region_name="us-east-1"),
-                bind_get_weather,
+                bind_tools,
             ),
             (
                 "ChatBedrockConverse",
                 ChatBedrockConverse(model="anthropic.claude-3-haiku-20240307-v1:0", region_name="us-east-1"),
-                bind_get_weather,
+                bind_tools,
             ),
             # Provider built-in tools are not function tools and are left out.
             (
                 "ChatAnthropic built-in tool",
                 ChatAnthropic(model="claude-3-5-sonnet-latest", api_key="fake"),
-                lambda llm: llm.bind(tools=[{"type": "web_search_20250305", "name": "web_search"}, anthropic_tool]),
+                lambda llm: llm.bind(tools=[{"type": "web_search_20250305", "name": "web_search"}, *anthropic_tools]),
             ),
             # Legacy OpenAI function calling.
             (
                 "ChatOpenAI legacy functions",
                 ChatOpenAI(model="gpt-4o", api_key="fake", use_responses_api=False),
-                lambda llm: llm.bind(functions=[{**weather, "parameters": schema}]),
+                lambda llm: llm.bind(functions=functions),
             ),
             # Tools passed through Bedrock additional_model_request_fields, read from the model config.
             (
@@ -1838,7 +1855,7 @@ class TestLangChainInstrumentor(TestCase):
                 ChatBedrockConverse(
                     model="anthropic.claude-3-haiku-20240307-v1:0",
                     region_name="us-east-1",
-                    additional_model_request_fields={"tools": [anthropic_tool]},
+                    additional_model_request_fields={"tools": anthropic_tools},
                 ),
                 lambda llm: llm,
             ),
@@ -1856,11 +1873,17 @@ class TestLangChainInstrumentor(TestCase):
                 (span,) = [s for s in self.span_exporter.get_finished_spans() if s.name.startswith("chat")]
                 tool_defs = json.loads(span.attributes[GEN_AI_TOOL_DEFINITIONS])
                 validate_otel_genai_schema(tool_defs, "gen-ai-tool-definitions")
-                self.assertEqual(len(tool_defs), 1)
-                self.assertEqual(
-                    {k: tool_defs[0][k] for k in ("type", "name", "description")}, {"type": "function", **weather}
-                )
+                self.assertEqual([d["name"] for d in tool_defs], ["get_weather", "create_order"])
+                self.assertEqual({d["type"] for d in tool_defs}, {"function"})
+                self.assertEqual(tool_defs[0]["description"], "Get the weather for a city.")
                 self.assertIn("city", tool_defs[0]["parameters"]["properties"])
+                if label == "ChatCohere":
+                    # langchain-cohere keeps only top-level property types when it converts the tool, so the
+                    # request it sends has no nested schema to record.
+                    continue
+                # Nested schemas survive serialization: items[] -> Item.ship_to -> Address.street
+                item = tool_defs[1]["parameters"]["properties"]["items"]["items"]
+                self.assertEqual(item["properties"]["ship_to"]["properties"]["street"]["type"], "string")
 
     def test_provider_extracted_from_serialized_id(self):
         FakeChatModel = self.FakeChatModel

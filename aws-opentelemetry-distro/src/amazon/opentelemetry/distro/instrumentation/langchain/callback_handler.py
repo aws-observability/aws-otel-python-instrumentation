@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from contextvars import Token
 from dataclasses import dataclass
@@ -18,6 +19,7 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
     PROVIDER_MAP,
     DictWithLock,
     content_to_parts,
+    extract_tool_definitions,
     first_not_none,
     serialize_to_json_string,
     skip_instrumentation_if_suppressed,
@@ -93,51 +95,6 @@ class _SpanEntry:
     span: Span
     token: Token
     agent_content: Optional[_AgentContent] = None
-
-
-# Adapted from opentelemetry-python-genai (Apache-2.0):
-# https://github.com/open-telemetry/opentelemetry-python-genai/blob/main/instrumentation/opentelemetry-instrumentation-genai-langchain/src/opentelemetry/instrumentation/genai/langchain/utils.py
-def _get_property_value(obj: Any, property_name: str) -> Any:
-    if isinstance(obj, dict):
-        return obj.get(property_name)
-
-    return getattr(obj, property_name, None)
-
-
-def _extract_tool_definitions(tools: Any) -> list[dict[str, Any]]:
-    """Normalize LangChain provider tool formats to OTel gen_ai.tool.definitions entries."""
-    definitions = []
-    if not tools:
-        return []
-    for tool in tools:
-        tool_type = _get_property_value(tool, "type")
-
-        if tool_type == "function":
-            # OpenAI format (ChatOpenAI, ChatBedrockConverse, Gemini, Mistral, Cohere, ...):
-            # {"type": "function", "function": {"name", "description", "parameters"}}
-            spec = _get_property_value(tool, "function") or {}
-            parameters = _get_property_value(spec, "parameters")
-        elif tool_type is None:
-            # Flat formats with no "type":
-            #   Legacy OpenAI functions: {"name", "description", "parameters"}
-            #   Anthropic (ChatAnthropic, ChatBedrock InvokeModel): {"name", "description", "input_schema"}
-            spec = tool
-            parameters = _get_property_value(spec, "parameters") or _get_property_value(spec, "input_schema")
-        else:
-            # Provider built-in tools (e.g. web search) are not function tools.
-            continue
-
-        name = _get_property_value(spec, "name")
-        if not name:
-            continue
-
-        definition = {"type": "function", "name": name}
-        if description := _get_property_value(spec, "description"):
-            definition["description"] = description
-        if parameters:
-            definition["parameters"] = parameters
-        definitions.append(definition)
-    return definitions
 
 
 class _BaseCallbackManagerInitWrapper:
@@ -918,8 +875,10 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             nested_additional_model_request_fields.get("tools"),
             nested_additional_model_request_fields.get("functions"),
         )
-        if tool_defs := _extract_tool_definitions(tools):
-            self._set_span_attribute(span, GEN_AI_TOOL_DEFINITIONS, serialize_to_json_string(tool_defs))
+        if tool_defs := extract_tool_definitions(tools):
+            # Not serialize_to_json_string: its max_depth truncates nested parameter schemas, and these
+            # definitions are already JSON-safe values taken from the provider request.
+            self._set_span_attribute(span, GEN_AI_TOOL_DEFINITIONS, json.dumps(tool_defs, default=str))
 
     def _should_skip_chain(
         self, serialized: dict[str, Any], name: Optional[str], metadata: Optional[dict] = None
