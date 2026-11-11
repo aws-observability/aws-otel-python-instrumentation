@@ -375,12 +375,18 @@ class OpenTelemetryEventHandler:
                     [{"role": "assistant", "parts": content_to_parts(output), "finish_reason": "stop"}]
                 ),
             )
-        self._end_spans_for_root_event(event.started_event_id)
+        # like _on_crew_completed, end by the entry's root: if CrewAI mis-pairs this event with a child start left
+        # open on its scope stack, started_event_id is that child's ID, whose root is still this agent span
+        self._end_spans_for_root_event(agent_entry.root_event_id if agent_entry else event.started_event_id)
 
     def _on_lite_agent_error(
         self, source: "BaseAgent", event: "LiteAgentExecutionErrorEvent"
     ) -> None:  # pylint: disable=unused-argument
-        self._end_spans_for_root_event(event.started_event_id, error=getattr(event, "error", None))
+        agent_entry = self._event_id_to_span.get(event.started_event_id)
+        self._end_spans_for_root_event(
+            agent_entry.root_event_id if agent_entry else event.started_event_id,
+            error=getattr(event, "error", None),
+        )
 
     def _on_tool_start(self, source: "ToolUsage", event: "ToolUsageStartedEvent") -> None:
         tool_name = event.tool_name
