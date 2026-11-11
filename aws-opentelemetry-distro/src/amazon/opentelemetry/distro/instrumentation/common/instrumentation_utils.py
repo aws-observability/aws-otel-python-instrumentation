@@ -148,6 +148,7 @@ def get_value(source: Any, name: str) -> Any:
 
 
 def serialize_to_json_string(value: Any, max_depth: int = 10) -> str:
+    # Values nested deeper than max_depth are replaced with "..."; pass sys.maxsize for no practical limit.
     json_safe_types = (str, int, float, bool, bytes, dict, list, tuple, type(None))
 
     def _sanitize(obj: Any, depth: int) -> Any:
@@ -163,6 +164,9 @@ def serialize_to_json_string(value: Any, max_depth: int = 10) -> str:
         return json.dumps(_sanitize(value, max_depth), default=lambda o: b64encode(o).decode())
     except (TypeError, ValueError):
         return str(value)
+    except RecursionError:
+        # With a very large max_depth, a value that contains itself recurses until Python's recursion limit.
+        return '"..."'
 
 
 def to_tool_attribute_value(value: Any) -> Union[str, int, float, bool, bytes, None]:
