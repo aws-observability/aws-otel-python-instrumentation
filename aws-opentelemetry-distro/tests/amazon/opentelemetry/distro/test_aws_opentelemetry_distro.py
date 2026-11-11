@@ -14,6 +14,11 @@ from amazon.opentelemetry.distro.aws_opentelemetry_distro import (
     AWS_GENAI_INSTRUMENTATION,
     AwsOpenTelemetryDistro,
 )
+from amazon.opentelemetry.distro.instrumentation.crewai import CrewAIInstrumentor
+from amazon.opentelemetry.distro.instrumentation.langchain import LangChainInstrumentor
+from amazon.opentelemetry.distro.instrumentation.llama_index import LlamaIndexInstrumentor
+from amazon.opentelemetry.distro.instrumentation.mcp import McpInstrumentor
+from amazon.opentelemetry.distro.instrumentation.openai_agents import OpenAIAgentsInstrumentor
 from opentelemetry import propagate
 from opentelemetry.distro import OpenTelemetryDistro
 from opentelemetry.environment_variables import (
@@ -23,6 +28,7 @@ from opentelemetry.environment_variables import (
     OTEL_PYTHON_ID_GENERATOR,
     OTEL_TRACES_EXPORTER,
 )
+from opentelemetry.instrumentation.dependencies import DependencyConflictError
 from opentelemetry.instrumentation.environment_variables import OTEL_PYTHON_DISABLED_INSTRUMENTATIONS
 from opentelemetry.propagators.composite import CompositePropagator
 from opentelemetry.sdk.environment_variables import (
@@ -548,6 +554,9 @@ class TestAwsOpenTelemetryDistro(TestCase):
         self.assertNotIn(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, os.environ)
         self.assertNotIn(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, os.environ)
 
+    # what load_instrumentor adds for AWS GenAI entry points so their dependency ranges are checked
+    _DEPENDENCY_CHECK_KWARGS = {"skip_dep_check": False, "raise_exception_on_conflict": True}
+
     @staticmethod
     def _make_ep(name, dist_name=None):
         ep = MagicMock()
@@ -594,7 +603,7 @@ class TestAwsOpenTelemetryDistro(TestCase):
         """aws_langchain should load when no third-party langchain is registered."""
         ep = self._make_ep("aws_langchain", "aws-opentelemetry-distro")
         mock_super = self._load_instrumentor_with_agent(ep, third_party_eps=[])
-        mock_super.assert_called_once_with(ep)
+        mock_super.assert_called_once_with(ep, **self._DEPENDENCY_CHECK_KWARGS)
 
     def test_load_third_party_when_auto_detect(self):
         """Third-party langchain always loads — ADOT never disables third-party instrumentors."""
@@ -624,7 +633,7 @@ class TestAwsOpenTelemetryDistro(TestCase):
                     third_party_eps=third_party,
                     environment=environment,
                 )
-                mock_super.assert_called_once_with(ep)
+                mock_super.assert_called_once_with(ep, **self._DEPENDENCY_CHECK_KWARGS)
 
     def test_load_third_party_when_mode_enabled(self):
         """Third-party langchain still loads under mode=enabled — only the aws_* side is governed."""
@@ -716,7 +725,7 @@ class TestAwsOpenTelemetryDistro(TestCase):
             third_party_eps=third_party,
             environment={AWS_GENAI_INSTRUMENTATION: "ENABLED"},
         )
-        mock_super.assert_called_once_with(ep)
+        mock_super.assert_called_once_with(ep, **self._DEPENDENCY_CHECK_KWARGS)
 
         # Disabled — skip aws_*
         mock_super = self._load_instrumentor_with_agent(
@@ -746,6 +755,75 @@ class TestAwsOpenTelemetryDistro(TestCase):
         third_party = [self._make_ep("openai_agents", "openinference-instrumentation-openai-agents")]
         mock_super = self._load_instrumentor_with_agent(ep, third_party_eps=third_party)
         mock_super.assert_not_called()
+
+    # a supported install of every framework; each case below changes one package's version
+    _SUPPORTED_FRAMEWORK_VERSIONS = {
+        "mcp": "1.10.0",
+        "crewai": "1.10.0",
+        "langchain": "0.3.21",
+        "llama-index-core": "0.13.0",
+        "llama-index-workflows": "1.0.1",
+        "openai-agents": "0.3.3",
+    }
+    # entry point, instrumentor, package, unsupported versions (None = not installed), supported versions
+    _GENAI_DEPENDENCY_RANGES = [
+        ("aws_mcp", McpInstrumentor, "mcp", ["1.9.4", "2.0.0", "2.3.0", None], ["1.10.0", "1.25.0"]),
+        ("aws_crewai", CrewAIInstrumentor, "crewai", ["1.9.3", "2.0.0", "2.1.0", None], ["1.10.0", "1.15.30"]),
+        ("aws_langchain", LangChainInstrumentor, "langchain", ["0.3.20", "2.0.0", "2.1.0", None], ["0.3.21", "1.2.0"]),
+        ("aws_llama-index", LlamaIndexInstrumentor, "llama-index-core", ["0.12.52", "1.0.0", None], ["0.13.0"]),
+        ("aws_llama-index", LlamaIndexInstrumentor, "llama-index-workflows", ["1.0.0", "2.24.0", "3.0.0"], ["2.25.0"]),
+        ("aws_openai_agents", OpenAIAgentsInstrumentor, "openai-agents", ["0.3.2", "1.0.0", "1.1.0", None], ["0.6.5"]),
+    ]
+
+    def test_load_instrumentor_enforces_genai_dependency_ranges(self):
+        """Auto-instrumentation passes skip_dep_check=True; AWS GenAI instrumentor ranges must still apply."""
+        for entry_point, instrumentor, package, unsupported, supported in self._GENAI_DEPENDENCY_RANGES:
+            for installed in unsupported:
+                with self.subTest(package=package, version=installed):
+                    self.assertFalse(self._auto_instrument(entry_point, instrumentor, {package: installed}))
+            for installed in supported:
+                with self.subTest(package=package, version=installed):
+                    self.assertTrue(self._auto_instrument(entry_point, instrumentor, {package: installed}))
+
+    def _auto_instrument(self, entry_point_name, instrumentor_class, installed):
+        """Load an instrumentor the way auto-instrumentation does and return whether it instrumented."""
+        entry_point = self._make_ep(entry_point_name, "aws-opentelemetry-distro")
+        entry_point.load.return_value = instrumentor_class
+        versions = {**self._SUPPORTED_FRAMEWORK_VERSIONS, **installed}
+        # the frameworks aren't installed in this environment, so only the wrapping is stubbed;
+        # the parent loader and the dependency check run for real
+        with self._installed_framework_versions(versions), patch.object(
+            instrumentor_class, "_instrument"
+        ) as mock_instrument, patch.object(instrumentor_class, "_uninstrument"):
+            try:
+                AwsOpenTelemetryDistro().load_instrumentor(entry_point, skip_dep_check=True)
+            except DependencyConflictError:
+                # the upstream auto-loader catches this and skips the instrumentor
+                return False
+            instrumentor_class().uninstrument()
+            return mock_instrument.called
+
+    @staticmethod
+    def _installed_framework_versions(versions):
+        """Simulate the customer's installed package metadata for the given frameworks."""
+        original_distribution = importlib.metadata.distribution
+
+        def distribution(name):
+            if name not in versions:
+                return original_distribution(name)
+            if versions[name] is None:
+                raise PackageNotFoundError(name)
+            dist = MagicMock()
+            dist.version = versions[name]
+            return dist
+
+        return patch("importlib.metadata.distribution", side_effect=distribution)
+
+    def test_load_instrumentor_keeps_skip_dep_check_for_other_entry_points(self):
+        entry_point = self._make_ep("requests", "opentelemetry-instrumentation-requests")
+        with patch.object(OpenTelemetryDistro, "load_instrumentor") as mock_super:
+            AwsOpenTelemetryDistro().load_instrumentor(entry_point, skip_dep_check=True)
+        mock_super.assert_called_once_with(entry_point, skip_dep_check=True)
 
     def _configure_with_agent_observability(self, region="us-west-2"):
         with patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.OpenTelemetryDistro._configure"), patch(
