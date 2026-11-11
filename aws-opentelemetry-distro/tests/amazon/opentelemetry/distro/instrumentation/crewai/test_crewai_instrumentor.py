@@ -4,6 +4,7 @@
 # flake8: noqa: E402
 # pylint: disable=wrong-import-position
 import asyncio
+import copy
 import json
 import os
 import sys
@@ -1400,6 +1401,164 @@ class TestCrewAIInstrumentor(TestCase):
         self._assert_span_parent(successful_agent, successful_workflow)
         self._assert_spans_all_ended()
 
+    def test_llm_span_records_tool_definitions_for_its_agent_and_task(self):
+        from pydantic import BaseModel
+
+        class Address(BaseModel):
+            street: str
+
+        class Item(BaseModel):
+            sku: str
+            ship_to: Address
+
+        @tool
+        def get_greeting(name: str) -> str:
+            """Get a greeting message for the given name."""
+            return f"Hello, {name}!"
+
+        @tool
+        def format_message(message: str) -> str:
+            """Format a message with decorations."""
+            return message
+
+        @tool
+        def create_order(items: list[Item]) -> str:
+            """Create an order."""
+            return "created"
+
+        llm = LLM(model="openai/gpt-4", is_litellm=True)
+        llm.supports_function_calling = lambda: True
+        greeter = Agent(role="Greeter", goal="Greet", backstory="Agent.", llm=llm, tools=[get_greeting])
+        orderer = Agent(role="Orderer", goal="Order", backstory="Agent.", llm=llm, tools=[get_greeting, format_message])
+        crew = Crew(
+            name="ToolDefinitionsCrew",
+            agents=[greeter, orderer],
+            tasks=[
+                Task(description="Greet.", expected_output="A greeting.", agent=greeter),
+                # Task tools replace the agent's tools for this task.
+                Task(description="Order.", expected_output="An order.", agent=orderer, tools=[create_order]),
+            ],
+        )
+        with patch("litellm.completion", side_effect=[self._mock_response("Final Answer: Done")] * 2):
+            crew.kickoff()
+
+        def tool_defs(span):
+            defs = json.loads(span.attributes[GEN_AI_TOOL_DEFINITIONS])
+            validate_otel_genai_schema(defs, "gen-ai-tool-definitions")
+            return defs
+
+        def chat_span_of(agent_span):
+            return next(
+                s
+                for s in self.span_exporter.get_finished_spans()
+                if s.name.startswith("chat") and s.parent and s.parent.span_id == agent_span.context.span_id
+            )
+
+        # invoke_agent spans list the tools of that agent's execution (task tools replace agent tools).
+        self.assertEqual([d["name"] for d in tool_defs(self._find_span("invoke_agent Greeter"))], ["get_greeting"])
+        self.assertEqual([d["name"] for d in tool_defs(self._find_span("invoke_agent Orderer"))], ["create_order"])
+
+        greeter_defs = tool_defs(chat_span_of(self._find_span("invoke_agent Greeter")))
+        self.assertEqual([d["name"] for d in greeter_defs], ["get_greeting"])
+        self.assertEqual(greeter_defs[0]["description"], "Get a greeting message for the given name.")
+        self.assertEqual(greeter_defs[0]["parameters"]["properties"]["name"]["type"], "string")
+
+        orderer_defs = tool_defs(chat_span_of(self._find_span("invoke_agent Orderer")))
+        self.assertEqual([d["name"] for d in orderer_defs], ["create_order"])
+        # Nested schemas are not truncated: items[] -> Item.ship_to -> Address.street
+        schema = orderer_defs[0]["parameters"]
+        item = schema["$defs"]["Item"] if "$defs" in schema else schema["properties"]["items"]["items"]
+        ship_to = item["properties"]["ship_to"]
+        address = schema["$defs"]["Address"] if "$ref" in ship_to else ship_to
+        self.assertEqual(address["properties"]["street"]["type"], "string")
+
+        # The crew span lists every agent and task tool once.
+        crew_defs = tool_defs(self._find_span("invoke_workflow ToolDefinitionsCrew"))
+        self.assertEqual(sorted(d["name"] for d in crew_defs), ["create_order", "format_message", "get_greeting"])
+        self._assert_spans_all_ended()
+
+    def test_llm_and_agent_spans_record_delegation_tools(self):
+        @tool
+        def get_greeting(name: str) -> str:
+            """Get a greeting message for the given name."""
+            return f"Hello, {name}!"
+
+        llm = LLM(model="openai/gpt-4", is_litellm=True)
+        llm.supports_function_calling = lambda: True
+        lead = Agent(role="Lead", goal="Lead", backstory="Agent.", llm=llm, tools=[get_greeting], allow_delegation=True)
+        helper = Agent(role="Helper", goal="Help", backstory="Agent.", llm=llm, tools=[])
+        crew = Crew(
+            name="DelegationCrew",
+            agents=[lead, helper],
+            tasks=[Task(description="Greet.", expected_output="A greeting.", agent=lead)],
+        )
+        with patch("litellm.completion", return_value=self._mock_response("Final Answer: Done")):
+            crew.kickoff()
+
+        # CrewAI adds delegation tools for the execution; both spans list them with their schemas.
+        for span in (self._find_span("chat gpt-4"), self._find_span("invoke_agent Lead")):
+            defs = json.loads(span.attributes[GEN_AI_TOOL_DEFINITIONS])
+            validate_otel_genai_schema(defs, "gen-ai-tool-definitions")
+            names = [d["name"] for d in defs]
+            # The names the model sees, the same on both spans.
+            self.assertEqual(
+                names, ["get_greeting", "delegate_work_to_coworker", "ask_question_to_coworker"], span.name
+            )
+            for definition in defs:
+                self.assertIn("properties", definition.get("parameters", {}), f"{span.name}: {definition['name']}")
+        self._assert_spans_all_ended()
+
+    def test_llm_span_records_tool_definitions_for_every_provider(self):
+        # CrewAI emits LLMCallStartedEvent with the same OpenAI-format tools for every provider, but serializes
+        # them on some paths, so check the recorded definition matches the original exactly on each one.
+        tool = {
+            "type": "function",
+            "function": {
+                "name": "create_order",
+                "description": "Create an order.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "note": {"type": "string", "default": "it's fine"},
+                        "ship_to": {
+                            "type": "object",
+                            "properties": {"street": {"type": "string"}, "unit": {"type": ["integer", "null"]}},
+                            "required": ["street"],
+                        },
+                    },
+                    "required": ["ship_to"],
+                },
+            },
+        }
+        aws = {"region_name": "us-east-1", "aws_access_key_id": "fake", "aws_secret_access_key": "fake"}
+        azure = {"api_key": "fake", "endpoint": "https://fake.openai.azure.com", "api_version": "2024-06-01"}
+        cases = [  # (provider, LLM kwargs, method that sends the request)
+            ("openai", {"model": "openai/gpt-4o"}, "_handle_completion"),
+            ("anthropic", {"model": "anthropic/claude-fable-5", "api_key": "fake"}, "_handle_completion"),
+            ("bedrock", {"model": "bedrock/anthropic.claude-fable-5", **aws}, "_handle_converse"),
+            ("azure", {"model": "azure/gpt-4o", **azure}, "_handle_completion"),
+            ("gemini", {"model": "gemini/gemini-2.5-flash", "api_key": "fake"}, "_handle_completion"),
+            ("litellm", {"model": "groq/llama-3.3-70b-versatile", "api_key": "fake", "is_litellm": True}, None),
+        ]
+        for provider, llm_kwargs, request_method in cases:
+            with self.subTest(provider=provider):
+                self.span_exporter.clear()
+                llm = LLM(**llm_kwargs)
+                # The request fails without reaching the network; tool definitions are recorded when the call starts.
+                with (
+                    patch.object(type(llm), request_method, side_effect=RuntimeError("no network in tests"))
+                    if request_method
+                    else patch("litellm.completion", side_effect=RuntimeError("no network in tests"))
+                ):
+                    with self.assertRaises(Exception):
+                        # Pass a copy: some providers modify the request's tool dicts in place.
+                        llm.call([{"role": "user", "content": "Order."}], tools=[copy.deepcopy(tool)])
+
+                chat_span = next(s for s in self.span_exporter.get_finished_spans() if s.name.startswith("chat"))
+                defs = json.loads(chat_span.attributes[GEN_AI_TOOL_DEFINITIONS])
+                validate_otel_genai_schema(defs, "gen-ai-tool-definitions")
+                self.assertEqual(defs, [{"type": "function", **tool["function"]}])
+
     def _run_crew_kickoff_test(self, model: str, provider: str, model_id: str):
         test_tracer = self.tracer_provider.get_tracer("test")
         tc = self._mock_tool_call()
@@ -1463,6 +1622,10 @@ class TestCrewAIInstrumentor(TestCase):
         self.assertNotIn(GEN_AI_REQUEST_MODEL, crew_span.attributes)
         self.assertIn(GEN_AI_TOOL_DEFINITIONS, crew_span.attributes)
         self.assertIn("get_greeting", crew_span.attributes[GEN_AI_TOOL_DEFINITIONS])
+        for span in [agent_span, *[s for s in spans if s.name.startswith("chat")]]:
+            tool_defs = json.loads(span.attributes[GEN_AI_TOOL_DEFINITIONS])
+            self.assertEqual([d["name"] for d in tool_defs], ["get_greeting"], span.name)
+            self.assertIn("name", tool_defs[0]["parameters"]["properties"], span.name)
 
         self._assert_span_attributes(
             spans,
