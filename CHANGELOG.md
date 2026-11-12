@@ -11,6 +11,12 @@ For any change that affects end users of this package, please add an entry under
 If your change does not need a CHANGELOG entry, add the "skip changelog" label to your PR.
 
 ## Unreleased
+- fix(crewai): record `gen_ai.tool.definitions` (name, description, and parameters) on CrewAI `chat` and
+  `invoke_agent` spans, using the tools sent on each LLM call. CrewAI's `LLMCallStartedEvent` turns parameter schemas
+  into Python repr strings, which are now parsed back into JSON Schema. The crew span's tool list now includes task
+  tools, lists each tool once, no longer truncates nested schemas, and uses the tool names sent to the model (for
+  example `get_greeting` instead of `Get Greeting`)
+  ([#972](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/972))
 - fix: prevent the GenAI nested CLIENT span processor from retaining state for remote or untracked parents,
   abandoned spans, or children that end after their parents.
   ([#971](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/971))
