@@ -1,5 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+# pylint: disable=too-many-lines
 
 import ast
 import re
@@ -353,7 +354,7 @@ class OpenTelemetryEventHandler:
         # same attribute the crew span sets in _on_crew_start
         tools = first_not_none(getattr(event, "tools", None), getattr(agent, "tools", None))
         if tools and (tool_defs := self._extract_tool_definitions(tools)):
-            attributes[GEN_AI_TOOL_DEFINITIONS] = serialize_to_json_string(tool_defs)
+            attributes[GEN_AI_TOOL_DEFINITIONS] = serialize_to_json_string(tool_defs, max_depth=sys.maxsize)
 
         # Agent.kickoff() runs an agent on its own, without a Crew or Task, and emits LiteAgentExecution* events:
         # https://docs.crewai.com/v1.15.35/en/concepts/agents#direct-agent-interaction-with-kickoff
