@@ -4,6 +4,7 @@
 
 import re
 import sys
+import unicodedata
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
@@ -293,7 +294,7 @@ class OpenTelemetryEventHandler:
         # for this execution before emitting the event, with every tool its LLM calls receive: the task's (or
         # agent's) tools plus those CrewAI adds, such as delegation, code execution, and MCP tools.
         executor = getattr(agent, "agent_executor", None)
-        tool_defs = self._sent_tool_definitions(getattr(executor, "original_tools", None))
+        tool_defs = self._extract_tool_definitions(getattr(executor, "original_tools", None) or [])
         if tool_defs:
             attributes[GEN_AI_TOOL_DEFINITIONS] = serialize_to_json_string(tool_defs, max_depth=sys.maxsize)
 
@@ -373,11 +374,9 @@ class OpenTelemetryEventHandler:
                 [self._to_input_message(m) for m in messages if isinstance(m, dict)]
             )
 
-        # LiteAgentExecutionStartedEvent.tools has every tool the kickoff's LLM calls receive, parsed into
-        # CrewStructuredTools; CrewAI converts the BaseTools they were parsed from for the requests.
+        # LiteAgentExecutionStartedEvent.tools has every tool the kickoff's LLM calls receive
         tools = first_not_none(getattr(event, "tools", None), getattr(agent, "tools", None)) or []
-        original_tools = [getattr(tool, "_original_tool", None) or tool for tool in tools]
-        tool_defs = self._sent_tool_definitions(original_tools) or self._extract_tool_definitions(tools)
+        tool_defs = self._extract_tool_definitions(tools)
         if tool_defs:
             attributes[GEN_AI_TOOL_DEFINITIONS] = serialize_to_json_string(tool_defs, max_depth=sys.maxsize)
 
@@ -997,34 +996,16 @@ class OpenTelemetryEventHandler:
             return False
 
     @staticmethod
-    def _sent_tool_definitions(tools: Any) -> list:
-        # The tool definitions CrewAI's agent executors send their LLM calls for these tools (native tool calling)
-        if not tools:
-            return []
-        try:
-            # pylint: disable=import-outside-toplevel
-            from crewai.utilities.agent_utils import convert_tools_to_openai_schema
-
-            return OpenTelemetryEventHandler._function_tool_definitions(convert_tools_to_openai_schema(tools)[0])
-        except Exception:  # pylint: disable=broad-exception-caught
-            return []
-
-    @staticmethod
     def _function_tool_definitions(tools: Any) -> list:
-        # tool definitions from tools in OpenAI function format
+        # tool definitions from tools in OpenAI function format (LLMCallStartedEvent.tools), keeping their names: they
+        # are the names CrewAI sent the model
         defs = []
         for tool in tools:
             function = get_value(tool, "function") or {}
             if name := get_value(function, "name"):
-                parameters = get_value(function, "parameters")
-                if not isinstance(parameters, dict) or any(
-                    isinstance(value, str) for value in (parameters.get("properties") or {}).values()
-                ):
-                    # missing, or a serialized schema whose properties are repr() strings; keep name and description
-                    parameters = None
-                defs.append(
-                    OpenTelemetryEventHandler._tool_definition(name, get_value(function, "description"), parameters)
-                )
+                description = get_value(function, "description")
+                parameters = OpenTelemetryEventHandler._normalize_parameters(get_value(function, "parameters"))
+                defs.append(OpenTelemetryEventHandler._tool_definition(name, description, parameters))
         return defs
 
     @staticmethod
@@ -1040,12 +1021,7 @@ class OpenTelemetryEventHandler:
         for tool in tools:
             if not (name := getattr(tool, "name", None)):
                 continue
-            parameters = None
-            if (args_schema := getattr(tool, "args_schema", None)) is not None:
-                try:
-                    parameters = args_schema.model_json_schema()
-                except Exception:  # pylint: disable=broad-exception-caught
-                    pass
+            parameters = OpenTelemetryEventHandler._normalize_parameters(getattr(tool, "args_schema", None))
             name = OpenTelemetryEventHandler._request_tool_name(name)
             description = OpenTelemetryEventHandler._normalize_tool_description(getattr(tool, "description", None))
             defs.append(OpenTelemetryEventHandler._tool_definition(name, description, parameters))
@@ -1061,15 +1037,33 @@ class OpenTelemetryEventHandler:
         return tool_def
 
     @staticmethod
-    def _request_tool_name(name: str) -> str:
-        # The name CrewAI sends the model (e.g. "Delegate work to coworker" -> "delegate_work_to_coworker"),
-        # so agent and crew spans match the chat spans.
-        try:
-            from crewai.utilities.string_utils import sanitize_tool_name  # pylint: disable=import-outside-toplevel
+    def _normalize_parameters(parameters: Any) -> Optional[Dict[str, Any]]:
+        # A tool's parameters as a JSON schema, from a tool's Pydantic args_schema or a schema dictionary
+        if isinstance(parameters, type) and hasattr(parameters, "model_json_schema"):
+            try:
+                parameters = parameters.model_json_schema()
+            except Exception:  # pylint: disable=broad-exception-caught
+                return None
+        if not isinstance(parameters, dict):
+            return None
+        for key in ("properties", "$defs"):
+            entries = parameters.get(key)
+            if isinstance(entries, dict) and any(not isinstance(entry, dict) for entry in entries.values()):
+                # Serialized: CrewAI builds LLMCallStartedEvent.tools with to_serializable(tools), which turns every
+                # value nested 5 levels deep into its repr() string (https://github.com/crewAIInc/crewAI/issues/9107)
+                return None
+        return parameters
 
-            return sanitize_tool_name(name)
-        except Exception:  # pylint: disable=broad-exception-caught
-            return name
+    @staticmethod
+    def _request_tool_name(name: str) -> str:
+        # The name CrewAI sends the model for a tool, following crewai.utilities.string_utils.sanitize_tool_name, so
+        # that crew and agent spans use the same names as chat spans, which take theirs from the request's tools.
+        name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
+        name = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)  # HTTPRequestTool -> HTTP_RequestTool
+        name = re.sub(r"([a-z])([A-Z])", r"\1_\2", name)  # HTTP_RequestTool -> HTTP_Request_Tool
+        name = re.sub(r"[\"']+", "", name.lower())
+        # 64 is the tool name limit of OpenAI and Bedrock; CrewAI shortens longer names to end in a hash instead
+        return re.sub(r"[^a-z0-9]+", "_", name).strip("_")[:64].rstrip("_")
 
     @staticmethod
     def _normalize_tool_description(desc: Optional[str]) -> Optional[str]:

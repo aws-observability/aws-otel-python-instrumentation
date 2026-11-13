@@ -638,12 +638,13 @@ class TestCrewAIInstrumentor(TestCase):
         llm.supports_function_calling = lambda: True
         agent = Agent(role="Researcher", goal="Answer questions", backstory="Agent.", llm=llm, tools=[tool_a])
 
-        sent = []
-        responses = [
-            self._mock_response(tool_calls=[self._mock_tool_call("c1", "tool_a", '{"value": "1"}')]),
-            self._mock_response("Final Answer: Done!"),
-        ]
-        with patch("litellm.completion", side_effect=self._recording_completion(sent, responses)):
+        with patch(
+            "litellm.completion",
+            side_effect=[
+                self._mock_response(tool_calls=[self._mock_tool_call("c1", "tool_a", '{"value": "1"}')]),
+                self._mock_response("Final Answer: Done!"),
+            ],
+        ):
             with self.tracer_provider.get_tracer("test").start_as_current_span("POST /chat", kind=SpanKind.SERVER):
                 agent.kickoff("What is A of 1?")
 
@@ -675,10 +676,21 @@ class TestCrewAIInstrumentor(TestCase):
                 }
             ],
         )
-        sent_tool = {k: v for k, v in sent[0][0]["function"].items() if k in ("name", "description", "parameters")}
         self.assertEqual(
             json.loads(attributes.pop(GEN_AI_TOOL_DEFINITIONS)),
-            [{"type": "function", **sent_tool}],  # the tool as sent to the model
+            [
+                {
+                    "type": "function",
+                    "name": "tool_a",
+                    "description": "Tool A.",
+                    "parameters": {
+                        "properties": {"value": {"title": "Value", "type": "string"}},
+                        "required": ["value"],
+                        "title": "Tool_A",
+                        "type": "object",
+                    },
+                }
+            ],
         )
         # older crewai versions add their ReAct stop words to the agent's LLM; that request param is not under test
         attributes.pop(GEN_AI_REQUEST_STOP_SEQUENCES, None)
@@ -1696,26 +1708,18 @@ class TestCrewAIInstrumentor(TestCase):
         with patch("litellm.completion", side_effect=self._recording_completion(sent, responses)):
             Crew(name="ToolDefinitionsCrew", agents=[greeter, orderer], tasks=tasks).kickoff()
 
-        # each chat span lists exactly the tools its request sent to the model
-        sent_definitions = []
+        # each chat span lists exactly the tools its request sent to the model, by name and description
+        sent_tools = []
         for request_tools in sent:
-            definitions = []
-            for request_tool in request_tools:
-                function = request_tool["function"]
-                definitions.append(
-                    {
-                        "type": "function",
-                        "name": function["name"],
-                        "description": function["description"],
-                        "parameters": function["parameters"],
-                    }
-                )
-            sent_definitions.append(definitions)
+            sent_tools.append([(t["function"]["name"], t["function"]["description"]) for t in request_tools])
         chat_spans = sorted(
             (s for s in self.span_exporter.get_finished_spans() if s.name.startswith("chat")),
             key=lambda s: s.start_time,
         )
-        self.assertEqual([self._tool_defs(chat) for chat in chat_spans], sent_definitions)
+        chat_tools = []
+        for chat in chat_spans:
+            chat_tools.append([(d["name"], d["description"]) for d in self._tool_defs(chat)])
+        self.assertEqual(chat_tools, sent_tools)
 
         # agent spans list each execution's tools, including the delegation tools CrewAI adds, and their chat spans
         # list the same definitions
@@ -1783,6 +1787,8 @@ class TestCrewAIInstrumentor(TestCase):
         # how CrewAI builds LLMCallStartedEvent.tools: the schema's properties become repr() strings
         serialized = to_serializable([{"type": "function", "function": {**weather_brief, "parameters": parameters}}])
         malformed = [None, {"type": "function"}, {"function": {"description": "No name."}}, {"function": {"name": "x"}}]
+        # a name the agent span has no definition for, e.g. CrewAI's suffix for two tools with the same name
+        renamed = to_serializable([{"function": {"name": "weather_2", "parameters": parameters}}])
 
         def agent_entry(use_native_tools=None):
             executor = SimpleNamespace(state=SimpleNamespace(use_native_tools=use_native_tools))
@@ -1798,6 +1804,13 @@ class TestCrewAIInstrumentor(TestCase):
             ("agent's definition replaces the serialized one", native, serialized, "agent", [weather]),
             ("no agent: serialized parameters dropped", native, serialized, None, [weather_brief]),
             ("entries without a name skipped", native, malformed, None, [{"type": "function", "name": "x"}]),
+            (
+                "name the agent span does not have",
+                native,
+                renamed,
+                "agent",
+                [{"type": "function", "name": "weather_2"}],
+            ),
             ("text tool calling: the agent's tools", text, None, "agent", [weather]),
             ("executor switched to text tool calling", native, None, "switched_agent", [weather]),
             ("executor uses native tool calling", text, None, "native_agent", []),
@@ -1810,9 +1823,64 @@ class TestCrewAIInstrumentor(TestCase):
                     handler._llm_call_tool_definitions(llm, SimpleNamespace(tools=tools), parent), expected
                 )
 
-        # if CrewAI's conversion is missing or changes, agent spans get no definitions instead of raising
-        with patch("crewai.utilities.agent_utils.convert_tools_to_openai_schema", side_effect=AttributeError):
-            self.assertEqual(OpenTelemetryEventHandler._sent_tool_definitions([object()]), [])
+    def test_request_tool_name(self):
+        from amazon.opentelemetry.distro.instrumentation.crewai._event_handler import OpenTelemetryEventHandler
+
+        cases = [  # (the tool's name, the name CrewAI sends the model)
+            ("get_greeting", "get_greeting"),
+            ("Get Greeting", "get_greeting"),  # case and spaces
+            ("getGreeting", "get_greeting"),  # camelCase
+            ("HTTPRequestTool", "http_request_tool"),
+            ("Search Web!", "search_web"),  # punctuation
+            ("search--web", "search_web"),
+            ("  __search web__ ", "search_web"),  # leading, trailing, and repeated separators
+            ("it s a tool", "it_s_a_tool"),
+            ("Café Résumé", "cafe_resume"),  # accents become ASCII
+            ("tool 2", "tool_2"),
+        ]
+        for name, expected in cases:
+            with self.subTest(name):
+                self.assertEqual(OpenTelemetryEventHandler._request_tool_name(name), expected)
+        # quotes are removed rather than replaced, and names that normalize to the same value are one tool
+        self.assertEqual(OpenTelemetryEventHandler._request_tool_name("Jane's tool"), "janes_tool")
+        normalized = {
+            OpenTelemetryEventHandler._request_tool_name(n) for n in ("Search Web", "search_web", "SearchWeb")
+        }
+        self.assertEqual(normalized, {"search_web"})
+        # a name over the model's 64 character limit keeps its start
+        long_name = OpenTelemetryEventHandler._request_tool_name("search " * 15)
+        self.assertEqual(len(long_name), 64)
+        self.assertTrue(long_name.startswith("search_search_"), long_name)
+
+    def test_normalize_parameters(self):
+        from crewai.utilities.serialization import to_serializable
+        from pydantic import BaseModel
+
+        from amazon.opentelemetry.distro.instrumentation.crewai._event_handler import OpenTelemetryEventHandler
+
+        class Args(BaseModel):
+            city: str
+
+        class Unreadable:
+            @staticmethod
+            def model_json_schema():
+                raise ValueError("no schema")
+
+        schema = {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}
+        serialized = to_serializable([{"function": {"parameters": schema}}])[0]["function"]["parameters"]
+        self.assertIsInstance(serialized["properties"]["city"], str)
+        cases = [  # (case, the tool's parameters, the expected JSON schema)
+            ("a tool's Pydantic args_schema", Args, Args.model_json_schema()),
+            ("an intact schema", schema, schema),
+            ("a tool without arguments", {"type": "object", "properties": {}}, {"type": "object", "properties": {}}),
+            ("a serialized schema: its properties are repr() strings", serialized, None),
+            ("an args_schema that cannot be read", Unreadable, None),
+            ("not a schema", "x", None),
+            ("missing", None, None),
+        ]
+        for case, parameters, expected in cases:
+            with self.subTest(case):
+                self.assertEqual(OpenTelemetryEventHandler._normalize_parameters(parameters), expected)
 
     def test_llm_span_without_agent_records_tool_definitions(self):
         # Without an agent span to take definitions from, the chat span uses LLMCallStartedEvent.tools. CrewAI
