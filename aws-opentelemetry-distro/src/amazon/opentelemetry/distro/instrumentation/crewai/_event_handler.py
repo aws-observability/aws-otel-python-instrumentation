@@ -356,6 +356,25 @@ class OpenTelemetryEventHandler:
         # Unlike _on_agent_start, this passes its own root_event_id so _end_spans_for_root_event ends this span and
         # its children when the kickoff completes. When kickoff() runs inside a crew (from a tool or a Task string
         # guardrail), inheriting the crew's root would leave this span open until the crew ends.
+        #
+        # A guardrail rejection in the deprecated LiteAgent class retries by calling _execute_core() again, which emits
+        # another start event parented to the rejected attempt, but the kickoff emits only one end event. Fold the
+        # retry into the attempt's span, matching Agent.kickoff(), whose guardrail retries emit no new start event.
+        # Each retry also leaves an unpaired scope on CrewAI's event stack, so when kickoff() runs inside a crew tool,
+        # CrewAI pairs the tool's finish event with the wrong start and that tool span ends with the crew instead.
+        # That's a CrewAI bug, tracked upstream: https://github.com/crewAIInc/crewAI/issues/8536, with the fix in
+        # https://github.com/crewAIInc/crewAI/pull/8544. Once it ships, retries emit no start event and this is a no-op.
+        agent_id = getattr(source, "id", None)
+        retried = self._event_id_to_span.get(event.parent_event_id) if event.parent_event_id else None
+        if (
+            retried
+            and agent_id
+            # the parent is a LiteAgent span (or an earlier retry folded into it), not a crew agent or child span
+            and self._event_id_to_span.get(retried.root_event_id) is retried
+            and retried is self._event_id_to_span.get(str(agent_id))
+        ):
+            self._event_id_to_span.put(event.event_id, retried)
+            return
         self._start_span(
             span_name, event.event_id, attributes, self._get_parent_event_id(event), root_event_id=event.event_id
         )
