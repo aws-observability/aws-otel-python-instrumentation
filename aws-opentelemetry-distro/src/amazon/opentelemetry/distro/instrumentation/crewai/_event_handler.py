@@ -157,6 +157,9 @@ class OpenTelemetryEventHandler:
         self._event_id_to_span = DictWithLock()
         # maps each task or agent ID to the started event ID of its unfinished LLM call
         self._task_or_agent_id_to_started_llm_event_id = DictWithLock()
+        # span contexts of the spans a cancelled kickoff ended, by event ID, so CrewAI work that keeps running after
+        # the cancel (e.g. a tool in a worker thread) still starts its spans in the same trace
+        self._cancelled_event_id_to_span_context = DictWithLock(max_size=1000)
         self._event_type_handlers: Dict[type, Any] = {
             CrewKickoffStartedEvent: self._on_crew_start,
             CrewKickoffCompletedEvent: self._on_crew_completed,
@@ -658,9 +661,13 @@ class OpenTelemetryEventHandler:
         initial_token_usage: Tuple[int, int] = (0, 0),
     ) -> None:
         parent_entry = self._event_id_to_span.get(parent_event_id) if parent_event_id else None
+        cancelled_parent = self._cancelled_event_id_to_span_context.get(parent_event_id) if parent_event_id else None
         if parent_entry:
             # continue the trace under the parent span recorded for this CrewAI event
             parent_ctx = trace.set_span_in_context(parent_entry.span)
+        elif cancelled_parent:
+            # the parent span was ended when its kickoff was cancelled, but this work kept running
+            parent_ctx = trace.set_span_in_context(trace.NonRecordingSpan(cancelled_parent))
         elif root_event_id is not None or parent_event_id is None:
             # a CrewAI root may run inside an incoming request trace, preserving that
             # caller context when CrewAI does not provide a parent span to continue
@@ -734,15 +741,18 @@ class OpenTelemetryEventHandler:
             # CrewAI emits no end event for a BaseException that is not an Exception, such as asyncio.CancelledError
             # or KeyboardInterrupt, so end the kickoff's spans here
             for root_event_id in reversed(root_event_ids):
-                self._end_spans_for_root_event(root_event_id, error=exc)
+                for event_id, entry in self._end_spans_for_root_event(root_event_id, error=exc):
+                    self._cancelled_event_id_to_span_context.put(event_id, entry.span.get_span_context())
             raise
         finally:
             try_detach(caller_context_token)
             _kickoff_root_event_ids.reset(root_event_ids_token)
 
-    def _end_spans_for_root_event(self, root_event_id: Optional[str], error: Optional[Any] = None) -> None:
+    def _end_spans_for_root_event(
+        self, root_event_id: Optional[str], error: Optional[Any] = None
+    ) -> List[Tuple[str, _SpanEntry]]:
         if not root_event_id:
-            return
+            return []
         error_type = self._get_error_type(error) if error else None
 
         removed_span_entries = self._event_id_to_span.pop_items_if_matches(
@@ -761,6 +771,7 @@ class OpenTelemetryEventHandler:
                     entry.span.set_status(Status(StatusCode.OK))
                 entry.span.end()
                 try_detach(entry.token)
+        return removed_span_entries
 
     @staticmethod
     def _get_error_type(error: Any) -> str:

@@ -972,6 +972,60 @@ class TestCrewAIInstrumentor(TestCase):
         self.assertCountEqual([span.status.status_code for span in agent_spans], [StatusCode.ERROR, StatusCode.OK])
         self._assert_spans_all_ended()
 
+    def test_cancelled_kickoff_keeps_late_work_in_its_trace(self):
+        # a tool still running in a worker thread after its kickoff is cancelled keeps reporting the ended spans as
+        # its CrewAI parents, so the spans it starts must stay in the kickoff's trace
+        tool_started = threading.Event()
+        release_tool = threading.Event()
+
+        @tool
+        def slow_tool(query: str) -> str:
+            """Slow tool."""
+            tool_started.set()
+            release_tool.wait(10)
+            LLM(model="openai/gpt-4", is_litellm=True).call("Summarize.")
+            return "done"
+
+        llm = LLM(model="openai/gpt-4", is_litellm=True)
+        llm.supports_function_calling = lambda: True
+        agent = Agent(role="Late", goal="Answer", backstory="Agent.", llm=llm, tools=[slow_tool])
+        responses = [self._mock_response(tool_calls=[self._mock_tool_call("c1", "slow_tool", '{"query": "x"}')])]
+
+        def completion(*args, **kwargs):
+            return responses.pop(0) if responses else self._mock_response("Final Answer: Done")
+
+        async def acompletion(*args, **kwargs):
+            return await asyncio.to_thread(completion, *args, **kwargs)
+
+        async def run():
+            kickoff = asyncio.ensure_future(agent.kickoff_async("Go."))
+            self.assertTrue(await asyncio.to_thread(tool_started.wait, 10))
+            kickoff.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await kickoff
+
+        with patch("litellm.completion", side_effect=completion), patch("litellm.acompletion", side_effect=acompletion):
+            with self.tracer_provider.get_tracer("test").start_as_current_span("POST /chat", kind=SpanKind.SERVER):
+                asyncio.run(run())
+            release_tool.set()
+            # wait for the tool's late LLM call to finish in its worker thread
+            for _ in range(100):
+                if len([span for span in self.span_exporter.get_finished_spans() if span.name == "chat gpt-4"]) == 2:
+                    break
+                time.sleep(0.05)
+
+        server_span = self._find_span("POST /chat")
+        tool_span = self._find_span("execute_tool slow_tool")
+        late_chat_spans = [
+            span
+            for span in self.span_exporter.get_finished_spans()
+            if span.name == "chat gpt-4" and span.parent and span.parent.span_id == tool_span.context.span_id
+        ]
+        self.assertEqual(len(late_chat_spans), 1)
+        for span in self.span_exporter.get_finished_spans():
+            self.assertEqual(span.context.trace_id, server_span.context.trace_id, f"{span.name} left the trace")
+        self._assert_spans_all_ended()
+
     def test_async_task_parenting(self):
         llm_a = LLM(model="openai/gpt-4", is_litellm=True)
         llm_b = LLM(model="openai/gpt-4", is_litellm=True)

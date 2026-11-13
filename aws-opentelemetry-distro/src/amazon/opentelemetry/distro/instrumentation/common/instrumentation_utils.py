@@ -65,10 +65,12 @@ class _JsonEncoder(json.JSONEncoder):
 
 
 class DictWithLock:
-    def __init__(self):
+    def __init__(self, max_size: Optional[int] = None):
         # Allow weak-reference cleanup to acquire the lock during garbage collection.
         self._lock = threading.RLock()
         self._data: Dict[Any, Any] = {}
+        # when set, put() drops the oldest entry once the dict holds more than max_size entries
+        self._max_size = max_size
 
     def get(self, key: Any) -> Any:
         with self._lock:
@@ -77,6 +79,8 @@ class DictWithLock:
     def put(self, key: Any, value: Any) -> None:
         with self._lock:
             self._data[key] = value
+            if self._max_size is not None and len(self._data) > self._max_size:
+                del self._data[next(iter(self._data))]
 
     def update_if_present(self, key: Any, updater: Callable[[Any], None]) -> bool:
         """Update an existing value in place while holding the lock.

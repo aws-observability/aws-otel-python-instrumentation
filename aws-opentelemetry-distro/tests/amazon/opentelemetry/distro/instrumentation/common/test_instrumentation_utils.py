@@ -120,6 +120,13 @@ class TestInstrumentationUtils(TestCase):
         result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=10, check=False)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_dict_with_lock_max_size_drops_oldest_entry(self):
+        state = DictWithLock(max_size=2)
+        for key in ("a", "b", "c"):
+            state.put(key, key.upper())
+        self.assertIsNone(state.get("a"))
+        self.assertEqual((state.get("b"), state.get("c")), ("B", "C"))
+
     def test_first_not_none_and_get_value(self):
         object_source = Mock()
         object_source.temperature = 0.0
