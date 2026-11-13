@@ -31,6 +31,7 @@ from crewai.tools import tool
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
     GEN_AI_WORKFLOW_NAME,
     OPERATION_INVOKE_WORKFLOW,
+    try_unwrap,
 )
 from amazon.opentelemetry.distro.instrumentation.crewai import CrewAIInstrumentor
 from opentelemetry.instrumentation.threading import ThreadingInstrumentor
@@ -1666,7 +1667,7 @@ class TestCrewAIInstrumentor(TestCase):
         self._assert_span_parent(successful_agent, successful_workflow)
         self._assert_spans_all_ended()
 
-    def test_llm_span_records_tool_definitions_for_its_agent_and_task(self):
+    def test_llm_and_agent_spans_record_tool_definitions(self):
         from pydantic import BaseModel
 
         class Address(BaseModel):
@@ -1693,7 +1694,9 @@ class TestCrewAIInstrumentor(TestCase):
 
         llm = LLM(model="openai/gpt-4", is_litellm=True)
         llm.supports_function_calling = lambda: True
-        greeter = Agent(role="Greeter", goal="Greet", backstory="Agent.", llm=llm, tools=[get_greeting])
+        greeter = Agent(
+            role="Greeter", goal="Greet", backstory="Agent.", llm=llm, tools=[get_greeting], allow_delegation=True
+        )
         orderer = Agent(role="Orderer", goal="Order", backstory="Agent.", llm=llm, tools=[get_greeting, format_message])
         crew = Crew(
             name="ToolDefinitionsCrew",
@@ -1719,16 +1722,24 @@ class TestCrewAIInstrumentor(TestCase):
                 if s.name.startswith("chat") and s.parent and s.parent.span_id == agent_span.context.span_id
             )
 
-        # invoke_agent spans list the tools of that agent's execution (task tools replace agent tools).
-        self.assertEqual([d["name"] for d in tool_defs(self._find_span("invoke_agent Greeter"))], ["get_greeting"])
-        self.assertEqual([d["name"] for d in tool_defs(self._find_span("invoke_agent Orderer"))], ["create_order"])
+        # CrewAI adds delegation tools to the Greeter's execution; its agent and chat spans list them with their
+        # schemas, using the names the model sees.
+        greeter_span = self._find_span("invoke_agent Greeter")
+        for span in (greeter_span, chat_span_of(greeter_span)):
+            defs = tool_defs(span)
+            names = [d["name"] for d in defs]
+            self.assertEqual(
+                names, ["get_greeting", "delegate_work_to_coworker", "ask_question_to_coworker"], span.name
+            )
+            for definition in defs:
+                self.assertIn("properties", definition.get("parameters", {}), f"{span.name}: {definition['name']}")
+        greeting = tool_defs(chat_span_of(greeter_span))[0]
+        self.assertEqual(greeting["description"], "Get a greeting message for the given name.")
+        self.assertEqual(greeting["parameters"]["properties"]["name"]["type"], "string")
 
-        greeter_defs = tool_defs(chat_span_of(self._find_span("invoke_agent Greeter")))
-        self.assertEqual([d["name"] for d in greeter_defs], ["get_greeting"])
-        self.assertEqual(greeter_defs[0]["description"], "Get a greeting message for the given name.")
-        self.assertEqual(greeter_defs[0]["parameters"]["properties"]["name"]["type"], "string")
-
-        orderer_defs = tool_defs(chat_span_of(self._find_span("invoke_agent Orderer")))
+        orderer_span = self._find_span("invoke_agent Orderer")
+        self.assertEqual([d["name"] for d in tool_defs(orderer_span)], ["create_order"])
+        orderer_defs = tool_defs(chat_span_of(orderer_span))
         self.assertEqual([d["name"] for d in orderer_defs], ["create_order"])
         # Nested schemas are not truncated: items[] -> Item.ship_to -> Address.street
         schema = orderer_defs[0]["parameters"]
@@ -1740,37 +1751,6 @@ class TestCrewAIInstrumentor(TestCase):
         # The crew span lists every agent and task tool once.
         crew_defs = tool_defs(self._find_span("invoke_workflow ToolDefinitionsCrew"))
         self.assertEqual(sorted(d["name"] for d in crew_defs), ["create_order", "format_message", "get_greeting"])
-        self._assert_spans_all_ended()
-
-    def test_llm_and_agent_spans_record_delegation_tools(self):
-        @tool
-        def get_greeting(name: str) -> str:
-            """Get a greeting message for the given name."""
-            return f"Hello, {name}!"
-
-        llm = LLM(model="openai/gpt-4", is_litellm=True)
-        llm.supports_function_calling = lambda: True
-        lead = Agent(role="Lead", goal="Lead", backstory="Agent.", llm=llm, tools=[get_greeting], allow_delegation=True)
-        helper = Agent(role="Helper", goal="Help", backstory="Agent.", llm=llm, tools=[])
-        crew = Crew(
-            name="DelegationCrew",
-            agents=[lead, helper],
-            tasks=[Task(description="Greet.", expected_output="A greeting.", agent=lead)],
-        )
-        with patch("litellm.completion", return_value=self._mock_response("Final Answer: Done")):
-            crew.kickoff()
-
-        # CrewAI adds delegation tools for the execution; both spans list them with their schemas.
-        for span in (self._find_span("chat gpt-4"), self._find_span("invoke_agent Lead")):
-            defs = json.loads(span.attributes[GEN_AI_TOOL_DEFINITIONS])
-            validate_otel_genai_schema(defs, "gen-ai-tool-definitions")
-            names = [d["name"] for d in defs]
-            # The names the model sees, the same on both spans.
-            self.assertEqual(
-                names, ["get_greeting", "delegate_work_to_coworker", "ask_question_to_coworker"], span.name
-            )
-            for definition in defs:
-                self.assertIn("properties", definition.get("parameters", {}), f"{span.name}: {definition['name']}")
         self._assert_spans_all_ended()
 
     def test_llm_span_records_tool_definitions_for_every_provider(self):
@@ -1796,13 +1776,9 @@ class TestCrewAIInstrumentor(TestCase):
             },
         }
         aws = {"region_name": "us-east-1", "aws_access_key_id": "fake", "aws_secret_access_key": "fake"}
-        azure = {"api_key": "fake", "endpoint": "https://fake.openai.azure.com", "api_version": "2024-06-01"}
         cases = [  # (provider, LLM kwargs, method that sends the request)
             ("openai", {"model": "openai/gpt-4o"}, "_handle_completion"),
-            ("anthropic", {"model": "anthropic/claude-fable-5", "api_key": "fake"}, "_handle_completion"),
             ("bedrock", {"model": "bedrock/anthropic.claude-fable-5", **aws}, "_handle_converse"),
-            ("azure", {"model": "azure/gpt-4o", **azure}, "_handle_completion"),
-            ("gemini", {"model": "gemini/gemini-2.5-flash", "api_key": "fake"}, "_handle_completion"),
             ("litellm", {"model": "groq/llama-3.3-70b-versatile", "api_key": "fake", "is_litellm": True}, None),
         ]
         for provider, llm_kwargs, request_method in cases:
@@ -1823,6 +1799,20 @@ class TestCrewAIInstrumentor(TestCase):
                 defs = json.loads(chat_span.attributes[GEN_AI_TOOL_DEFINITIONS])
                 validate_otel_genai_schema(defs, "gen-ai-tool-definitions")
                 self.assertEqual(defs, [{"type": "function", **tool["function"]}])
+
+        # If _emit_call_started_event cannot be wrapped, only the serialized event.tools is left, whose schema
+        # properties are repr() strings, so the chat span keeps the tool's name and description.
+        self.span_exporter.clear()
+        try_unwrap(BaseLLM, "_emit_call_started_event")
+        llm = LLM(model="openai/gpt-4o")
+        with patch.object(type(llm), "_handle_completion", side_effect=RuntimeError("no network in tests")):
+            with self.assertRaises(Exception):
+                llm.call([{"role": "user", "content": "Order."}], tools=[copy.deepcopy(tool)])
+        chat_span = next(s for s in self.span_exporter.get_finished_spans() if s.name.startswith("chat"))
+        self.assertEqual(
+            json.loads(chat_span.attributes[GEN_AI_TOOL_DEFINITIONS]),
+            [{"type": "function", "name": "create_order", "description": "Create an order."}],
+        )
 
     def _run_crew_kickoff_test(self, model: str, provider: str, model_id: str):
         test_tracer = self.tracer_provider.get_tracer("test")

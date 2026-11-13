@@ -12,10 +12,11 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 - fix(crewai): record `gen_ai.tool.definitions` (name, description, and parameters) on CrewAI `chat` and
-  `invoke_agent` spans, using the tools sent on each LLM call. CrewAI's `LLMCallStartedEvent` turns parameter schemas
-  into Python repr strings, which are now parsed back into JSON Schema. The crew span's tool list now includes task
-  tools, lists each tool once, no longer truncates nested schemas, and uses the tool names sent to the model (for
-  example `get_greeting` instead of `Get Greeting`). `Agent.kickoff()` agent spans no longer truncate nested schemas
+  `invoke_agent` spans, using the tools sent on each LLM call. The tools are read before CrewAI serializes them for
+  `LLMCallStartedEvent`, which turns nested parameter schemas into Python repr strings. The crew span's tool list now
+  includes task tools, lists each tool once, no longer truncates nested schemas, and uses the tool names sent to the
+  model (for example `get_greeting` instead of `Get Greeting`). `Agent.kickoff()` agent spans no longer truncate nested
+  schemas
   ([#972](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/972))
 
 - feat: add CrewAI LiteAgent support. The CrewAI instrumentor now handles the `LiteAgentExecution*` events emitted

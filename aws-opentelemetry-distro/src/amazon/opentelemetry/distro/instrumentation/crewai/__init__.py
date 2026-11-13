@@ -5,6 +5,7 @@ from typing import Any, Collection
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import try_unwrap, try_wrap
 from amazon.opentelemetry.distro.instrumentation.crewai._event_handler import (
     OpenTelemetryEventHandler,
+    _emit_call_started_event_wrapper,
     _EventBusEmitWrapper,
 )
 from amazon.opentelemetry.distro.version import __version__
@@ -38,8 +39,13 @@ class CrewAIInstrumentor(BaseInstrumentor):
         self._handler = OpenTelemetryEventHandler(tracer)
 
         try_wrap("crewai.events", "crewai_event_bus.emit", _EventBusEmitWrapper(self._handler))
+        # keeps each LLM call's tools before CrewAI serializes them for LLMCallStartedEvent
+        try_wrap("crewai.llms.base_llm", "BaseLLM._emit_call_started_event", _emit_call_started_event_wrapper)
 
     def _uninstrument(self, **kwargs: Any) -> None:  # pylint: disable=no-self-use
-        from crewai.events import crewai_event_bus  # pylint: disable=import-outside-toplevel
+        # pylint: disable=import-outside-toplevel
+        from crewai.events import crewai_event_bus
+        from crewai.llms.base_llm import BaseLLM
 
         try_unwrap(crewai_event_bus, "emit")
+        try_unwrap(BaseLLM, "_emit_call_started_event")

@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # pylint: disable=too-many-lines
 
-import ast
 import re
 import sys
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
@@ -93,8 +93,24 @@ class _SpanEntry:
     # older CrewAI versions only expose cumulative token usage, so retain the
     # starting counts to calculate this LLM call's usage when the span ends
     initial_token_usage: Tuple[int, int] = (0, 0)
-    # set on agent spans: the tool definitions of the agent's LLM calls, by name
-    tool_definitions: Optional[Dict[str, Any]] = None
+    # set on agent spans: the JSON tool definitions of the agent's LLM calls, by name
+    tool_definitions: Optional[Dict[str, str]] = None
+
+
+# The tools of the LLM call being started, as passed to BaseLLM._emit_call_started_event. CrewAI builds
+# LLMCallStartedEvent.tools from them with to_serializable(tools), which replaces every value nested 5 levels deep
+# (each entry of a schema's "properties", "$defs", "required", ...) with its repr() string:
+# https://github.com/crewAIInc/crewAI/issues/9107
+_LLM_CALL_TOOLS: ContextVar[Optional[list]] = ContextVar("crewai_llm_call_tools", default=None)
+
+
+def _emit_call_started_event_wrapper(wrapped, instance, args, kwargs) -> Any:  # pylint: disable=unused-argument
+    # The event is emitted, and handled by _EventBusEmitWrapper, inside this call.
+    token = _LLM_CALL_TOOLS.set(args[1] if len(args) > 1 else kwargs.get("tools"))
+    try:
+        return wrapped(*args, **kwargs)
+    finally:
+        _LLM_CALL_TOOLS.reset(token)
 
 
 class _EventBusEmitWrapper:
@@ -455,9 +471,23 @@ class OpenTelemetryEventHandler:
         if model_name:
             attributes[GEN_AI_REQUEST_MODEL] = model_name
         self._set_llm_request_span_attributes(attributes, source, event)
+        parent_event_id = self._get_parent_event_id(event)
         if tool_defs := self._llm_call_tool_definitions(event):
             attributes[GEN_AI_TOOL_DEFINITIONS] = serialize_to_json_string(tool_defs, max_depth=sys.maxsize)
-            self._add_tool_definitions_to_agent_span(self._get_parent_event_id(event), tool_defs)
+            # the parent agent span lists every tool its LLM calls received; each is serialized now, as providers
+            # may change the request's tool dicts after the event
+            agent_entry = self._event_id_to_span.get(parent_event_id)
+            if agent_entry and agent_entry.tool_definitions is not None:
+                agent_entry.tool_definitions.update(
+                    {
+                        d["name"]: serialize_to_json_string(d, max_depth=sys.maxsize)
+                        for d in tool_defs
+                        if d["name"] not in agent_entry.tool_definitions
+                    }
+                )
+                agent_entry.span.set_attribute(
+                    GEN_AI_TOOL_DEFINITIONS, f"[{', '.join(agent_entry.tool_definitions.values())}]"
+                )
 
         span_name = (
             f"{GenAiOperationNameValues.CHAT.value} {model_name}" if model_name else GenAiOperationNameValues.CHAT.value
@@ -479,7 +509,6 @@ class OpenTelemetryEventHandler:
                     [self._to_input_message(m) for m in non_system_messages]
                 )
 
-        parent_event_id = self._get_parent_event_id(event)
         self._start_span(
             span_name,
             event.event_id,
@@ -936,76 +965,45 @@ class OpenTelemetryEventHandler:
 
     @staticmethod
     def _llm_call_tool_definitions(event: "LLMCallStartedEvent") -> list:
-        # event.tools is exactly what CrewAI sends the model for this call, in OpenAI function format for every
-        # provider (each provider converts to its own format after emitting the event).
+        # The tools CrewAI sends the model for this call, in OpenAI function format for every provider (each provider
+        # converts to its own format after emitting the event). event.tools has the same tools, serialized on some
+        # paths (see _LLM_CALL_TOOLS), so it is only used when _emit_call_started_event could not be wrapped.
         defs = []
-        for tool in getattr(event, "tools", None) or []:
+        for tool in first_not_none(_LLM_CALL_TOOLS.get(), getattr(event, "tools", None)) or []:
             function = get_value(tool, "function") or {}
-            name = get_value(function, "name")
-            if not name:
-                continue
-            tool_def: Dict[str, Any] = {"type": "function", "name": name}
-            if description := get_value(function, "description"):
-                tool_def["description"] = description
-            parameters = OpenTelemetryEventHandler._rebuild_parameters(get_value(function, "parameters"))
-            if parameters is not None:
-                tool_def["parameters"] = parameters
-            defs.append(tool_def)
+            if name := get_value(function, "name"):
+                parameters = get_value(function, "parameters")
+                if not isinstance(parameters, dict) or any(
+                    isinstance(value, str) for value in (parameters.get("properties") or {}).values()
+                ):
+                    # missing, or a serialized schema whose properties are repr() strings; keep name and description
+                    parameters = None
+                defs.append(
+                    OpenTelemetryEventHandler._tool_definition(name, get_value(function, "description"), parameters)
+                )
         return defs
-
-    @staticmethod
-    def _rebuild_parameters(parameters: Any) -> Optional[Dict[str, Any]]:
-        # CrewAI builds LLMCallStartedEvent.tools with to_serializable(tools, max_depth=5), which replaces every
-        # value at depth 5 with its repr(): each entry of parameters["properties"], ["$defs"], ["required"], ...
-        # becomes a string holding that whole sub-tree as a Python literal.
-        # https://github.com/crewAIInc/crewAI/issues/9107
-        # Parse those strings back. Older CrewAI's LiteLLM path does not serialize, so its schemas are left as is.
-        if not isinstance(parameters, dict):
-            return None
-        properties = parameters.get("properties")
-        if not isinstance(properties, dict) or not any(isinstance(value, str) for value in properties.values()):
-            return parameters
-        try:
-            rebuilt = dict(parameters)
-            for key, value in parameters.items():
-                if isinstance(value, dict):
-                    rebuilt[key] = {k: ast.literal_eval(v) if isinstance(v, str) else v for k, v in value.items()}
-                elif isinstance(value, list):
-                    rebuilt[key] = [ast.literal_eval(v) if isinstance(v, str) else v for v in value]
-            return rebuilt
-        except (ValueError, SyntaxError, TypeError, MemoryError, RecursionError):
-            # a value whose repr is not a Python literal (e.g. float("inf")); keep name and description only
-            return None
-
-    def _add_tool_definitions_to_agent_span(self, parent_event_id: Optional[str], tool_defs: list) -> None:
-        agent_entry = self._event_id_to_span.get(parent_event_id) if parent_event_id else None
-        if agent_entry is None or agent_entry.tool_definitions is None:
-            return
-        for tool_def in tool_defs:
-            agent_entry.tool_definitions.setdefault(tool_def["name"], tool_def)
-        agent_entry.span.set_attribute(
-            GEN_AI_TOOL_DEFINITIONS,
-            serialize_to_json_string(list(agent_entry.tool_definitions.values()), max_depth=sys.maxsize),
-        )
 
     @staticmethod
     def _extract_tool_definitions(tools: Any) -> list:
         defs = []
         for tool in tools:
-            name = getattr(tool, "name", None)
-            if not name:
+            if not (name := getattr(tool, "name", None)):
                 continue
-            tool_def: Dict[str, Any] = {"type": "function", "name": OpenTelemetryEventHandler._request_tool_name(name)}
-            if desc := OpenTelemetryEventHandler._normalize_tool_description(getattr(tool, "description", None)):
-                tool_def["description"] = desc
-            args_schema = getattr(tool, "args_schema", None)
-            if args_schema is not None:
+            parameters = None
+            if (args_schema := getattr(tool, "args_schema", None)) is not None:
                 try:
-                    tool_def["parameters"] = args_schema.model_json_schema()
+                    parameters = args_schema.model_json_schema()
                 except Exception:  # pylint: disable=broad-exception-caught
                     pass
-            defs.append(tool_def)
+            name = OpenTelemetryEventHandler._request_tool_name(name)
+            description = OpenTelemetryEventHandler._normalize_tool_description(getattr(tool, "description", None))
+            defs.append(OpenTelemetryEventHandler._tool_definition(name, description, parameters))
         return defs
+
+    @staticmethod
+    def _tool_definition(name: str, description: Optional[str], parameters: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        tool_def = {"type": "function", "name": name, "description": description or None, "parameters": parameters}
+        return {key: value for key, value in tool_def.items() if value is not None}
 
     @staticmethod
     def _request_tool_name(name: str) -> str:
