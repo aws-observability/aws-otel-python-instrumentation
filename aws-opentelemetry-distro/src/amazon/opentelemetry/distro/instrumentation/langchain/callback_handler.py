@@ -219,9 +219,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             self._end_span(run_id)
             return
         span = entry.span
-        llm_output: dict | None = response.llm_output
-        model: str | None = (llm_output.get("model_name") or llm_output.get("model_id")) if llm_output else None
-        response_id: str | None = llm_output.get("id") if llm_output else None
+        model, response_id = self._extract_llm_model_and_response_id(response)
         (
             input_tokens,
             output_tokens,
@@ -259,6 +257,49 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         self._set_span_attribute(span, GEN_AI_USAGE_REASONING_OUTPUT_TOKENS, reasoning_output_tokens)
 
         self._end_span(run_id)
+
+    @staticmethod
+    def _extract_llm_model_and_response_id(response: LLMResult) -> tuple[str | None, str | None]:
+        # LLMResult(
+        #     llm_output=None,
+        #     generations=[[
+        #         ChatGeneration(
+        #             message=AIMessage(
+        #                 content=[{"type": "text", "text": "Hello, World!", "annotations": [], "id": "msg-mock"}],
+        #                 response_metadata={
+        #                     "id": "resp-mock",
+        #                     "model": "gpt-5.6-sol",
+        #                     "model_name": "gpt-5.6-sol",
+        #                 },
+        #             ),
+        #             generation_info=None,
+        #         )
+        #     ]],
+        # )
+        # https://github.com/langchain-ai/langchain/blob/16a08bda1247010c23fcfa887e421259a5fced5e/libs/partners/openai/langchain_openai/chat_models/base.py#L5195-L5382
+        llm_output = response.llm_output or {}
+        model_keys = ("model_name", "model_id", "model")
+        model = first_not_none(
+            *(str(llm_output[key]).strip() or None for key in model_keys if llm_output.get(key) is not None)
+        )
+        response_id = llm_output.get("id")
+        if response_id is not None:
+            response_id = str(response_id).strip() or None
+        for batch in response.generations:
+            for generation in batch:
+                if model and response_id:
+                    return model, response_id
+                message_metadata = getattr(getattr(generation, "message", None), "response_metadata", None) or {}
+                generation_info = generation.generation_info or {}
+                for metadata in (message_metadata, generation_info):
+                    model = first_not_none(
+                        model,
+                        *(metadata[key].strip() or None for key in model_keys if isinstance(metadata.get(key), str)),
+                    )
+                    value = metadata.get("id")
+                    if isinstance(value, str):
+                        response_id = first_not_none(response_id, value.strip() or None)
+        return model, response_id
 
     @staticmethod
     def _extract_token_usage(
