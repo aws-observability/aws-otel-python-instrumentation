@@ -3,6 +3,7 @@
 import asyncio
 import os
 import warnings
+from contextlib import asynccontextmanager, closing
 from importlib.metadata import PackageNotFoundError
 from typing import Any, Dict
 from unittest import TestCase
@@ -43,7 +44,11 @@ from amazon.opentelemetry.distro.semconv._incubating.attributes.gen_ai_attribute
     GEN_AI_RUNTIME_ID,
 )
 from opentelemetry.instrumentation.botocore import AiobotocoreInstrumentor, BotocoreInstrumentor
-from opentelemetry.instrumentation.botocore.extensions import _BOTOCORE_EXTENSIONS, bedrock_utils
+from opentelemetry.instrumentation.botocore.extensions import (
+    _AIOBOTOCORE_EXTENSIONS,
+    _BOTOCORE_EXTENSIONS,
+    bedrock_utils,
+)
 from opentelemetry.instrumentation.environment_variables import OTEL_PYTHON_DISABLED_INSTRUMENTATIONS
 from opentelemetry.propagate import get_global_textmap
 from opentelemetry.sdk.trace import TracerProvider
@@ -434,76 +439,81 @@ class TestInstrumentationPatch(TestCase):
         started_spans = []
         provider = TracerProvider()
         processor = SimpleSpanProcessor(exporter)
-        # Streaming spans may never be exported, so record span starts too.
+        # Record starts too so a broken streaming gate fails even if its span never ends.
         processor.on_start = lambda span, parent_context=None: started_spans.append(span)
         provider.add_span_processor(processor)
         session = get_async_session() if use_async else get_session()
         session.set_credentials("test-access-key", "test-secret-key")
-        runtime = session.create_client("bedrock-runtime", region_name="us-east-1")
-        agents = session.create_client("bedrock-agent-runtime", region_name="us-east-1")
-        if use_async:
-            runtime = await runtime.__aenter__()
-            agents = await agents.__aenter__()
+
+        @asynccontextmanager
+        async def create_client(service):
+            if use_async:
+                async with session.create_client(service, region_name="us-east-1") as client:
+                    yield client
+            else:
+                with closing(session.create_client(service, region_name="us-east-1")) as client:
+                    yield client
 
         async def call(api, **params):
             result = api(**params)
             return await result if use_async else result
 
-        converse_params = {
-            "modelId": "amazon.nova-lite-v1:0",
-            "messages": [{"role": "user", "content": [{"text": "Hello"}]}],
-        }
-        model_params = {"modelId": "amazon.nova-lite-v1:0", "body": b"{}"}
-        converse_response = {
-            "output": {"message": {"role": "assistant", "content": [{"text": "Hello"}]}},
-            "stopReason": "end_turn",
-            "usage": {"inputTokens": 1, "outputTokens": 1, "totalTokens": 2},
-            "metrics": {"latencyMs": 1},
-        }
-        stubber_class = AioStubber if use_async else Stubber
-        runtime_stubber = stubber_class(runtime)
-        runtime_stubber.add_response("converse", converse_response, converse_params)
-        runtime_stubber.add_response("converse_stream", {"stream": {}}, converse_params)
-        runtime_stubber.add_response("invoke_model", {"body": b"{}", "contentType": "application/json"}, model_params)
-        runtime_stubber.add_response(
-            "invoke_model_with_response_stream", {"body": {}, "contentType": "application/json"}, model_params
-        )
-        agents_stubber = stubber_class(agents)
-        agents_stubber.add_response(
-            "invoke_agent", {"completion": {}, "contentType": "application/json", "sessionId": "test-session"}
-        )
-        agents_stubber.add_response("retrieve", {"retrievalResults": []})
+        async with create_client("bedrock-runtime") as runtime, create_client("bedrock-agent-runtime") as agents:
+            converse_params = {
+                "modelId": "amazon.nova-lite-v1:0",
+                "messages": [{"role": "user", "content": [{"text": "Hello"}]}],
+            }
+            model_params = {"modelId": "amazon.nova-lite-v1:0", "body": b"{}"}
+            converse_response = {
+                "output": {"message": {"role": "assistant", "content": [{"text": "Hello"}]}},
+                "stopReason": "end_turn",
+                "usage": {"inputTokens": 1, "outputTokens": 1, "totalTokens": 2},
+                "metrics": {"latencyMs": 1},
+            }
+            stubber_class = AioStubber if use_async else Stubber
+            runtime_stubber = stubber_class(runtime)
+            runtime_stubber.add_response("converse", converse_response, converse_params)
+            runtime_stubber.add_response("converse_stream", {"stream": {}}, converse_params)
+            runtime_stubber.add_response(
+                "invoke_model", {"body": b"{}", "contentType": "application/json"}, model_params
+            )
+            runtime_stubber.add_response(
+                "invoke_model_with_response_stream", {"body": {}, "contentType": "application/json"}, model_params
+            )
+            agents_stubber = stubber_class(agents)
+            agents_stubber.add_response(
+                "invoke_agent", {"completion": {}, "contentType": "application/json", "sessionId": "test-session"}
+            )
+            agents_stubber.add_response("retrieve", {"retrievalResults": []})
 
-        instrumentor = AiobotocoreInstrumentor() if use_async else BotocoreInstrumentor()
-        with runtime_stubber, agents_stubber, patch.dict(
-            os.environ, {OTEL_PYTHON_DISABLED_INSTRUMENTATIONS: "bedrock"}
-        ):
-            try:
-                _apply_botocore_bedrock_patch()
-                instrumentor.instrument(tracer_provider=provider)
-                self.assertTrue(instrumentor.is_instrumented_by_opentelemetry)
-                await call(runtime.converse, **converse_params)
-                await call(runtime.converse_stream, **converse_params)
-                await call(runtime.invoke_model, **model_params)
-                await call(runtime.invoke_model_with_response_stream, **model_params)
-                await call(
-                    agents.invoke_agent,
-                    agentId="1234567890",
-                    agentAliasId="1234567890",
-                    sessionId="test-session",
-                    inputText="Hello",
-                )
-                await call(agents.retrieve, knowledgeBaseId="1234567890", retrievalQuery={"text": "Hello"})
+            instrumentor = AiobotocoreInstrumentor() if use_async else BotocoreInstrumentor()
+            with runtime_stubber, agents_stubber, patch.dict(
+                os.environ, {OTEL_PYTHON_DISABLED_INSTRUMENTATIONS: "bedrock"}
+            ), patch.dict(_BOTOCORE_EXTENSIONS), patch.dict(_AIOBOTOCORE_EXTENSIONS):
+                try:
+                    _apply_botocore_bedrock_patch()
+                    instrumentor.instrument(tracer_provider=provider)
+                    self.assertTrue(instrumentor.is_instrumented_by_opentelemetry)
+                    await call(runtime.converse, **converse_params)
+                    await call(runtime.converse_stream, **converse_params)
+                    await call(runtime.invoke_model, **model_params)
+                    await call(runtime.invoke_model_with_response_stream, **model_params)
+                    await call(
+                        agents.invoke_agent,
+                        agentId="1234567890",
+                        agentAliasId="1234567890",
+                        sessionId="test-session",
+                        inputText="Hello",
+                    )
+                    await call(agents.retrieve, knowledgeBaseId="1234567890", retrievalQuery={"text": "Hello"})
 
-                runtime_stubber.assert_no_pending_responses()
-                agents_stubber.assert_no_pending_responses()
-                self.assertEqual(started_spans, [])
-                self.assertEqual(exporter.get_finished_spans(), ())
-            finally:
-                instrumentor.uninstrument()
-                await call(runtime.close)
-                await call(agents.close)
-                provider.shutdown()
+                    runtime_stubber.assert_no_pending_responses()
+                    agents_stubber.assert_no_pending_responses()
+                    self.assertEqual(started_spans, [])
+                    self.assertEqual(exporter.get_finished_spans(), ())
+                finally:
+                    instrumentor.uninstrument()
+                    provider.shutdown()
 
     def _test_patched_api_call_with_no_credentials(self):
         # Create mocks

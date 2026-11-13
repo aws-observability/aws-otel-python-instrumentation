@@ -56,8 +56,8 @@ def is_genai_bedrock_call(call_context: _AwsSdkCallContext) -> bool:
 
 
 def is_bedrock_instrumentation_disabled() -> bool:
-    disabled = {name.strip() for name in os.environ.get(OTEL_PYTHON_DISABLED_INSTRUMENTATIONS, "").split(",")}
-    return "bedrock" in disabled
+    disabled = os.environ.get(OTEL_PYTHON_DISABLED_INSTRUMENTATIONS, "")
+    return bool(disabled) and "bedrock" in {name.strip() for name in disabled.split(",")}
 
 
 class _BedrockAgentOperation(abc.ABC):
