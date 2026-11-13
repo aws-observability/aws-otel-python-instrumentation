@@ -24,6 +24,7 @@ from crewai.events import crewai_event_bus
 from crewai.events.types.agent_events import LiteAgentExecutionCompletedEvent, LiteAgentExecutionStartedEvent
 from crewai.events.types.llm_events import LLMCallCompletedEvent, LLMCallFailedEvent, LLMCallStartedEvent, LLMCallType
 from crewai.flow.flow import Flow, start
+from crewai.lite_agent import LiteAgent
 from crewai.llms.base_llm import BaseLLM, llm_call_context
 from crewai.tools import tool
 
@@ -867,6 +868,44 @@ class TestCrewAIInstrumentor(TestCase):
         self._assert_span_parent(agent_span, server_span)
         self._assert_trace_spans(server_span, ["POST /chat", "invoke_agent FlowAgent", "chat gpt-4"])
         self._assert_spans_all_ended()
+
+    def test_lite_agent_guardrail_retry(self):
+        # A guardrail rejection makes the deprecated LiteAgent class re-emit LiteAgentExecutionStartedEvent per attempt
+        # but emit one end event for the whole kickoff (https://github.com/crewAIInc/crewAI/issues/8536). The attempts
+        # share one span, like Agent.kickoff(), and every span ends when the kickoff does.
+
+        def make_agent(accept_on_attempt):
+            attempts = 0
+
+            def guardrail(output):  # CrewAI requires a one-parameter guardrail
+                nonlocal attempts
+                attempts += 1
+                return (True, output.raw) if attempts == accept_on_attempt else (False, "Try again.")
+
+            llm = LLM(model="openai/gpt-4", is_litellm=True)
+            return LiteAgent(
+                role="Guarded", goal="Answer", backstory="Agent.", llm=llm, guardrail=guardrail, guardrail_max_retries=2
+            )
+
+        # three attempts, since each retry's start event is parented to the previous retry, not the first attempt
+        for accept_on_attempt, expected_status in ((3, StatusCode.OK), (None, StatusCode.ERROR)):
+            with self.subTest(retries_exhausted=accept_on_attempt is None):
+                self.span_exporter.clear()
+                responses = [self._mock_response(f"Final Answer: {i}") for i in range(3)]
+                with patch("litellm.completion", side_effect=responses):
+                    if accept_on_attempt is None:
+                        with self.assertRaises(Exception):
+                            make_agent(accept_on_attempt).kickoff("Go.")
+                    else:
+                        make_agent(accept_on_attempt).kickoff("Go.")
+                spans = self.span_exporter.get_finished_spans()
+                (agent_span,) = [s for s in spans if s.name == "invoke_agent Guarded"]
+                chat_spans = [s for s in spans if s.name == "chat gpt-4"]
+                self.assertEqual(len(chat_spans), 3)
+                for chat_span in chat_spans:
+                    self._assert_span_parent(chat_span, agent_span)
+                self.assertEqual(agent_span.status.status_code, expected_status)
+                self._assert_spans_all_ended()
 
     def test_lite_agent_events_with_missing_source_data(self):
         # the source may lack role/llm (e.g. customer code emitting events, or the deprecated LiteAgent class)
