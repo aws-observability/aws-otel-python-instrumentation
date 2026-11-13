@@ -94,6 +94,8 @@ class _SpanEntry:
     initial_token_usage: Tuple[int, int] = (0, 0)
     # set on agent spans: the definitions of the tools CrewAI sends the agent's LLM calls, by name
     tool_definitions: Optional[Dict[str, Dict[str, Any]]] = None
+    # set on crew agent spans: the CrewAI agent executor running this execution
+    executor: Any = None
 
 
 class _EventBusEmitWrapper:
@@ -188,7 +190,9 @@ class OpenTelemetryEventHandler:
             if event_id and parent_entry:
                 self._event_id_to_span.put(event_id, parent_entry)
 
-    def _on_crew_start(self, source: "Crew", event: "CrewKickoffStartedEvent") -> None:
+    def _on_crew_start(  # pylint: disable=too-many-locals,too-many-branches
+        self, source: "Crew", event: "CrewKickoffStartedEvent"
+    ) -> None:
         crew_name = getattr(source, "name", None)
         span_name = f"{OPERATION_INVOKE_WORKFLOW} {crew_name}" if crew_name else OPERATION_INVOKE_WORKFLOW
         attributes: Dict[str, Any] = {
@@ -207,8 +211,14 @@ class OpenTelemetryEventHandler:
             for task in getattr(source, "tasks", []) or []:
                 all_tools.extend(getattr(task, "tools", []) or [])
             if all_tools:
-                # each tool once, by the name sent to the model (a task without tools reuses its agent's tools)
-                tool_defs = list({d["name"]: d for d in self._extract_tool_definitions(all_tools)}.values())
+                # List each tool once, by the name sent to the model: a task without tools reuses its agent's tools,
+                # and names like "Search Web" and "search_web" are the same tool to the model.
+                tool_defs = []
+                seen_names = set()
+                for tool_def in self._extract_tool_definitions(all_tools):
+                    if tool_def["name"] not in seen_names:
+                        seen_names.add(tool_def["name"])
+                        tool_defs.append(tool_def)
                 if tool_defs:
                     attributes[GEN_AI_TOOL_DEFINITIONS] = serialize_to_json_string(tool_defs, max_depth=sys.maxsize)
 
@@ -290,7 +300,8 @@ class OpenTelemetryEventHandler:
         self._start_span(span_name, event.event_id, attributes, self._get_parent_event_id(event))
         if agent_entry := self._event_id_to_span.get(event.event_id):
             self._event_id_to_span.put(self._get_task_or_agent_id(event), agent_entry)
-            agent_entry.tool_definitions = {d["name"]: d for d in tool_defs}
+            agent_entry.tool_definitions = self._tool_definitions_by_name(tool_defs)
+            agent_entry.executor = executor
 
     def _on_agent_completed(
         self, source: "BaseAgent", event: "AgentExecutionCompletedEvent"  # pylint: disable=unused-argument
@@ -362,9 +373,11 @@ class OpenTelemetryEventHandler:
                 [self._to_input_message(m) for m in messages if isinstance(m, dict)]
             )
 
-        # LiteAgentExecutionStartedEvent.tools has every tool the kickoff's LLM calls receive
-        tools = first_not_none(getattr(event, "tools", None), getattr(agent, "tools", None))
-        tool_defs = (self._sent_tool_definitions(tools) or self._extract_tool_definitions(tools)) if tools else []
+        # LiteAgentExecutionStartedEvent.tools has every tool the kickoff's LLM calls receive, parsed into
+        # CrewStructuredTools; CrewAI converts the BaseTools they were parsed from for the requests.
+        tools = first_not_none(getattr(event, "tools", None), getattr(agent, "tools", None)) or []
+        original_tools = [getattr(tool, "_original_tool", None) or tool for tool in tools]
+        tool_defs = self._sent_tool_definitions(original_tools) or self._extract_tool_definitions(tools)
         if tool_defs:
             attributes[GEN_AI_TOOL_DEFINITIONS] = serialize_to_json_string(tool_defs, max_depth=sys.maxsize)
 
@@ -377,7 +390,7 @@ class OpenTelemetryEventHandler:
             span_name, event.event_id, attributes, self._get_parent_event_id(event), root_event_id=event.event_id
         )
         if agent_entry := self._event_id_to_span.get(event.event_id):
-            agent_entry.tool_definitions = {d["name"]: d for d in tool_defs}
+            agent_entry.tool_definitions = self._tool_definitions_by_name(tool_defs)
             # like _on_agent_start, so events that lose their CrewAI parent (e.g. native tool calls) still find it
             if agent_id := getattr(source, "id", None):
                 self._event_id_to_span.put(str(agent_id), agent_entry)
@@ -470,7 +483,7 @@ class OpenTelemetryEventHandler:
             attributes[GEN_AI_REQUEST_MODEL] = model_name
         self._set_llm_request_span_attributes(attributes, source, event)
         parent_event_id = self._get_parent_event_id(event)
-        if tool_defs := self._llm_call_tool_definitions(event, parent_event_id):
+        if tool_defs := self._llm_call_tool_definitions(source, event, parent_event_id):
             attributes[GEN_AI_TOOL_DEFINITIONS] = serialize_to_json_string(tool_defs, max_depth=sys.maxsize)
 
         span_name = (
@@ -947,7 +960,9 @@ class OpenTelemetryEventHandler:
                         return OpenTelemetryEventHandler._normalize_tool_description(desc)
         return None
 
-    def _llm_call_tool_definitions(self, event: "LLMCallStartedEvent", parent_event_id: Optional[str]) -> list:
+    def _llm_call_tool_definitions(
+        self, source: "BaseLLM", event: "LLMCallStartedEvent", parent_event_id: Optional[str]
+    ) -> list:
         # event.tools is what CrewAI sends the model for this call, in OpenAI function format for every provider, but
         # CrewAI builds it with to_serializable(tools), which turns every value nested 5 levels deep (each entry of a
         # schema's "properties", "$defs", "required", ...) into its repr() string:
@@ -956,7 +971,30 @@ class OpenTelemetryEventHandler:
         # span, which built it from the same tools.
         parent_entry = self._event_id_to_span.get(parent_event_id)
         known = (parent_entry.tool_definitions if parent_entry else None) or {}
-        return [known.get(d["name"], d) for d in self._function_tool_definitions(getattr(event, "tools", None) or [])]
+        tools = getattr(event, "tools", None)
+        if not tools and known and self._uses_text_tool_calling(source, parent_entry):
+            # CrewAI describes the agent's tools in the prompt instead of sending them as the request's tools
+            return list(known.values())
+        tool_defs = []
+        for tool_def in self._function_tool_definitions(tools or []):
+            # the agent span's full definition when it has one, otherwise the event's
+            tool_defs.append(known.get(tool_def["name"], tool_def))
+        return tool_defs
+
+    @staticmethod
+    def _uses_text_tool_calling(source: "BaseLLM", agent_entry: "_SpanEntry") -> bool:
+        # CrewAI's agent executor (1.15.0+) tracks whether it uses native or text-based tool calling, including when it
+        # switches to text partway through because the provider rejected native tools:
+        # https://github.com/crewAIInc/crewAI/pull/6131
+        state = getattr(agent_entry.executor, "state", None)
+        use_native_tools = getattr(state, "use_native_tools", None)
+        if isinstance(use_native_tools, bool):
+            return not use_native_tools
+        # Otherwise CrewAI picks the mode from the LLM when the execution starts.
+        try:
+            return not source.supports_function_calling()
+        except Exception:  # pylint: disable=broad-exception-caught
+            return False
 
     @staticmethod
     def _sent_tool_definitions(tools: Any) -> list:
@@ -990,6 +1028,13 @@ class OpenTelemetryEventHandler:
         return defs
 
     @staticmethod
+    def _tool_definitions_by_name(tool_defs: list) -> Dict[str, Dict[str, Any]]:
+        by_name = {}
+        for tool_def in tool_defs:
+            by_name[tool_def["name"]] = tool_def
+        return by_name
+
+    @staticmethod
     def _extract_tool_definitions(tools: Any) -> list:
         defs = []
         for tool in tools:
@@ -1008,8 +1053,12 @@ class OpenTelemetryEventHandler:
 
     @staticmethod
     def _tool_definition(name: str, description: Optional[str], parameters: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-        tool_def = {"type": "function", "name": name, "description": description or None, "parameters": parameters}
-        return {key: value for key, value in tool_def.items() if value is not None}
+        tool_def: Dict[str, Any] = {"type": "function", "name": name}
+        if description:
+            tool_def["description"] = description
+        if parameters is not None:
+            tool_def["parameters"] = parameters
+        return tool_def
 
     @staticmethod
     def _request_tool_name(name: str) -> str:
