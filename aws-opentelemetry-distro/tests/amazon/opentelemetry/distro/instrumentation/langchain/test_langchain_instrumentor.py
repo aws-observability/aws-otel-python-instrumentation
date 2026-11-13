@@ -1398,6 +1398,7 @@ class TestLangChainInstrumentor(TestCase):
             generations=[ChatGeneration(message=AIMessage(content="ok"), generation_info={"finish_reason": "stop"})],
             llm_output={
                 "model_name": "test",
+                "id": " test-response-id ",
                 "token_usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
             },
         )
@@ -1553,6 +1554,7 @@ class TestLangChainInstrumentor(TestCase):
             with self.subTest(**subtest_kwargs):
                 self.span_exporter.clear()
                 expected_request_attributes = {}
+                expected_response_attributes = {}
 
                 if model_cls is ChatOpenAI:
                     use_responses_api = init_kwargs["use_responses_api"]
@@ -1582,7 +1584,11 @@ class TestLangChainInstrumentor(TestCase):
                             **chat_completions_kwargs,
                         ).invoke(messages)
 
-                    call_mock_llm("openai", invoke_llm_callback=invoke_openai)
+                    call_mock_llm("openai", invoke_llm_callback=invoke_openai, model=" gpt-5.6-sol ")
+                    expected_response_attributes = {
+                        GEN_AI_RESPONSE_MODEL: "gpt-5.6-sol",
+                        GEN_AI_RESPONSE_ID: "resp-mock" if use_responses_api else "chatcmpl-mock",
+                    }
                     expected_request_attributes = {
                         GEN_AI_REQUEST_MODEL: "gpt-5.6-sol",
                         GEN_AI_REQUEST_TEMPERATURE: 1.0,
@@ -1617,7 +1623,11 @@ class TestLangChainInstrumentor(TestCase):
                         llm._client = client
                         llm.invoke(messages)
 
-                    call_mock_llm("anthropic", invoke_llm_callback=invoke_anthropic)
+                    call_mock_llm("anthropic", invoke_llm_callback=invoke_anthropic, model=" claude-fable-5 ")
+                    expected_response_attributes = {
+                        GEN_AI_RESPONSE_MODEL: "claude-fable-5",
+                        GEN_AI_RESPONSE_ID: "msg_mock",
+                    }
                     expected_request_attributes = {
                         GEN_AI_REQUEST_MODEL: "claude-opus-5",
                         GEN_AI_REQUEST_TEMPERATURE: 1.0,
@@ -1641,6 +1651,12 @@ class TestLangChainInstrumentor(TestCase):
                         ).invoke(messages)
 
                     call_mock_llm("bedrock", invoke_llm_callback=invoke_bedrock)
+                    expected_response_attributes = {
+                        GEN_AI_RESPONSE_MODEL: "anthropic.claude-fable-5",
+                        # Converse's standard response has no completion ID.
+                        # https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html
+                        GEN_AI_RESPONSE_ID: None,
+                    }
                     expected_request_attributes = {
                         GEN_AI_REQUEST_MODEL: "anthropic.claude-fable-5",
                         GEN_AI_REQUEST_TEMPERATURE: 0.7,
@@ -1650,6 +1666,10 @@ class TestLangChainInstrumentor(TestCase):
                         GEN_AI_REQUEST_STOP_SEQUENCES: ("STOP",),
                     }
                 else:
+                    expected_response_attributes = {
+                        GEN_AI_RESPONSE_MODEL: "test",
+                        GEN_AI_RESPONSE_ID: "test-response-id",
+                    }
                     llm = model_cls(**init_kwargs)
                     with (
                         patch.object(type(llm), "_generate", return_value=fake_result),
@@ -1749,7 +1769,7 @@ class TestLangChainInstrumentor(TestCase):
                 validate_otel_genai_schema(json.loads(attrs[GEN_AI_INPUT_MESSAGES]), "gen-ai-input-messages")
                 validate_otel_genai_schema(json.loads(attrs[GEN_AI_OUTPUT_MESSAGES]), "gen-ai-output-messages")
                 self.assertEqual(attrs.get(GEN_AI_RESPONSE_FINISH_REASONS), ("stop",))
-                for attribute, value in expected_request_attributes.items():
+                for attribute, value in {**expected_request_attributes, **expected_response_attributes}.items():
                     self.assertEqual(attrs.get(attribute), value)
 
     def test_llm_span_records_tool_definitions(self):

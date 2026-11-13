@@ -20,6 +20,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   `Get Greeting`). `Agent.kickoff()` agent spans no longer truncate nested schemas
   ([#972](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/972))
 
+- fix(langchain): resolve response model and ID from generation metadata
+  ([#974](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/974))
 - feat: add CrewAI LiteAgent support. The CrewAI instrumentor now handles the `LiteAgentExecution*` events emitted
   by standalone `Agent.kickoff()` / `kickoff_async()`, so these runs produce an `invoke_agent` span and their LLM
   and tool spans stay in the caller's trace instead of each starting a new trace.
