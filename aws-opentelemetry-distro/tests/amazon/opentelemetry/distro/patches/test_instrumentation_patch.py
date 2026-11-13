@@ -1,9 +1,14 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+import os
+import warnings
 from importlib.metadata import PackageNotFoundError
 from typing import Any, Dict
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
+
+from botocore.session import get_session
+from botocore.stub import Stubber
 
 from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_AUTH_ACCESS_KEY,
@@ -25,6 +30,7 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_REGION,
     AWS_SQS_QUEUE_NAME,
 )
+from amazon.opentelemetry.distro.patches._botocore_patches import _apply_botocore_bedrock_patch
 from amazon.opentelemetry.distro.patches._instrumentation_patch import apply_instrumentation_patches
 from amazon.opentelemetry.distro.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_BROWSER_ID,
@@ -35,7 +41,11 @@ from amazon.opentelemetry.distro.semconv._incubating.attributes.gen_ai_attribute
 )
 from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
 from opentelemetry.instrumentation.botocore.extensions import _BOTOCORE_EXTENSIONS, bedrock_utils
+from opentelemetry.instrumentation.environment_variables import OTEL_PYTHON_DISABLED_INSTRUMENTATIONS
 from opentelemetry.propagate import get_global_textmap
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.semconv._incubating.attributes.aws_attributes import (
     AWS_BEDROCK_GUARDRAIL_ID,
     AWS_BEDROCK_KNOWLEDGE_BASE_ID,
@@ -238,6 +248,7 @@ class TestInstrumentationPatch(TestCase):
 
         # Bedrock
         self._test_patched_bedrock_instrumentation()
+        self._test_apply_botocore_bedrock_patch_disables_spans_when_env_is_set()
 
         # Bedrock Agent Operation
         self._test_patched_bedrock_agent_instrumentation()
@@ -403,6 +414,79 @@ class TestInstrumentationPatch(TestCase):
             self.assertIn(AWS_AUTH_REGION, initial_attributes)
             self.assertEqual(initial_attributes[AWS_AUTH_REGION], "us-west-2")
             instrumentor.uninstrument()
+
+    # TODO: Remove this temporary Bedrock disable test once upstream PR #5266 is merged
+    # and we've consumed the upstream change: https://github.com/open-telemetry/opentelemetry-python-contrib/pull/5266
+    # pylint: disable=too-many-locals
+    def _test_apply_botocore_bedrock_patch_disables_spans_when_env_is_set(self):
+        context = MagicMock(operation="ConverseStream")  # This test should fail once the upstream migration begins.
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            extension = _BOTOCORE_EXTENSIONS["bedrock-runtime"]()(context)
+            self.assertFalse(extension.should_end_span_on_exit())
+
+        exporter = InMemorySpanExporter()
+        started_spans = []
+        provider = TracerProvider()
+        processor = SimpleSpanProcessor(exporter)
+        # Streaming spans may never be exported, so record span starts too.
+        processor.on_start = lambda span, parent_context=None: started_spans.append(span)
+        provider.add_span_processor(processor)
+        session = get_session()
+        session.set_credentials("test-access-key", "test-secret-key")
+        runtime = session.create_client("bedrock-runtime", region_name="us-east-1")
+        agents = session.create_client("bedrock-agent-runtime", region_name="us-east-1")
+
+        converse_params = {
+            "modelId": "amazon.nova-lite-v1:0",
+            "messages": [{"role": "user", "content": [{"text": "Hello"}]}],
+        }
+        model_params = {"modelId": "amazon.nova-lite-v1:0", "body": b"{}"}
+        converse_response = {
+            "output": {"message": {"role": "assistant", "content": [{"text": "Hello"}]}},
+            "stopReason": "end_turn",
+            "usage": {"inputTokens": 1, "outputTokens": 1, "totalTokens": 2},
+            "metrics": {"latencyMs": 1},
+        }
+        runtime_stubber = Stubber(runtime)
+        runtime_stubber.add_response("converse", converse_response, converse_params)
+        runtime_stubber.add_response("converse_stream", {"stream": {}}, converse_params)
+        runtime_stubber.add_response("invoke_model", {"body": b"{}", "contentType": "application/json"}, model_params)
+        runtime_stubber.add_response(
+            "invoke_model_with_response_stream", {"body": {}, "contentType": "application/json"}, model_params
+        )
+        agents_stubber = Stubber(agents)
+        agents_stubber.add_response(
+            "invoke_agent", {"completion": {}, "contentType": "application/json", "sessionId": "test-session"}
+        )
+        agents_stubber.add_response("retrieve", {"retrievalResults": []})
+
+        instrumentor = BotocoreInstrumentor()
+        with runtime_stubber, agents_stubber, patch.dict(
+            os.environ, {OTEL_PYTHON_DISABLED_INSTRUMENTATIONS: "bedrock"}
+        ):
+            try:
+                _apply_botocore_bedrock_patch()
+                instrumentor.instrument(tracer_provider=provider)
+                self.assertTrue(instrumentor.is_instrumented_by_opentelemetry)
+                runtime.converse(**converse_params)
+                runtime.converse_stream(**converse_params)
+                runtime.invoke_model(**model_params)
+                runtime.invoke_model_with_response_stream(**model_params)
+                agents.invoke_agent(
+                    agentId="1234567890", agentAliasId="1234567890", sessionId="test-session", inputText="Hello"
+                )
+                agents.retrieve(knowledgeBaseId="1234567890", retrievalQuery={"text": "Hello"})
+
+                runtime_stubber.assert_no_pending_responses()
+                agents_stubber.assert_no_pending_responses()
+                self.assertEqual(started_spans, [])
+                self.assertEqual(exporter.get_finished_spans(), ())
+            finally:
+                instrumentor.uninstrument()
+                runtime.close()
+                agents.close()
+                provider.shutdown()
 
     def _test_patched_api_call_with_no_credentials(self):
         # Create mocks

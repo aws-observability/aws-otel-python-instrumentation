@@ -20,14 +20,17 @@ from amazon.opentelemetry.distro.patches._bedrock_agentcore_patches import (  # 
 from amazon.opentelemetry.distro.patches._bedrock_patches import (  # noqa # pylint: disable=unused-import
     _BedrockAgentExtension,
     _BedrockAgentRuntimeExtension,
+    _BedrockAsyncExtension,
     _BedrockExtension,
+    _PatchedBedrockRuntimeExtension,
+    is_bedrock_instrumentation_disabled,
 )
 from opentelemetry.instrumentation.botocore import (
     BotocoreInstrumentor,
     _apply_response_attributes,
     _determine_call_context,
 )
-from opentelemetry.instrumentation.botocore.extensions import _BOTOCORE_EXTENSIONS
+from opentelemetry.instrumentation.botocore.extensions import _AIOBOTOCORE_EXTENSIONS, _BOTOCORE_EXTENSIONS
 from opentelemetry.instrumentation.botocore.extensions.dynamodb import _DynamoDbExtension
 from opentelemetry.instrumentation.botocore.extensions.lmbd import _LambdaExtension
 from opentelemetry.instrumentation.botocore.extensions.sqs import _SqsExtension
@@ -187,7 +190,7 @@ def _apply_botocore_bedrock_patch() -> None:
     This patch adds an extension to the upstream's list of known extension for Bedrock.
     Extensions allow for custom logic for adding service-specific information to spans, such as attributes.
     Specifically, we are adding logic to add the AWS_BEDROCK attributes referenced in _aws_attribute_keys.
-    Note: Bedrock Runtime uses the upstream extension directly.
+    When disabled, Bedrock Runtime inherits the upstream extension and overrides the tracing gate.
     """
     _BOTOCORE_EXTENSIONS["bedrock"] = _lazy_load(".", "_BedrockExtension")
     _BOTOCORE_EXTENSIONS["bedrock-agent"] = _lazy_load(".", "_BedrockAgentExtension")
@@ -196,6 +199,15 @@ def _apply_botocore_bedrock_patch() -> None:
     _BOTOCORE_EXTENSIONS["bedrock-agentcore-control"] = _lazy_load(
         ".._bedrock_agentcore_patches", "_BedrockAgentCoreExtension"
     )
+
+    # TODO: Remove this temporary Bedrock disable workaround once upstream PR #5266 is merged
+    # and we've consumed the upstream change: https://github.com/open-telemetry/opentelemetry-python-contrib/pull/5266
+    if not is_bedrock_instrumentation_disabled():
+        return
+
+    _BOTOCORE_EXTENSIONS["bedrock-runtime"] = _lazy_load(".", "_PatchedBedrockRuntimeExtension")
+    _AIOBOTOCORE_EXTENSIONS["bedrock-runtime"] = _lazy_load(".", "_BedrockAsyncExtension")
+    _AIOBOTOCORE_EXTENSIONS["bedrock-agent-runtime"] = _lazy_load(".", "_BedrockAsyncExtension")
 
 
 def _apply_botocore_dynamodb_patch() -> None:
