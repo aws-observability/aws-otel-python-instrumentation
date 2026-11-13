@@ -31,7 +31,6 @@ from crewai.tools import tool
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
     GEN_AI_WORKFLOW_NAME,
     OPERATION_INVOKE_WORKFLOW,
-    try_unwrap,
 )
 from amazon.opentelemetry.distro.instrumentation.crewai import CrewAIInstrumentor
 from opentelemetry.instrumentation.threading import ThreadingInstrumentor
@@ -1753,9 +1752,65 @@ class TestCrewAIInstrumentor(TestCase):
         self.assertEqual(sorted(d["name"] for d in crew_defs), ["create_order", "format_message", "get_greeting"])
         self._assert_spans_all_ended()
 
-    def test_llm_span_records_tool_definitions_for_every_provider(self):
-        # CrewAI emits LLMCallStartedEvent with the same OpenAI-format tools for every provider, but serializes
-        # them on some paths, so check the recorded definition matches the original exactly on each one.
+    def test_agent_span_records_tool_definitions_with_text_tool_calling(self):
+        # An LLM without native function calling gets its tools in the prompt (CrewAI's text tool calling), not in
+        # the request's tools, so the agent span lists them and the chat span does not.
+        @tool
+        def get_greeting(name: str) -> str:
+            """Get a greeting message for the given name."""
+            return f"Hello, {name}!"
+
+        llm = LLM(model="openai/gpt-4", is_litellm=True)
+        llm.supports_function_calling = lambda: False
+        agent = Agent(role="Greeter", goal="Greet", backstory="Agent.", llm=llm, tools=[get_greeting])
+        task = Task(description="Greet.", expected_output="A greeting.", agent=agent)
+        with patch("litellm.completion", return_value=self._mock_response("Final Answer: Done")):
+            Crew(name="TextToolsCrew", agents=[agent], tasks=[task]).kickoff()
+
+        defs = json.loads(self._find_span("invoke_agent Greeter").attributes[GEN_AI_TOOL_DEFINITIONS])
+        validate_otel_genai_schema(defs, "gen-ai-tool-definitions")
+        self.assertEqual([d["name"] for d in defs], ["get_greeting"])
+        self.assertIn("name", defs[0]["parameters"]["properties"])
+        self.assertNotIn(GEN_AI_TOOL_DEFINITIONS, self._find_span("chat gpt-4").attributes)
+        self._assert_spans_all_ended()
+
+    def test_function_tool_definitions_skips_unnamed_tools_and_serialized_schemas(self):
+        from crewai.utilities.serialization import to_serializable
+
+        from amazon.opentelemetry.distro.instrumentation.crewai._event_handler import OpenTelemetryEventHandler
+
+        weather = {
+            "type": "function",
+            "function": {
+                "name": "weather",
+                "description": "Get the weather.",
+                "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]},
+            },
+        }
+        serialized = to_serializable([weather])  # how CrewAI builds LLMCallStartedEvent.tools
+        self.assertIsInstance(serialized[0]["function"]["parameters"]["properties"]["city"], str)
+        no_args = {"type": "object", "properties": {}}
+        tools = [
+            None,
+            {"type": "function"},
+            {"type": "function", "function": {"description": "No name."}},
+            {"type": "function", "function": {"name": "no_args", "parameters": no_args}},
+            {"type": "function", "function": {"name": "bad_parameters", "description": "d", "parameters": "x"}},
+            *serialized,
+        ]
+        self.assertEqual(
+            OpenTelemetryEventHandler._function_tool_definitions(tools),
+            [
+                {"type": "function", "name": "no_args", "parameters": no_args},
+                {"type": "function", "name": "bad_parameters", "description": "d"},
+                {"type": "function", "name": "weather", "description": "Get the weather."},
+            ],
+        )
+
+    def test_llm_span_without_agent_records_tool_definitions(self):
+        # Without an agent span to take definitions from, the chat span uses LLMCallStartedEvent.tools. CrewAI
+        # serializes it on some paths, turning the schema's properties into repr() strings; there the parameters are
+        # left out, otherwise they must match the original exactly.
         tool = {
             "type": "function",
             "function": {
@@ -1798,21 +1853,10 @@ class TestCrewAIInstrumentor(TestCase):
                 chat_span = next(s for s in self.span_exporter.get_finished_spans() if s.name.startswith("chat"))
                 defs = json.loads(chat_span.attributes[GEN_AI_TOOL_DEFINITIONS])
                 validate_otel_genai_schema(defs, "gen-ai-tool-definitions")
-                self.assertEqual(defs, [{"type": "function", **tool["function"]}])
-
-        # If _emit_call_started_event cannot be wrapped, only the serialized event.tools is left, whose schema
-        # properties are repr() strings, so the chat span keeps the tool's name and description.
-        self.span_exporter.clear()
-        try_unwrap(BaseLLM, "_emit_call_started_event")
-        llm = LLM(model="openai/gpt-4o")
-        with patch.object(type(llm), "_handle_completion", side_effect=RuntimeError("no network in tests")):
-            with self.assertRaises(Exception):
-                llm.call([{"role": "user", "content": "Order."}], tools=[copy.deepcopy(tool)])
-        chat_span = next(s for s in self.span_exporter.get_finished_spans() if s.name.startswith("chat"))
-        self.assertEqual(
-            json.loads(chat_span.attributes[GEN_AI_TOOL_DEFINITIONS]),
-            [{"type": "function", "name": "create_order", "description": "Create an order."}],
-        )
+                expected = {"type": "function", **tool["function"]}
+                if "parameters" not in defs[0]:
+                    del expected["parameters"]
+                self.assertEqual(defs, [expected])
 
     def _run_crew_kickoff_test(self, model: str, provider: str, model_id: str):
         test_tracer = self.tracer_provider.get_tracer("test")
