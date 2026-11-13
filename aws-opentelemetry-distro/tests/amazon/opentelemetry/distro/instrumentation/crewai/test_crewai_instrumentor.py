@@ -32,6 +32,7 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
     OPERATION_INVOKE_WORKFLOW,
 )
 from amazon.opentelemetry.distro.instrumentation.crewai import CrewAIInstrumentor
+from opentelemetry import context
 from opentelemetry.instrumentation.threading import ThreadingInstrumentor
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -886,6 +887,89 @@ class TestCrewAIInstrumentor(TestCase):
             GEN_AI_OUTPUT_MESSAGES,
         ):
             self.assertNotIn(attribute, agent_span.attributes)
+        self._assert_spans_all_ended()
+
+    def test_interrupted_kickoff_ends_its_spans(self):
+        # CrewAI emits no failed or error event when a kickoff is stopped by a BaseException that is not an Exception
+        class Interrupted(BaseException):
+            # stands in for KeyboardInterrupt, so a regression that lets it escape can't abort the whole test run
+            pass
+
+        llm = LLM(model="openai/gpt-4", is_litellm=True)
+        llm.supports_function_calling = lambda: True
+        agent = Agent(role="Slow", goal="Answer", backstory="Agent.", llm=llm)
+        crew = Crew(name="SlowCrew", agents=[agent], tasks=[Task(description="Go.", expected_output="x", agent=agent)])
+        caller_context = context.get_current()
+
+        async def check_context_after(coroutine):
+            # asyncio.run gives the task its own copy of the context, so compare inside the task
+            task_context = context.get_current()
+            try:
+                return await coroutine
+            finally:
+                self.assertEqual(context.get_current(), task_context)
+
+        cases = (
+            (asyncio.CancelledError, lambda: asyncio.run(check_context_after(agent.kickoff_async("Go.")))),
+            (asyncio.CancelledError, lambda: asyncio.run(check_context_after(crew.akickoff()))),
+            (Interrupted, lambda: agent.kickoff("Go.")),
+            (Interrupted, crew.kickoff),
+        )
+        for index, (interruption, kickoff) in enumerate(cases):
+            with self.subTest(case=index, interruption=interruption.__name__):
+                self.span_exporter.clear()
+                # crewai routes the async kickoffs through litellm.acompletion or litellm.completion depending on
+                # the executor, so patch both
+                with patch("litellm.completion", side_effect=interruption), patch(
+                    "litellm.acompletion", side_effect=interruption
+                ), self.assertRaises(interruption):
+                    kickoff()
+                spans = self.span_exporter.get_finished_spans()
+                self.assertTrue(spans)
+                for span in spans:
+                    self.assertEqual(span.status.status_code, StatusCode.ERROR, span.name)
+                    self.assertEqual(span.attributes[ERROR_TYPE], interruption.__qualname__, span.name)
+                self.assertEqual(context.get_current(), caller_context)
+                self._assert_spans_all_ended()
+
+    def test_cancelled_kickoff_does_not_end_concurrent_kickoff_of_same_agent(self):
+        # a server may share one Agent across requests, so cancelling one kickoff must only end the spans it started
+        llm = LLM(model="openai/gpt-4", is_litellm=True)
+        llm.supports_function_calling = lambda: True
+        agent = Agent(role="Shared", goal="Answer", backstory="Agent.", llm=llm)
+        llm_call_started = threading.Semaphore(0)
+        release_llm_calls = threading.Event()
+
+        # block in a worker thread on either litellm route, so the event loop keeps running
+        def completion(*args, **kwargs):
+            llm_call_started.release()
+            release_llm_calls.wait(10)
+            return self._mock_response("Final Answer: Done")
+
+        async def acompletion(*args, **kwargs):
+            return await asyncio.to_thread(completion, *args, **kwargs)
+
+        async def start_kickoff(message):
+            kickoff = asyncio.ensure_future(agent.kickoff_async(message))
+            # wait until the kickoff is blocked in its LLM call
+            self.assertTrue(await asyncio.to_thread(llm_call_started.acquire, timeout=10))
+            return kickoff
+
+        async def run():
+            first = await start_kickoff("First.")
+            second = await start_kickoff("Second.")
+            first.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await first
+            release_llm_calls.set()
+            await second
+
+        with patch("litellm.completion", side_effect=completion), patch("litellm.acompletion", side_effect=acompletion):
+            asyncio.run(run())
+
+        # the cancelled kickoff's span ends with an error and the other kickoff still completes
+        agent_spans = [span for span in self.span_exporter.get_finished_spans() if span.name == "invoke_agent Shared"]
+        self.assertCountEqual([span.status.status_code for span in agent_spans], [StatusCode.ERROR, StatusCode.OK])
         self._assert_spans_all_ended()
 
     def test_async_task_parenting(self):

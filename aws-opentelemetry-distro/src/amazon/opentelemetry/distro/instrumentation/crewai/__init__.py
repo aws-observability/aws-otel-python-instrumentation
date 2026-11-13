@@ -7,6 +7,7 @@ from amazon.opentelemetry.distro.instrumentation.crewai._event_handler import (
     OpenTelemetryEventHandler,
     _EventBusEmitWrapper,
 )
+from amazon.opentelemetry.distro.instrumentation.crewai._wrappers import _KickoffWrapper
 from amazon.opentelemetry.distro.version import __version__
 from opentelemetry import trace
 from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
@@ -38,8 +39,21 @@ class CrewAIInstrumentor(BaseInstrumentor):
         self._handler = OpenTelemetryEventHandler(tracer)
 
         try_wrap("crewai.events", "crewai_event_bus.emit", _EventBusEmitWrapper(self._handler))
+        # Crew.kickoff_async is not wrapped: it runs the wrapped Crew.kickoff in a worker thread, which keeps running
+        # after the awaiting task is cancelled and ends its spans normally. Agent.akickoff awaits Agent.kickoff_async.
+        kickoff_wrapper = _KickoffWrapper(self._handler)
+        try_wrap("crewai", "Crew.kickoff", kickoff_wrapper)
+        try_wrap("crewai", "Crew.akickoff", kickoff_wrapper)
+        try_wrap("crewai", "Crew.replay", kickoff_wrapper)
+        try_wrap("crewai", "Agent.kickoff", kickoff_wrapper)
+        try_wrap("crewai", "Agent.kickoff_async", kickoff_wrapper)
 
     def _uninstrument(self, **kwargs: Any) -> None:  # pylint: disable=no-self-use
         from crewai.events import crewai_event_bus  # pylint: disable=import-outside-toplevel
 
         try_unwrap(crewai_event_bus, "emit")
+        try_unwrap("crewai.Crew", "kickoff")
+        try_unwrap("crewai.Crew", "akickoff")
+        try_unwrap("crewai.Crew", "replay")
+        try_unwrap("crewai.Agent", "kickoff")
+        try_unwrap("crewai.Agent", "kickoff_async")

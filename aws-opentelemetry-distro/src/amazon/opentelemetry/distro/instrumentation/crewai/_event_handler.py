@@ -3,8 +3,10 @@
 
 import re
 import sys
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Generator, List, Optional, Tuple
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
     GEN_AI_WORKFLOW_NAME,
@@ -80,6 +82,9 @@ if TYPE_CHECKING:
     from crewai.llms.base_llm import BaseLLM
     from crewai.tools.tool_usage import ToolUsage
     from crewai.types.usage_metrics import UsageMetrics
+
+# root event IDs of the spans started by the Crew or Agent kickoff running in this context
+_kickoff_root_event_ids: ContextVar[Optional[List[str]]] = ContextVar("crewai_kickoff_root_event_ids", default=None)
 
 
 @dataclass
@@ -671,6 +676,13 @@ class OpenTelemetryEventHandler:
             else:
                 # If the parent has already been cleaned up, keep this orphan in its own cleanup scope.
                 root_event_id = event_id
+        if root_event_id == event_id:
+            # remember this root span so a cancelled kickoff can end it and its children, see
+            # _end_kickoff_spans_if_cancelled. There is no list outside a kickoff, e.g. when events are emitted
+            # directly.
+            kickoff_root_event_ids = _kickoff_root_event_ids.get()
+            if kickoff_root_event_ids is not None:
+                kickoff_root_event_ids.append(event_id)
         span = self._tracer.start_span(name, kind=kind, attributes=attributes, context=parent_ctx)
         token = context.attach(trace.set_span_in_context(span))
         self._event_id_to_span.put(
@@ -704,6 +716,29 @@ class OpenTelemetryEventHandler:
                 entry.span.set_status(Status(StatusCode.OK))
             entry.span.end()
             try_detach(entry.token)
+
+    @contextmanager
+    def _end_kickoff_spans_if_cancelled(self) -> Generator[None, None, None]:
+        """Wraps one Crew or Agent kickoff and ends the spans it started if it is cancelled or interrupted."""
+        root_event_ids: List[str] = []
+        root_event_ids_token = _kickoff_root_event_ids.set(root_event_ids)
+        # an interrupted Crew.kickoff detaches its crew_context baggage before its spans end below, so detaching the
+        # crew span's token re-activates that baggage; detaching this token in finally restores the caller's context
+        caller_context_token = context.attach(context.get_current())
+        try:
+            yield
+        except Exception:
+            # CrewAI's failed and error events have already ended these spans
+            raise
+        except BaseException as exc:
+            # CrewAI emits no end event for a BaseException that is not an Exception, such as asyncio.CancelledError
+            # or KeyboardInterrupt, so end the kickoff's spans here
+            for root_event_id in reversed(root_event_ids):
+                self._end_spans_for_root_event(root_event_id, error=exc)
+            raise
+        finally:
+            try_detach(caller_context_token)
+            _kickoff_root_event_ids.reset(root_event_ids_token)
 
     def _end_spans_for_root_event(self, root_event_id: Optional[str], error: Optional[Any] = None) -> None:
         if not root_event_id:
