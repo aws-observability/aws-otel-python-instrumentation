@@ -294,7 +294,7 @@ class OpenTelemetryEventHandler:
         # for this execution before emitting the event, with every tool its LLM calls receive: the task's (or
         # agent's) tools plus those CrewAI adds, such as delegation, code execution, and MCP tools.
         executor = getattr(agent, "agent_executor", None)
-        tool_defs = self._extract_tool_definitions(getattr(executor, "original_tools", None) or [])
+        tool_defs = self._extract_tool_definitions(getattr(executor, "tools", None) or [])
         if tool_defs:
             attributes[GEN_AI_TOOL_DEFINITIONS] = serialize_to_json_string(tool_defs, max_depth=sys.maxsize)
 
@@ -481,9 +481,6 @@ class OpenTelemetryEventHandler:
         if model_name:
             attributes[GEN_AI_REQUEST_MODEL] = model_name
         self._set_llm_request_span_attributes(attributes, source, event)
-        parent_event_id = self._get_parent_event_id(event)
-        if tool_defs := self._llm_call_tool_definitions(source, event, parent_event_id):
-            attributes[GEN_AI_TOOL_DEFINITIONS] = serialize_to_json_string(tool_defs, max_depth=sys.maxsize)
 
         span_name = (
             f"{GenAiOperationNameValues.CHAT.value} {model_name}" if model_name else GenAiOperationNameValues.CHAT.value
@@ -504,6 +501,10 @@ class OpenTelemetryEventHandler:
                 attributes[GEN_AI_INPUT_MESSAGES] = serialize_to_json_string(
                     [self._to_input_message(m) for m in non_system_messages]
                 )
+
+        parent_event_id = self._get_parent_event_id(event)
+        if tool_defs := self._llm_call_tool_definitions(source, event, parent_event_id):
+            attributes[GEN_AI_TOOL_DEFINITIONS] = serialize_to_json_string(tool_defs, max_depth=sys.maxsize)
 
         self._start_span(
             span_name,
@@ -962,22 +963,25 @@ class OpenTelemetryEventHandler:
     def _llm_call_tool_definitions(
         self, source: "BaseLLM", event: "LLMCallStartedEvent", parent_event_id: Optional[str]
     ) -> list:
-        # event.tools is what CrewAI sends the model for this call, in OpenAI function format for every provider, but
-        # CrewAI builds it with to_serializable(tools), which turns every value nested 5 levels deep (each entry of a
-        # schema's "properties", "$defs", "required", ...) into its repr() string:
-        # https://github.com/crewAIInc/crewAI/issues/9107
-        # Names and descriptions are not nested that deep, so take each tool's full definition from the parent agent
-        # span, which built it from the same tools.
-        parent_entry = self._event_id_to_span.get(parent_event_id)
-        known = (parent_entry.tool_definitions if parent_entry else None) or {}
+        # event.tools has the tools sent on this call, in OpenAI function format. Their names select the parent agent
+        # span's definitions, which hold the full schemas; the event's own schemas are not used.
+        parent_agent_entry = self._event_id_to_span.get(parent_event_id)
+        parent_agent_tools = (parent_agent_entry.tool_definitions if parent_agent_entry else None) or {}
         tools = getattr(event, "tools", None)
-        if not tools and known and self._uses_text_tool_calling(source, parent_entry):
-            # CrewAI describes the agent's tools in the prompt instead of sending them as the request's tools
-            return list(known.values())
+        if not tools and parent_agent_tools and self._uses_text_tool_calling(source, parent_agent_entry):
+            # CrewAI describes the agent's tools in the prompt instead of sending them as the request's tools,
+            # so we just write the list of agent tools
+            return list(parent_agent_tools.values())
         tool_defs = []
-        for tool_def in self._function_tool_definitions(tools or []):
-            # the agent span's full definition when it has one, otherwise the event's
-            tool_defs.append(known.get(tool_def["name"], tool_def))
+        for tool in tools or []:
+            function = get_value(tool, "function") or {}
+            if not (name := get_value(function, "name")):
+                continue
+            if name in parent_agent_tools:
+                tool_defs.append(parent_agent_tools[name])
+            else:
+                # no definition on an agent span, e.g. llm.call() without an agent: the tool's name and description
+                tool_defs.append(self._tool_definition(name, get_value(function, "description"), None))
         return tool_defs
 
     @staticmethod
@@ -994,19 +998,6 @@ class OpenTelemetryEventHandler:
             return not source.supports_function_calling()
         except Exception:  # pylint: disable=broad-exception-caught
             return False
-
-    @staticmethod
-    def _function_tool_definitions(tools: Any) -> list:
-        # tool definitions from tools in OpenAI function format (LLMCallStartedEvent.tools), keeping their names: they
-        # are the names CrewAI sent the model
-        defs = []
-        for tool in tools:
-            function = get_value(tool, "function") or {}
-            if name := get_value(function, "name"):
-                description = get_value(function, "description")
-                parameters = OpenTelemetryEventHandler._normalize_parameters(get_value(function, "parameters"))
-                defs.append(OpenTelemetryEventHandler._tool_definition(name, description, parameters))
-        return defs
 
     @staticmethod
     def _tool_definitions_by_name(tool_defs: list) -> Dict[str, Dict[str, Any]]:
@@ -1038,21 +1029,13 @@ class OpenTelemetryEventHandler:
 
     @staticmethod
     def _normalize_parameters(parameters: Any) -> Optional[Dict[str, Any]]:
-        # A tool's parameters as a JSON schema, from a tool's Pydantic args_schema or a schema dictionary
+        # A tool's parameters as a JSON schema, from its Pydantic args_schema or a schema dictionary
         if isinstance(parameters, type) and hasattr(parameters, "model_json_schema"):
             try:
                 parameters = parameters.model_json_schema()
             except Exception:  # pylint: disable=broad-exception-caught
                 return None
-        if not isinstance(parameters, dict):
-            return None
-        for key in ("properties", "$defs"):
-            entries = parameters.get(key)
-            if isinstance(entries, dict) and any(not isinstance(entry, dict) for entry in entries.values()):
-                # Serialized: CrewAI builds LLMCallStartedEvent.tools with to_serializable(tools), which turns every
-                # value nested 5 levels deep into its repr() string (https://github.com/crewAIInc/crewAI/issues/9107)
-                return None
-        return parameters
+        return parameters if isinstance(parameters, dict) else None
 
     @staticmethod
     def _request_tool_name(name: str) -> str:
