@@ -12,6 +12,10 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- feat: support disabling Bedrock SDK instrumentation
+  Setting `OTEL_PYTHON_DISABLED_INSTRUMENTATIONS=bedrock` skips SDK telemetry from Bedrock GenAI operations
+  in botocore and aiobotocore, while keeping AgentCore and other AWS services instrumented.
+  ([#976](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/976))
 - fix(langchain): resolve response model and ID from generation metadata
   ([#974](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/974))
 - feat: add CrewAI LiteAgent support. The CrewAI instrumentor now handles the `LiteAgentExecution*` events emitted

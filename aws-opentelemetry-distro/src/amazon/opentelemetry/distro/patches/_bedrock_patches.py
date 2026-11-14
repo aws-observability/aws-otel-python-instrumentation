@@ -3,6 +3,7 @@
 import abc
 import inspect
 import logging
+import os
 from typing import Dict, Optional
 
 from amazon.opentelemetry.distro._aws_attribute_keys import (
@@ -10,6 +11,7 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_BEDROCK_DATA_SOURCE_ID,
     AWS_BEDROCK_GUARDRAIL_ARN,
 )
+from opentelemetry.instrumentation.botocore.extensions.bedrock import _BedrockRuntimeExtension
 from opentelemetry.instrumentation.botocore.extensions.types import (
     _AttributeMapT,
     _AwsSdkCallContext,
@@ -17,6 +19,7 @@ from opentelemetry.instrumentation.botocore.extensions.types import (
     _BotocoreInstrumentorContext,
     _BotoResultT,
 )
+from opentelemetry.instrumentation.environment_variables import OTEL_PYTHON_DISABLED_INSTRUMENTATIONS
 from opentelemetry.semconv._incubating.attributes.aws_attributes import (
     AWS_BEDROCK_GUARDRAIL_ID,
     AWS_BEDROCK_KNOWLEDGE_BASE_ID,
@@ -34,6 +37,27 @@ _AWS_BEDROCK_SYSTEM: str = "aws.bedrock"
 _logger = logging.getLogger(__name__)
 # Set logger level to DEBUG
 _logger.setLevel(logging.DEBUG)
+
+
+def is_genai_bedrock_call(call_context: _AwsSdkCallContext) -> bool:
+    # Upstream dispatch for these six operations:
+    # https://github.com/open-telemetry/opentelemetry-python-genai/blob/fbef673e8c3249b2f2f84944d5489ec80a87b4e9/instrumentation/opentelemetry-instrumentation-genai-bedrock/src/opentelemetry/instrumentation/genai/bedrock/patch.py#L553-L606
+    disabled_api_calls = [
+        "Converse",
+        "ConverseStream",
+        "InvokeModel",
+        "InvokeModelWithResponseStream",
+        "InvokeAgent",
+        "Retrieve",
+    ]
+    return call_context.service in ("bedrock-runtime", "bedrock-agent-runtime") and (
+        call_context.operation in disabled_api_calls
+    )
+
+
+def is_bedrock_instrumentation_disabled() -> bool:
+    disabled = os.environ.get(OTEL_PYTHON_DISABLED_INSTRUMENTATIONS, "")
+    return bool(disabled) and "bedrock" in {name.strip() for name in disabled.split(",")}
 
 
 class _BedrockAgentOperation(abc.ABC):
@@ -193,12 +217,26 @@ class _BedrockAgentExtension(_AwsSdkExtension):
                 )
 
 
+class _PatchedBedrockRuntimeExtension(_BedrockRuntimeExtension):
+    # Upstream hook for opting out of SDK tracing:
+    # https://github.com/open-telemetry/opentelemetry-python-contrib/blob/a5470c666947acddc24fd4064ec7c1b169dfe8b6/instrumentation/opentelemetry-instrumentation-botocore/src/opentelemetry/instrumentation/botocore/extensions/types.py#L114-L120
+    def should_trace_service_call(self) -> bool:
+        if is_bedrock_instrumentation_disabled() and is_genai_bedrock_call(self._call_context):
+            return False
+        return super().should_trace_service_call()
+
+
 class _BedrockAgentRuntimeExtension(_AwsSdkExtension):
     """
     This class is an extension for <a
     href="https://docs.aws.amazon.com/bedrock/latest/APIReference/API_Operations_Agents_for_Amazon_Bedrock_Runtime.html">
     Agents for Amazon Bedrock Runtime</a>.
     """
+
+    def should_trace_service_call(self) -> bool:
+        if is_bedrock_instrumentation_disabled() and is_genai_bedrock_call(self._call_context):
+            return False
+        return super().should_trace_service_call()
 
     def extract_attributes(self, attributes: _AttributeMapT):
         agent_id = self._call_context.params.get(_AGENT_ID)
@@ -208,6 +246,15 @@ class _BedrockAgentRuntimeExtension(_AwsSdkExtension):
         knowledge_base_id = self._call_context.params.get(_KNOWLEDGE_BASE_ID)
         if knowledge_base_id:
             attributes[AWS_BEDROCK_KNOWLEDGE_BASE_ID] = knowledge_base_id
+
+
+class _BedrockAsyncExtension(_AwsSdkExtension):
+    """Bedrock tracing gate for aiobotocore's generic SDK telemetry."""
+
+    def should_trace_service_call(self) -> bool:
+        if is_bedrock_instrumentation_disabled() and is_genai_bedrock_call(self._call_context):
+            return False
+        return super().should_trace_service_call()
 
 
 class _BedrockExtension(_AwsSdkExtension):
