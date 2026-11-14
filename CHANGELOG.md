@@ -11,6 +11,13 @@ For any change that affects end users of this package, please add an entry under
 If your change does not need a CHANGELOG entry, add the "skip changelog" label to your PR.
 
 ## Unreleased
+- fix(crewai): record `gen_ai.tool.definitions` (name, description, and parameters) on CrewAI `chat` and
+  `invoke_agent` spans. Agent spans list the tools of the agent's execution, including those CrewAI adds such as
+  delegation tools, and chat spans list the tools sent on that LLM call with the agent span's definitions. An LLM
+  call made outside an agent records each tool's name and description. The crew span's tool list now includes task
+  tools, lists each tool once, no longer truncates nested schemas, and uses the tool names sent to the model (for
+  example `get_greeting` instead of `Get Greeting`). `Agent.kickoff()` agent spans no longer truncate nested schemas
+  ([#972](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/972))
 
 - feat: support disabling Bedrock SDK instrumentation
   Setting `OTEL_PYTHON_DISABLED_INSTRUMENTATIONS=bedrock` skips SDK telemetry from Bedrock GenAI operations
