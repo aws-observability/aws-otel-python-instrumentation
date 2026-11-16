@@ -3,6 +3,7 @@
 # pylint: disable=too-many-lines
 
 import ast
+import hashlib
 import re
 import sys
 import unicodedata
@@ -968,10 +969,9 @@ class OpenTelemetryEventHandler:
     def _extract_tool_definitions(tools: Any) -> list:
         defs = []
         for tool in tools:
-            if not (name := getattr(tool, "name", None)):
-                continue
-            name = OpenTelemetryEventHandler._tool_name_for_model(name)
-            tool_def: Dict[str, Any] = {"type": "function", "name": name}
+            tool_def: Dict[str, Any] = {"type": "function"}
+            if name := getattr(tool, "name", None):
+                tool_def["name"] = OpenTelemetryEventHandler._tool_name_for_model(name)
             description = OpenTelemetryEventHandler._normalize_tool_description(getattr(tool, "description", None))
             if description:
                 tool_def["description"] = description
@@ -996,31 +996,33 @@ class OpenTelemetryEventHandler:
         # schema is a dictionary, so a string there means the schema was serialized. literal_eval reverses repr()
         # exactly for every JSON value, except inf and nan, which have no literal form; then we drop the parameters.
         properties = parameters.get("properties")
-        if isinstance(properties, dict) and any(isinstance(value, str) for value in properties.values()):
-            try:
-                return {key: OpenTelemetryEventHandler._literal_eval_values(value) for key, value in parameters.items()}
-            except Exception:  # pylint: disable=broad-exception-caught
-                return None
-        return parameters
-
-    @staticmethod
-    def _literal_eval_values(value: Any) -> Any:
-        if isinstance(value, dict):
-            return {key: ast.literal_eval(item) for key, item in value.items()}
-        if isinstance(value, list):
-            return [ast.literal_eval(item) for item in value]
-        return value
+        if not (isinstance(properties, dict) and any(isinstance(value, str) for value in properties.values())):
+            return parameters
+        restored = {}
+        try:
+            for key, value in parameters.items():
+                if isinstance(value, dict):  # e.g. properties: each property's schema is a repr() string
+                    value = {k: ast.literal_eval(v) for k, v in value.items()}
+                elif isinstance(value, list):  # e.g. required: each name is a repr() string
+                    value = [ast.literal_eval(v) for v in value]
+                restored[key] = value  # any other value, e.g. type, was never serialized
+        except Exception:  # pylint: disable=broad-exception-caught
+            return None
+        return restored
 
     @staticmethod
     def _tool_name_for_model(name: str) -> str:
-        # The name CrewAI sends the model for a tool, following crewai.utilities.string_utils.sanitize_tool_name, so
-        # that crew and agent spans use the same names as chat spans, which take theirs from the request's tools.
+        # The name CrewAI sends the model for a tool, as crewai.utilities.string_utils.sanitize_tool_name (1.10.1+)
+        # makes it, so crew and agent spans name tools as chat and execute_tool spans do
         name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
         name = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)  # HTTPRequestTool -> HTTP_RequestTool
         name = re.sub(r"([a-z])([A-Z])", r"\1_\2", name)  # HTTP_RequestTool -> HTTP_Request_Tool
-        name = re.sub(r"[\"']+", "", name.lower())
-        # 64 is the tool name limit of OpenAI and Bedrock; CrewAI shortens longer names to end in a hash instead
-        return re.sub(r"[^a-z0-9]+", "_", name).strip("_")[:64].rstrip("_")
+        name = re.sub(r"['\"]+", "", name.lower())
+        name = re.sub(r"[^a-z0-9]+", "_", name).strip("_")
+        if len(name) > 64:  # the tool name limit of OpenAI and Bedrock: CrewAI ends a longer name with its hash
+            suffix = "_" + hashlib.sha256(name.encode()).hexdigest()[:8]
+            name = name[: 64 - len(suffix)].rstrip("_") + suffix
+        return name
 
     @staticmethod
     def _normalize_tool_description(desc: Optional[str]) -> Optional[str]:
