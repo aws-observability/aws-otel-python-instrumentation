@@ -11,6 +11,7 @@ import sys
 import threading
 import time
 import unittest
+from types import SimpleNamespace
 from typing import Any, Dict, Optional, Sequence
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
@@ -27,12 +28,15 @@ from crewai.events.types.llm_events import LLMCallCompletedEvent, LLMCallFailedE
 from crewai.flow.flow import Flow, start
 from crewai.llms.base_llm import BaseLLM, llm_call_context
 from crewai.tools import tool
+from crewai.utilities.serialization import to_serializable
+from pydantic import BaseModel
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
     GEN_AI_WORKFLOW_NAME,
     OPERATION_INVOKE_WORKFLOW,
 )
 from amazon.opentelemetry.distro.instrumentation.crewai import CrewAIInstrumentor
+from amazon.opentelemetry.distro.instrumentation.crewai._event_handler import OpenTelemetryEventHandler
 from opentelemetry.instrumentation.threading import ThreadingInstrumentor
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -158,8 +162,6 @@ class TestCrewAIInstrumentor(TestCase):
 
     def test_openai_crew_kickoff(self):
         self._run_crew_kickoff_test("openai/gpt-4", GenAiProviderNameValues.OPENAI.value, "gpt-4")
-
-        from amazon.opentelemetry.distro.instrumentation.crewai._event_handler import OpenTelemetryEventHandler
 
         attributes = {}
         OpenTelemetryEventHandler._set_llm_request_span_attributes(
@@ -1667,8 +1669,6 @@ class TestCrewAIInstrumentor(TestCase):
         self._assert_spans_all_ended()
 
     def test_crew_agent_and_chat_spans_record_tool_definitions(self):
-        from pydantic import BaseModel
-
         class Address(BaseModel):
             street: str
 
@@ -1731,18 +1731,16 @@ class TestCrewAIInstrumentor(TestCase):
         crew_defs = self._tool_defs(self._find_span("invoke_workflow ToolDefinitionsCrew"))
         self.assertEqual(
             [d["description"] for d in crew_defs],
-            [get_greeting.description, get_greeting_formally.description, create_order.description],
+            [
+                "Get a greeting message for the given name.",
+                "A different tool with the same name once sanitized.",
+                "Create an order.",
+            ],
         )
         self.assertEqual(crew_defs[2]["parameters"], create_order.args_schema.model_json_schema())
         self._assert_spans_all_ended()
 
     def test_llm_call_tool_definitions(self):
-        from types import SimpleNamespace
-
-        from crewai.utilities.serialization import to_serializable
-
-        from amazon.opentelemetry.distro.instrumentation.crewai._event_handler import OpenTelemetryEventHandler
-
         # inf has no literal form, so CrewAI's repr() of this schema cannot be restored
         infinite = {"type": "object", "properties": {"days": {"type": "number", "default": float("inf")}}}
         tools = [
@@ -1761,8 +1759,6 @@ class TestCrewAIInstrumentor(TestCase):
         self.assertEqual(OpenTelemetryEventHandler._llm_call_tool_definitions(SimpleNamespace(tools=None)), [])
 
     def test_tool_name_for_model(self):
-        from amazon.opentelemetry.distro.instrumentation.crewai._event_handler import OpenTelemetryEventHandler
-
         cases = [  # (the tool's name, the name CrewAI sends the model); the first three normalize to the same name
             ("get_greeting", "get_greeting"),
             ("Get Greeting", "get_greeting"),  # case and spaces
@@ -1778,11 +1774,6 @@ class TestCrewAIInstrumentor(TestCase):
                 self.assertEqual(OpenTelemetryEventHandler._tool_name_for_model(name), expected)
 
     def test_tool_parameters_json_schema(self):
-        from crewai.utilities.serialization import to_serializable
-        from pydantic import BaseModel
-
-        from amazon.opentelemetry.distro.instrumentation.crewai._event_handler import OpenTelemetryEventHandler
-
         class Args(BaseModel):
             city: str
 
@@ -1821,7 +1812,7 @@ class TestCrewAIInstrumentor(TestCase):
 
     def test_llm_span_without_agent_records_tool_definitions(self):
         # llm.call() with no agent: the chat span records the tool's full definition, nested schema included
-        tool = {
+        order_tool = {
             "type": "function",
             "function": {
                 "name": "create_order",
@@ -1849,10 +1840,10 @@ class TestCrewAIInstrumentor(TestCase):
         with patch.object(type(llm), "_handle_converse", side_effect=RuntimeError("no network in tests")):
             with self.assertRaises(Exception):
                 # pass a copy: the provider modifies the request's tool dicts in place
-                llm.call([{"role": "user", "content": "Order."}], tools=[copy.deepcopy(tool)])
+                llm.call([{"role": "user", "content": "Order."}], tools=[copy.deepcopy(order_tool)])
 
         (chat_span,) = [s for s in self.span_exporter.get_finished_spans() if s.name.startswith("chat")]
-        self.assertEqual(self._tool_defs(chat_span), [{"type": "function", **tool["function"]}])
+        self.assertEqual(self._tool_defs(chat_span), [{"type": "function", **order_tool["function"]}])
 
     def _run_crew_kickoff_test(self, model: str, provider: str, model_id: str):
         test_tracer = self.tracer_provider.get_tracer("test")
