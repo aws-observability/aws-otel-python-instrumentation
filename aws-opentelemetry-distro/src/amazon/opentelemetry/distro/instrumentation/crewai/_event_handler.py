@@ -7,7 +7,7 @@ import hashlib
 import re
 import sys
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
@@ -95,6 +95,7 @@ class _SpanEntry:
     # older CrewAI versions only expose cumulative token usage, so retain the
     # starting counts to calculate this LLM call's usage when the span ends
     initial_token_usage: Tuple[int, int] = (0, 0)
+    tool_descriptions: Dict[str, Optional[str]] = field(default_factory=dict)
 
 
 class _EventBusEmitWrapper:
@@ -189,7 +190,9 @@ class OpenTelemetryEventHandler:
             if event_id and parent_entry:
                 self._event_id_to_span.put(event_id, parent_entry)
 
-    def _on_crew_start(self, source: "Crew", event: "CrewKickoffStartedEvent") -> None:
+    def _on_crew_start(  # pylint: disable=too-many-locals,too-many-branches
+        self, source: "Crew", event: "CrewKickoffStartedEvent"
+    ) -> None:
         crew_name = getattr(source, "name", None)
         span_name = f"{OPERATION_INVOKE_WORKFLOW} {crew_name}" if crew_name else OPERATION_INVOKE_WORKFLOW
         attributes: Dict[str, Any] = {
@@ -200,20 +203,49 @@ class OpenTelemetryEventHandler:
         if hasattr(source, "id"):
             attributes[GEN_AI_AGENT_ID] = str(source.id)
 
+        seen_tool_ids = set()
+        crew_tool_definitions = []
+
         agents = getattr(source, "agents", [])
         if agents:
-            all_tools = []
             for agent in agents:
-                all_tools.extend(getattr(agent, "tools", []) or [])
-            for task in getattr(source, "tasks", []) or []:
-                all_tools.extend(getattr(task, "tools", []) or [])
-            if all_tools:
-                # List each tool once: a task without tools reuses its agent's tools, and agents can share a tool.
-                # Different tools are all listed, even with the same name.
-                distinct_tools = {id(tool): tool for tool in all_tools}.values()
-                tool_defs = self._extract_tool_definitions(distinct_tools)
-                if tool_defs:
-                    attributes[GEN_AI_TOOL_DEFINITIONS] = serialize_to_json_string(tool_defs, max_depth=sys.maxsize)
+                tools = getattr(agent, "tools", []) or []
+
+                # Resolve names separately for this agent's tool list.
+                tool_definitions = self._extract_tool_definitions(tools)
+
+                for tool_index, tool in enumerate(tools):
+                    tool_id = id(tool)
+
+                    # The same tool object may be shared by several agents or tasks.
+                    if tool_id in seen_tool_ids:
+                        continue
+
+                    seen_tool_ids.add(tool_id)
+                    tool_definition = tool_definitions[tool_index]
+                    crew_tool_definitions.append(tool_definition)
+
+        tasks = getattr(source, "tasks", [])
+        if tasks:
+            for task in tasks:
+                tools = getattr(task, "tools", []) or []
+
+                # Resolve names separately for this task's tool list.
+                tool_definitions = self._extract_tool_definitions(tools)
+
+                for tool_index, tool in enumerate(tools):
+                    tool_id = id(tool)
+
+                    # Skip tool objects already added from an agent or another task.
+                    if tool_id in seen_tool_ids:
+                        continue
+
+                    seen_tool_ids.add(tool_id)
+                    tool_definition = tool_definitions[tool_index]
+                    crew_tool_definitions.append(tool_definition)
+
+        if crew_tool_definitions:
+            attributes[GEN_AI_TOOL_DEFINITIONS] = serialize_to_json_string(crew_tool_definitions, max_depth=sys.maxsize)
 
         self._start_span(
             span_name,
@@ -379,8 +411,9 @@ class OpenTelemetryEventHandler:
             span_name, event.event_id, attributes, self._get_parent_event_id(event), root_event_id=event.event_id
         )
         # like _on_agent_start, so events that lose their CrewAI parent (e.g. native tool calls) still find this span
-        if (agent_entry := self._event_id_to_span.get(event.event_id)) and (agent_id := getattr(source, "id", None)):
-            self._event_id_to_span.put(str(agent_id), agent_entry)
+        if agent_entry := self._event_id_to_span.get(event.event_id):
+            if agent_id := getattr(source, "id", None):
+                self._event_id_to_span.put(str(agent_id), agent_entry)
 
     def _on_lite_agent_completed(
         self, source: "BaseAgent", event: "LiteAgentExecutionCompletedEvent"  # pylint: disable=unused-argument
@@ -421,20 +454,27 @@ class OpenTelemetryEventHandler:
         if tool_name:
             attributes[GEN_AI_TOOL_NAME] = tool_name
 
-        desc = self._find_tool_description(source, event, tool_name)
+        agent_entry = self._event_id_to_span.get(self._get_task_or_agent_id(event))
+        if agent_entry is None:
+            agent_entry = self._event_id_to_span.get(self._get_parent_event_id(event))
+        tool_descriptions = agent_entry.tool_descriptions if agent_entry else {}
+        desc = self._find_tool_description(source, event, tool_name, tool_descriptions)
         if desc:
             attributes[GEN_AI_TOOL_DESCRIPTION] = desc
 
         agent = first_not_none(getattr(source, "agent", None), self._get_event_agent(event))
-        if agent:
-            llm = getattr(agent, "llm", None)
-            provider, model = self._extract_provider_and_model(llm)
-            if provider:
-                attributes[GEN_AI_PROVIDER_NAME] = provider
-            if model:
-                attributes[GEN_AI_REQUEST_MODEL] = model
+        llm = getattr(agent, "llm", None)
+        if llm is None:
+            llm = getattr(source, "llm", None)
+        if llm is None and hasattr(source, "get_token_usage_summary"):
+            llm = source
+        provider, model = self._extract_provider_and_model(llm)
+        if provider:
+            attributes[GEN_AI_PROVIDER_NAME] = provider
+        if model:
+            attributes[GEN_AI_REQUEST_MODEL] = model
 
-        if event.tool_args:
+        if event.tool_args is not None:
             attributes[GEN_AI_TOOL_CALL_ARGUMENTS] = to_tool_attribute_value(event.tool_args)
 
         self._start_span(
@@ -451,7 +491,7 @@ class OpenTelemetryEventHandler:
         output = getattr(event, "output", None)
         if output is not None:
             attrs[GEN_AI_TOOL_CALL_RESULT] = to_tool_attribute_value(output)
-        self._end_span(event.started_event_id, attrs)
+        self._end_span(event.started_event_id, attrs, error=getattr(event, "failure", None))
 
     def _on_tool_error(
         self, source: "ToolUsage", event: "ToolUsageErrorEvent"
@@ -491,8 +531,14 @@ class OpenTelemetryEventHandler:
                 )
 
         parent_event_id = self._get_parent_event_id(event)
-        if tool_defs := self._llm_call_tool_definitions(event):
+        tool_defs = self._llm_call_tool_definitions(event)
+        if tool_defs:
             attributes[GEN_AI_TOOL_DEFINITIONS] = serialize_to_json_string(tool_defs, max_depth=sys.maxsize)
+        agent_entry = self._event_id_to_span.get(self._get_task_or_agent_id(event))
+        if agent_entry is None:
+            agent_entry = self._event_id_to_span.get(parent_event_id)
+        if agent_entry:
+            agent_entry.tool_descriptions = {tool_def["name"]: tool_def.get("description") for tool_def in tool_defs}
 
         self._start_span(
             span_name,
@@ -754,7 +800,7 @@ class OpenTelemetryEventHandler:
         # error.type must be a low-cardinality class name, not the message (which can contain task or tool content).
         # Most CrewAI failure events carry the error as a string, but this handler runs synchronously inside
         # CrewAI's except block, so the exception being handled gives the real type.
-        if isinstance(error, BaseException):
+        if isinstance(error, BaseException) or callable(getattr(error, "as_agent_message", None)):
             return type(error).__qualname__
         active_exception = sys.exc_info()[1]
         return type(active_exception).__qualname__ if active_exception else ErrorTypeValues.OTHER.value
@@ -910,7 +956,8 @@ class OpenTelemetryEventHandler:
                 function = tc.get("function") or {}
                 if name := tc.get("name") or function.get("name"):
                     part["name"] = name
-                if arguments := tc.get("input") or tc.get("arguments") or function.get("arguments"):
+                arguments = first_not_none(tc.get("input"), tc.get("arguments"), function.get("arguments"))
+                if arguments is not None:
                     part["arguments"] = arguments
                 tc_id = tc.get("toolUseId") or tc.get("id")
                 if tc_id:
@@ -919,8 +966,9 @@ class OpenTelemetryEventHandler:
                 func = tc.function
                 if getattr(func, "name", None):
                     part["name"] = func.name
-                if getattr(func, "arguments", None):
-                    part["arguments"] = func.arguments
+                arguments = getattr(func, "arguments", None)
+                if arguments is not None:
+                    part["arguments"] = arguments
                 if getattr(tc, "id", None):
                     part["id"] = tc.id
             else:
@@ -929,9 +977,16 @@ class OpenTelemetryEventHandler:
         return parts
 
     @staticmethod
-    def _find_tool_description(source: Any, event: Any, tool_name: Optional[str]) -> Optional[str]:
+    def _find_tool_description(
+        source: Any, event: Any, tool_name: Optional[str], tool_descriptions: Dict[str, Optional[str]]
+    ) -> Optional[str]:
         if not tool_name:
             return None
+        tool = (getattr(source, "_tool_name_mapping", None) or {}).get(tool_name)
+        if tool is not None:
+            return OpenTelemetryEventHandler._normalize_tool_description(getattr(tool, "description", None))
+        if tool_name in tool_descriptions:
+            return tool_descriptions[tool_name]
         tool_class = getattr(event, "tool_class", None)
         if tool_class:
             desc = getattr(tool_class, "description", None)
@@ -941,8 +996,13 @@ class OpenTelemetryEventHandler:
             tools = getattr(tools_holder, "tools", None) if tools_holder else None
             if not tools:
                 continue
+            used_names = set()
             for tool in tools:
-                if getattr(tool, "name", None) == tool_name:
+                name = getattr(tool, "name", None)
+                if not name:
+                    continue
+                normalized_name = OpenTelemetryEventHandler._normalize_tool_name(name, used_names)
+                if tool_name in (normalized_name, name):
                     desc = getattr(tool, "description", None)
                     if desc:
                         return OpenTelemetryEventHandler._normalize_tool_description(desc)
@@ -959,7 +1019,7 @@ class OpenTelemetryEventHandler:
             tool_def: Dict[str, Any] = {"type": "function", "name": name}
             if description := get_value(function, "description"):
                 tool_def["description"] = description
-            parameters = OpenTelemetryEventHandler._tool_parameters_json_schema(get_value(function, "parameters"))
+            parameters = OpenTelemetryEventHandler._normalize_tool_parameters(get_value(function, "parameters"))
             if parameters is not None:
                 tool_def["parameters"] = parameters
             tool_defs.append(tool_def)
@@ -968,21 +1028,24 @@ class OpenTelemetryEventHandler:
     @staticmethod
     def _extract_tool_definitions(tools: Any) -> list:
         defs = []
+        used_names = set()
         for tool in tools:
             tool_def: Dict[str, Any] = {"type": "function"}
             if name := getattr(tool, "name", None):
-                tool_def["name"] = OpenTelemetryEventHandler._tool_name_for_model(name)
+                tool_def["name"] = OpenTelemetryEventHandler._normalize_tool_name(name, used_names)
             description = OpenTelemetryEventHandler._normalize_tool_description(getattr(tool, "description", None))
             if description:
                 tool_def["description"] = description
-            parameters = OpenTelemetryEventHandler._tool_parameters_json_schema(getattr(tool, "args_schema", None))
+            parameters = OpenTelemetryEventHandler._normalize_tool_parameters(getattr(tool, "args_schema", None))
             if parameters is not None:
                 tool_def["parameters"] = parameters
             defs.append(tool_def)
         return defs
 
     @staticmethod
-    def _tool_parameters_json_schema(parameters: Any) -> Optional[Dict[str, Any]]:
+    def _normalize_tool_parameters(  # pylint: disable=too-many-branches
+        parameters: Any,
+    ) -> Optional[Dict[str, Any]]:
         # A tool's parameters as a JSON schema, from its Pydantic args_schema or a schema dictionary
         if isinstance(parameters, type) and hasattr(parameters, "model_json_schema"):
             try:
@@ -992,12 +1055,59 @@ class OpenTelemetryEventHandler:
         if not isinstance(parameters, dict):
             return None
         # CrewAI passes LLMCallStartedEvent.tools through to_serializable(max_depth=5), which replaces every value two
-        # levels inside the schema with its repr(): each property's schema, each required name, and so on. A property's
-        # schema is a dictionary, so a string there means the schema was serialized. literal_eval reverses repr()
-        # exactly for every JSON value, except inf and nan, which have no literal form; then we drop the parameters.
-        properties = parameters.get("properties")
-        if not (isinstance(properties, dict) and any(isinstance(value, str) for value in properties.values())):
+        # levels inside the schema with its repr(). Detect strings where JSON Schema requires schemas or collections;
+        # schemas can use references, composition, or additionalProperties without defining properties.
+        # Authored strings in intact schemas (for example enum values) must not be interpreted as Python literals.
+        serialized = False
+        for key in (
+            "properties",
+            "patternProperties",
+            "$defs",
+            "definitions",
+            "dependentSchemas",
+            "allOf",
+            "anyOf",
+            "oneOf",
+            "prefixItems",
+        ):
+            schemas = parameters.get(key)
+            if isinstance(schemas, dict):
+                schema_values = schemas.values()
+            elif isinstance(schemas, list):
+                schema_values = schemas
+            else:
+                continue
+
+            if any(isinstance(schema_value, str) for schema_value in schema_values):
+                serialized = True
+                break
+        for key in ("additionalProperties", "unevaluatedProperties", "items", "contains", "not", "if", "then", "else"):
+            schema = parameters.get(key)
+            if isinstance(schema, dict):
+                schema_type = schema.get("type")
+                serialized = (
+                    serialized
+                    or (isinstance(schema_type, str) and schema_type.startswith(("'", '"')))
+                    or any(
+                        isinstance(schema.get(field), str)
+                        for field in (
+                            "properties",
+                            "patternProperties",
+                            "$defs",
+                            "definitions",
+                            "dependentSchemas",
+                            "allOf",
+                            "anyOf",
+                            "oneOf",
+                            "prefixItems",
+                            "required",
+                            "enum",
+                        )
+                    )
+                )
+        if not serialized:
             return parameters
+        # literal_eval reverses repr() for JSON values. Unrecoverable values, such as inf or nan, drop parameters.
         restored = {}
         try:
             for key, value in parameters.items():
@@ -1011,17 +1121,30 @@ class OpenTelemetryEventHandler:
         return restored
 
     @staticmethod
-    def _tool_name_for_model(name: str) -> str:
+    def _normalize_tool_name(name: str, used_names: Optional[set[str]] = None) -> str:
         # The name CrewAI sends the model for a tool, as crewai.utilities.string_utils.sanitize_tool_name (1.10.1+)
         # makes it, so crew and agent spans name tools as chat and execute_tool spans do
+        # Reference from CrewAI main:
+        # https://github.com/crewAIInc/crewAI/blob/96c4d85b6423dd06b7f1c38f12dd472399c6ce43/lib/crewai/src/crewai/utilities/string_utils.py#L26-L60
         name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
         name = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)  # HTTPRequestTool -> HTTP_RequestTool
         name = re.sub(r"([a-z])([A-Z])", r"\1_\2", name)  # HTTP_RequestTool -> HTTP_Request_Tool
         name = re.sub(r"['\"]+", "", name.lower())
         name = re.sub(r"[^a-z0-9]+", "_", name).strip("_")
+        if name[:1].isdigit():
+            name = f"_{name}"
         if len(name) > 64:  # the tool name limit of OpenAI and Bedrock: CrewAI ends a longer name with its hash
             suffix = "_" + hashlib.sha256(name.encode()).hexdigest()[:8]
             name = name[: 64 - len(suffix)].rstrip("_") + suffix
+        # CrewAI's duplicate-name handling:
+        # https://github.com/crewAIInc/crewAI/blob/96c4d85b6423dd06b7f1c38f12dd472399c6ce43/lib/crewai/src/crewai/utilities/agent_utils.py#L292-L300
+        if used_names is not None:
+            base_name = name
+            counter = 2
+            while name in used_names:
+                name = OpenTelemetryEventHandler._normalize_tool_name(f"{base_name}_{counter}")
+                counter += 1
+            used_names.add(name)
         return name
 
     @staticmethod
