@@ -1,12 +1,13 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+import os
 import time
 import unittest
 from typing import List
 from unittest.mock import MagicMock, patch
 
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor import (
-    OTEL_AWS_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH,
+    OTEL_AWS_EXPERIMENTAL_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH,
     AwsCloudWatchOtlpBatchLogRecordProcessor,
 )
 from opentelemetry._logs._internal import LogRecord
@@ -20,9 +21,16 @@ from opentelemetry.trace import TraceFlags
 from opentelemetry.util.types import AnyValue
 
 
+# pylint: disable=too-many-public-methods
 class TestAwsBatchLogRecordProcessor(unittest.TestCase):
 
     def setUp(self):
+        # Keep tests independent of the caller's environment
+        env_patcher = patch.dict("os.environ")
+        env_patcher.start()
+        self.addCleanup(env_patcher.stop)
+        os.environ.pop(OTEL_AWS_EXPERIMENTAL_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH, None)
+
         self.mock_exporter = MagicMock()
         self.mock_exporter.export.return_value = LogRecordExportResult.SUCCESS
 
@@ -74,14 +82,33 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
             self.assertLess(default_depth_size - self.processor._BASE_LOG_BUFFER_BYTE_SIZE, len(content))
 
     def test_max_log_depth_from_env_var(self):
-        """Tests that OTEL_AWS_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH=true removes the depth limit, default is 3"""
+        """Tests that OTEL_AWS_EXPERIMENTAL_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH=true removes the depth limit"""
         self.assertEqual(self.processor._max_log_depth, 3)
 
-        cases = {"true": None, " TRUE ": None, "false": 3, "": 3, "abc": 3}
+        cases = {"true": None, "TRUE": None, " true ": None, "false": 3, "": 3}
         for value, expected in cases.items():
-            with patch.dict("os.environ", {OTEL_AWS_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH: value}):
+            with patch.dict("os.environ", {OTEL_AWS_EXPERIMENTAL_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH: value}):
                 processor = AwsCloudWatchOtlpBatchLogRecordProcessor(exporter=self.mock_exporter)
                 self.assertEqual(processor._max_log_depth, expected, value)
+
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor._logger")
+    def test_max_log_depth_from_invalid_env_var(self, mock_logger):
+        """Tests that invalid values log a warning and keep the default depth"""
+        for value in ["abc", "1"]:
+            mock_logger.reset_mock()
+            with patch.dict("os.environ", {OTEL_AWS_EXPERIMENTAL_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH: value}):
+                processor = AwsCloudWatchOtlpBatchLogRecordProcessor(exporter=self.mock_exporter)
+                self.assertEqual(processor._max_log_depth, 3, value)
+                mock_logger.warning.assert_called_once()
+
+    def test_max_log_depth_from_constructor(self):
+        """Tests that an explicit unlimited_depth takes precedence over the env var"""
+        for env_value in ["true", "false"]:
+            with patch.dict("os.environ", {OTEL_AWS_EXPERIMENTAL_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH: env_value}):
+                enabled = AwsCloudWatchOtlpBatchLogRecordProcessor(exporter=self.mock_exporter, unlimited_depth=True)
+                disabled = AwsCloudWatchOtlpBatchLogRecordProcessor(exporter=self.mock_exporter, unlimited_depth=False)
+                self.assertIsNone(enabled._max_log_depth, env_value)
+                self.assertEqual(disabled._max_log_depth, 3, env_value)
 
     def test_process_log_data_with_attributes(self):
         """Tests that the processor correctly handles both body and attributes"""
@@ -279,8 +306,8 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
     @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor.set_value")
     def test_export_splits_gen_ai_logs_with_deeply_nested_content(self, _, __, ___):
         """Should split Gen AI logs into sub-batches by the size of content nested more than three levels deep
-        when OTEL_AWS_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH is true"""
-        with patch.dict("os.environ", {OTEL_AWS_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH: "true"}):
+        when OTEL_AWS_EXPERIMENTAL_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH is true"""
+        with patch.dict("os.environ", {OTEL_AWS_EXPERIMENTAL_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH: "true"}):
             processor = AwsCloudWatchOtlpBatchLogRecordProcessor(exporter=self.mock_exporter)
 
         content = "X" * (processor._MAX_LOG_REQUEST_BYTE_SIZE // 2)

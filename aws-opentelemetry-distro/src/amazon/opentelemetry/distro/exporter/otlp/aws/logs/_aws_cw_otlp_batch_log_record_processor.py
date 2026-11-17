@@ -15,8 +15,23 @@ from opentelemetry.util.types import AnyValue
 
 _logger = logging.getLogger(__name__)
 
-# Set to "true" to estimate log sizes with no depth limit instead of the default depth of 3
-OTEL_AWS_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH = "OTEL_AWS_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH"
+# Experimental, interim opt-in (default: disabled). Set to "true" to estimate log sizes with no depth limit
+# instead of the default depth of 3, for Gen AI log events whose content is nested deeper: LLOHandler events and
+# botocore Bedrock events emitted directly as logs. To be removed once all affected legacy Gen AI log paths are
+# migrated or handled correctly, including any log-emission mode kept after the migration. Tracked in
+# https://github.com/open-telemetry/opentelemetry-python-contrib/pull/5266
+OTEL_AWS_EXPERIMENTAL_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH = "OTEL_AWS_EXPERIMENTAL_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH"
+
+
+def _is_unlimited_depth_enabled() -> bool:
+    # Leading and trailing whitespace is ignored, matching other ADOT boolean env var parsers
+    value = os.environ.get(OTEL_AWS_EXPERIMENTAL_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH, "").strip().lower()
+    if value and value not in ("true", "false"):
+        _logger.warning(
+            "Invalid value for %s, expected 'true' or 'false'. Defaulting to false.",
+            OTEL_AWS_EXPERIMENTAL_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH,
+        )
+    return value == "true"
 
 
 class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
@@ -81,6 +96,8 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
         max_export_batch_size: Optional[int] = None,
         export_timeout_millis: Optional[float] = None,
         max_queue_size: Optional[int] = None,
+        *,
+        unlimited_depth: Optional[bool] = None,
     ):
 
         super().__init__(
@@ -92,9 +109,10 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
         )
 
         self._exporter = exporter
-        self._max_log_depth: Optional[int] = (
-            None if os.environ.get(OTEL_AWS_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH, "").strip().lower() == "true" else 3
-        )
+        # Explicit unlimited_depth takes precedence over OTEL_AWS_EXPERIMENTAL_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH
+        if unlimited_depth is None:
+            unlimited_depth = _is_unlimited_depth_enabled()
+        self._max_log_depth: Optional[int] = None if unlimited_depth else 3
         self._batch_processor._export = self._export
 
     def _export(self, batch_strategy: BatchExportStrategy) -> None:
@@ -177,8 +195,9 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
         Args:
             log: The Log object to calculate size for
             depth: Maximum depth to traverse in nested structures, or None for no limit (default: 3).
-                Set OTEL_AWS_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH=true to use no limit, e.g. for Gen AI logs
-                whose content is nested more than 3 levels deep.
+                Exports use no limit if the processor is created with unlimited_depth=True or with
+                OTEL_AWS_EXPERIMENTAL_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH=true, e.g. for Gen AI logs whose
+                content is nested more than 3 levels deep.
 
         Returns:
             int: The estimated size of the log object in bytes

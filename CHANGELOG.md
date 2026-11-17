@@ -11,9 +11,9 @@ For any change that affects end users of this package, please add an entry under
 If your change does not need a CHANGELOG entry, add the "skip changelog" label to your PR.
 
 ## Unreleased
-- fix: add `OTEL_AWS_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH`. Set it to `true` to count log content nested more
-  than three levels deep when splitting CloudWatch Logs OTLP export batches by size, so batches of Gen AI logs
-  no longer exceed the 1 MB request limit and get rejected. The default depth of 3 is unchanged.
+- fix: add the experimental opt-in `OTEL_AWS_EXPERIMENTAL_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH=true` to include
+  content nested beyond three levels when estimating CloudWatch Logs batch sizes. The default depth remains 3.
+  This interim workaround reduces depth-related underestimation while legacy Gen AI log paths are migrated.
   ([#944](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/944))
 
 - feat: support disabling Bedrock SDK instrumentation
