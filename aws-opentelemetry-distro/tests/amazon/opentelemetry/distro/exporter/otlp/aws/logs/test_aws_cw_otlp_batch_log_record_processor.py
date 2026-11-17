@@ -1,11 +1,13 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+import os
 import time
 import unittest
 from typing import List
 from unittest.mock import MagicMock, patch
 
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor import (
+    OTEL_AWS_EXPERIMENTAL_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH,
     AwsCloudWatchOtlpBatchLogRecordProcessor,
 )
 from opentelemetry._logs._internal import LogRecord
@@ -19,9 +21,16 @@ from opentelemetry.trace import TraceFlags
 from opentelemetry.util.types import AnyValue
 
 
+# pylint: disable=too-many-public-methods
 class TestAwsBatchLogRecordProcessor(unittest.TestCase):
 
     def setUp(self):
+        # Keep tests independent of the caller's environment
+        env_patcher = patch.dict("os.environ")
+        env_patcher.start()
+        self.addCleanup(env_patcher.stop)
+        os.environ.pop(OTEL_AWS_EXPERIMENTAL_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH, None)
+
         self.mock_exporter = MagicMock()
         self.mock_exporter.export.return_value = LogRecordExportResult.SUCCESS
 
@@ -48,6 +57,58 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
 
         self.assertEqual(dict_size - self.processor._BASE_LOG_BUFFER_BYTE_SIZE, expected_dict_size)
         self.assertEqual(array_size - self.processor._BASE_LOG_BUFFER_BYTE_SIZE, expected_array_size)
+
+    def test_process_log_data_gen_ai_content_nested_beyond_three_levels(self):
+        """Tests that the processor counts Gen AI message content nested more than three levels deep"""
+        content = "X" * 400
+        log_bodies = [
+            # Gen AI log event built by LLOHandler from a gen_ai.user.message span event
+            {"input": {"messages": [{"role": "user", "content": {"content": content}}]}},
+            # Bedrock Converse gen_ai.assistant.message log event with reasoning content
+            {"content": [{"reasoningContent": {"reasoningText": {"text": content}}}]},
+        ]
+        expected_sizes = [
+            len("input") + len("messages") + len("role") + len("user") + len("content") * 2 + len(content),
+            len("content") + len("reasoningContent") + len("reasoningText") + len("text") + len(content),
+        ]
+
+        for index, log_body in enumerate(log_bodies):
+            log = self.generate_test_log_data(log_body=log_body, count=1)
+            actual_size = self.processor._estimate_log_size(log[0], depth=None)
+            self.assertEqual(actual_size - self.processor._BASE_LOG_BUFFER_BYTE_SIZE, expected_sizes[index])
+
+            # With the default depth of 3, the deeply nested content is not counted
+            default_depth_size = self.processor._estimate_log_size(log[0])
+            self.assertLess(default_depth_size - self.processor._BASE_LOG_BUFFER_BYTE_SIZE, len(content))
+
+    def test_max_log_depth_from_env_var(self):
+        """Tests that OTEL_AWS_EXPERIMENTAL_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH=true removes the depth limit"""
+        self.assertEqual(self.processor._max_log_depth, 3)
+
+        cases = {"true": None, "TRUE": None, " true ": None, "false": 3, "": 3}
+        for value, expected in cases.items():
+            with patch.dict("os.environ", {OTEL_AWS_EXPERIMENTAL_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH: value}):
+                processor = AwsCloudWatchOtlpBatchLogRecordProcessor(exporter=self.mock_exporter)
+                self.assertEqual(processor._max_log_depth, expected, value)
+
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor._logger")
+    def test_max_log_depth_from_invalid_env_var(self, mock_logger):
+        """Tests that invalid values log a warning and keep the default depth"""
+        for value in ["abc", "1"]:
+            mock_logger.reset_mock()
+            with patch.dict("os.environ", {OTEL_AWS_EXPERIMENTAL_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH: value}):
+                processor = AwsCloudWatchOtlpBatchLogRecordProcessor(exporter=self.mock_exporter)
+                self.assertEqual(processor._max_log_depth, 3, value)
+                mock_logger.warning.assert_called_once()
+
+    def test_max_log_depth_from_constructor(self):
+        """Tests that an explicit unlimited_depth takes precedence over the env var"""
+        for env_value in ["true", "false"]:
+            with patch.dict("os.environ", {OTEL_AWS_EXPERIMENTAL_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH: env_value}):
+                enabled = AwsCloudWatchOtlpBatchLogRecordProcessor(exporter=self.mock_exporter, unlimited_depth=True)
+                disabled = AwsCloudWatchOtlpBatchLogRecordProcessor(exporter=self.mock_exporter, unlimited_depth=False)
+                self.assertIsNone(enabled._max_log_depth, env_value)
+                self.assertEqual(disabled._max_log_depth, 3, env_value)
 
     def test_process_log_data_with_attributes(self):
         """Tests that the processor correctly handles both body and attributes"""
@@ -236,6 +297,34 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
             batch = call[0][0]
             expected_size = expected_sizes[index]
             self.assertEqual(len(batch), expected_size)
+
+    @patch(
+        "amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor.attach",
+        return_value=MagicMock(),
+    )
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor.detach")
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor.set_value")
+    def test_export_splits_gen_ai_logs_with_deeply_nested_content(self, _, __, ___):
+        """Should split Gen AI logs into sub-batches by the size of content nested more than three levels deep
+        when OTEL_AWS_EXPERIMENTAL_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH is true"""
+        with patch.dict("os.environ", {OTEL_AWS_EXPERIMENTAL_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH: "true"}):
+            processor = AwsCloudWatchOtlpBatchLogRecordProcessor(exporter=self.mock_exporter)
+
+        content = "X" * (processor._MAX_LOG_REQUEST_BYTE_SIZE // 2)
+        log_body = {"input": {"messages": [{"role": "user", "content": {"content": content}}]}}
+        test_logs = self.generate_test_log_data(log_body=log_body, count=3)
+
+        for log in test_logs:
+            processor._batch_processor._queue.appendleft(log)
+
+        processor._export(batch_strategy=BatchExportStrategy.EXPORT_ALL)
+
+        self.assertEqual(len(processor._batch_processor._queue), 0)
+        self.assertEqual(self.mock_exporter.export.call_count, len(test_logs))
+
+        for call in self.mock_exporter.export.call_args_list:
+            batch = call[0][0]
+            self.assertEqual(len(batch), 1)
 
     def test_force_flush_returns_false_when_shutdown(self):
         """Tests that force_flush returns False when processor is shutdown"""

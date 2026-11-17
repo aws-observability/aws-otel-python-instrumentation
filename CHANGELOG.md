@@ -13,11 +13,35 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 ## Unreleased
 - fix(langchain): record each tool call once when it appears in both message content and the tool call list
   ([#968](https://github.com/aws-observability/aws-otel-python-instrumentation/issues/968))
+- fix(crewai): record full tool definitions (name, description, and parameters) on CrewAI `chat`,
+  `invoke_agent`, and `invoke_workflow` spans
+  ([#972](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/972))
+- fix: add the experimental opt-in `OTEL_AWS_EXPERIMENTAL_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH=true` to include
+  content nested beyond three levels when estimating CloudWatch Logs batch sizes. The default depth remains 3.
+  This interim workaround reduces depth-related underestimation while legacy Gen AI log paths are migrated.
+  ([#944](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/944))
+
+- feat: support disabling Bedrock SDK instrumentation
+  Setting `OTEL_PYTHON_DISABLED_INSTRUMENTATIONS=bedrock` skips SDK telemetry from Bedrock GenAI operations
+  in botocore and aiobotocore, while keeping AgentCore and other AWS services instrumented.
+  ([#976](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/976))
+- fix(langchain): resolve response model and ID from generation metadata
+  ([#974](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/974))
+- feat: add CrewAI LiteAgent support. The CrewAI instrumentor now handles the `LiteAgentExecution*` events emitted
+  by standalone `Agent.kickoff()` / `kickoff_async()`, so these runs produce an `invoke_agent` span and their LLM
+  and tool spans stay in the caller's trace instead of each starting a new trace.
+  ([#955](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/955))
+- fix: prevent the GenAI nested CLIENT span processor from retaining state for remote or untracked parents,
+  abandoned spans, or children that end after their parents.
+  ([#971](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/971))
 - fix: CrewAI error spans now set `error.type` to the exception class (for example `TimeoutError`), or `_OTHER`
   when it is unknown, instead of the full error message. The message could contain task descriptions, tool
   arguments or provider details, and made `error.type` unusable for grouping errors. The message is still
   recorded as the span status description.
   ([#962](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/962))
+- fix(langchain): record `gen_ai.tool.definitions` (name, description, and parameters) on LangChain/LangGraph
+  LLM spans for tools bound to the model, matching the upstream OpenTelemetry LangChain instrumentation
+  ([#966](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/966))
 - fix: in Lambda, treat `OTEL_EXPORTER_OTLP_ENDPOINT` as a custom trace endpoint, as the OTLP exporter
   spec requires. Setting only the generic endpoint previously fell back to the X-Ray UDP exporter, so
   traces never reached the configured collector

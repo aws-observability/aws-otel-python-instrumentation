@@ -1,8 +1,12 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+# pylint: disable=too-many-lines
 
+import ast
+import hashlib
 import re
 import sys
+import unicodedata
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
@@ -13,6 +17,7 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
     DictWithLock,
     content_to_parts,
     first_not_none,
+    get_value,
     serialize_to_json_string,
     skip_instrumentation_if_suppressed,
     to_tool_attribute_value,
@@ -66,6 +71,9 @@ if TYPE_CHECKING:
         AgentExecutionCompletedEvent,
         AgentExecutionErrorEvent,
         AgentExecutionStartedEvent,
+        LiteAgentExecutionCompletedEvent,
+        LiteAgentExecutionErrorEvent,
+        LiteAgentExecutionStartedEvent,
     )
     from crewai.events.types.crew_events import (
         CrewKickoffCompletedEvent,
@@ -116,12 +124,20 @@ class _EventBusEmitWrapper:
 
 class OpenTelemetryEventHandler:
 
-    def __init__(self, tracer: trace.Tracer) -> None:
+    def __init__(self, tracer: trace.Tracer) -> None:  # pylint: disable=too-many-locals
         # pylint: disable=import-outside-toplevel
+        # CrewAI lets users run an agent with Agent.kickoff() without it belonging to a Crew. Those runs emit
+        # LiteAgentExecution* events instead of AgentExecution* events, see:
+        # https://docs.crewai.com/v1.15.35/en/concepts/agents#direct-agent-interaction-with-kickoff
+        # TODO: crewai 2.0 removes the deprecated LiteAgent class. When adding crewai 2.x support, check
+        # whether Agent.kickoff() still emits these events (or renamed them) and update these handlers.
         from crewai.events.types.agent_events import (
             AgentExecutionCompletedEvent,
             AgentExecutionErrorEvent,
             AgentExecutionStartedEvent,
+            LiteAgentExecutionCompletedEvent,
+            LiteAgentExecutionErrorEvent,
+            LiteAgentExecutionStartedEvent,
         )
         from crewai.events.types.crew_events import (
             CrewKickoffCompletedEvent,
@@ -154,6 +170,9 @@ class OpenTelemetryEventHandler:
             LLMCallStartedEvent: self._on_llm_start,
             LLMCallCompletedEvent: self._on_llm_completed,
             LLMCallFailedEvent: self._on_llm_failed,
+            LiteAgentExecutionStartedEvent: self._on_lite_agent_started,
+            LiteAgentExecutionCompletedEvent: self._on_lite_agent_completed,
+            LiteAgentExecutionErrorEvent: self._on_lite_agent_error,
         }
 
     @skip_instrumentation_if_suppressed
@@ -170,7 +189,9 @@ class OpenTelemetryEventHandler:
             if event_id and parent_entry:
                 self._event_id_to_span.put(event_id, parent_entry)
 
-    def _on_crew_start(self, source: "Crew", event: "CrewKickoffStartedEvent") -> None:
+    def _on_crew_start(  # pylint: disable=too-many-locals,too-many-branches
+        self, source: "Crew", event: "CrewKickoffStartedEvent"
+    ) -> None:
         crew_name = getattr(source, "name", None)
         span_name = f"{OPERATION_INVOKE_WORKFLOW} {crew_name}" if crew_name else OPERATION_INVOKE_WORKFLOW
         attributes: Dict[str, Any] = {
@@ -181,15 +202,49 @@ class OpenTelemetryEventHandler:
         if hasattr(source, "id"):
             attributes[GEN_AI_AGENT_ID] = str(source.id)
 
+        seen_tool_ids = set()
+        crew_tool_definitions = []
+
         agents = getattr(source, "agents", [])
         if agents:
-            all_tools = []
             for agent in agents:
-                all_tools.extend(getattr(agent, "tools", []) or [])
-            if all_tools:
-                tool_defs = self._extract_tool_definitions(all_tools)
-                if tool_defs:
-                    attributes[GEN_AI_TOOL_DEFINITIONS] = serialize_to_json_string(tool_defs)
+                tools = getattr(agent, "tools", []) or []
+
+                # Resolve names separately for this agent's tool list.
+                tool_definitions = self._extract_tool_definitions(tools)
+
+                for tool_index, tool in enumerate(tools):
+                    tool_id = id(tool)
+
+                    # The same tool object may be shared by several agents or tasks.
+                    if tool_id in seen_tool_ids:
+                        continue
+
+                    seen_tool_ids.add(tool_id)
+                    tool_definition = tool_definitions[tool_index]
+                    crew_tool_definitions.append(tool_definition)
+
+        tasks = getattr(source, "tasks", [])
+        if tasks:
+            for task in tasks:
+                tools = getattr(task, "tools", []) or []
+
+                # Resolve names separately for this task's tool list.
+                tool_definitions = self._extract_tool_definitions(tools)
+
+                for tool_index, tool in enumerate(tools):
+                    tool_id = id(tool)
+
+                    # Skip tool objects already added from an agent or another task.
+                    if tool_id in seen_tool_ids:
+                        continue
+
+                    seen_tool_ids.add(tool_id)
+                    tool_definition = tool_definitions[tool_index]
+                    crew_tool_definitions.append(tool_definition)
+
+        if crew_tool_definitions:
+            attributes[GEN_AI_TOOL_DEFINITIONS] = serialize_to_json_string(crew_tool_definitions, max_depth=sys.maxsize)
 
         self._start_span(
             span_name,
@@ -258,6 +313,14 @@ class OpenTelemetryEventHandler:
                 [{"role": "user", "parts": content_to_parts(task_prompt)}]
             )
 
+        # AgentExecutionStartedEvent.tools only has the agent's configured tools. CrewAI creates the agent executor
+        # for this execution before emitting the event, with every tool its LLM calls receive: the task's (or
+        # agent's) tools plus those CrewAI adds, such as delegation, code execution, and MCP tools.
+        executor = getattr(agent, "agent_executor", None)
+        tool_defs = self._extract_tool_definitions(getattr(executor, "tools", None) or [])
+        if tool_defs:
+            attributes[GEN_AI_TOOL_DEFINITIONS] = serialize_to_json_string(tool_defs, max_depth=sys.maxsize)
+
         self._start_span(span_name, event.event_id, attributes, self._get_parent_event_id(event))
         if agent_entry := self._event_id_to_span.get(event.event_id):
             self._event_id_to_span.put(self._get_task_or_agent_id(event), agent_entry)
@@ -283,6 +346,96 @@ class OpenTelemetryEventHandler:
         task_or_agent_id = self._get_task_or_agent_id(event)
         self._end_span(
             task_or_agent_id if self._event_id_to_span.get(task_or_agent_id) else event.started_event_id,
+            error=getattr(event, "error", None),
+        )
+
+    # LiteAgent will be deprecated starting in version 2.0.0
+    # https://github.com/crewAIInc/crewAI/blob/main/lib/crewai/src/crewai/lite_agent.py
+    #
+    # LiteAgent exists so you can invoke an agent without building a Crew or a Task.
+    # It is only used by Agent.kickoff().
+    # They carry less than crew agent events (no task, agent info as a plain dict), so this span is started
+    # as its own root and paired with its end event by started_event_id.
+    def _on_lite_agent_started(  # pylint: disable=too-many-branches,too-many-locals
+        self, source: "BaseAgent", event: "LiteAgentExecutionStartedEvent"
+    ) -> None:
+        agent = source
+        agent_role = getattr(agent, "role", None) if agent else None
+        span_name = (
+            f"{GenAiOperationNameValues.INVOKE_AGENT.value} {agent_role}"
+            if agent_role
+            else GenAiOperationNameValues.INVOKE_AGENT.value
+        )
+        attributes: Dict[str, Any] = {
+            GEN_AI_OPERATION_NAME: GenAiOperationNameValues.INVOKE_AGENT.value,
+        }
+        if agent:
+            if agent_role:
+                attributes[GEN_AI_AGENT_NAME] = agent_role
+            if hasattr(agent, "id"):
+                attributes[GEN_AI_AGENT_ID] = str(agent.id)
+            goal = getattr(agent, "goal", None)
+            if goal:
+                attributes[GEN_AI_AGENT_DESCRIPTION] = goal
+
+            llm = getattr(agent, "llm", None)
+            provider, model = self._extract_provider_and_model(llm)
+            if provider:
+                attributes[GEN_AI_PROVIDER_NAME] = provider
+            if model:
+                attributes[GEN_AI_REQUEST_MODEL] = model
+            if llm:
+                self._set_llm_request_span_attributes(attributes, llm)
+
+        messages = getattr(event, "messages", None)
+        if messages:
+            if isinstance(messages, str):
+                messages = [{"role": "user", "content": messages}]
+            attributes[GEN_AI_INPUT_MESSAGES] = serialize_to_json_string(
+                [self._to_input_message(m) for m in messages if isinstance(m, dict)]
+            )
+
+        # LiteAgentExecutionStartedEvent.tools has every tool the kickoff's LLM calls receive
+        tools = first_not_none(getattr(event, "tools", None), getattr(agent, "tools", None)) or []
+        tool_defs = self._extract_tool_definitions(tools)
+        if tool_defs:
+            attributes[GEN_AI_TOOL_DEFINITIONS] = serialize_to_json_string(tool_defs, max_depth=sys.maxsize)
+
+        # Agent.kickoff() runs an agent on its own, without a Crew or Task, and emits LiteAgentExecution* events:
+        # https://docs.crewai.com/v1.15.35/en/concepts/agents#direct-agent-interaction-with-kickoff
+        # Unlike _on_agent_start, this passes its own root_event_id so _end_spans_for_root_event ends this span and
+        # its children when the kickoff completes. When kickoff() runs inside a crew (from a tool or a Task string
+        # guardrail), inheriting the crew's root would leave this span open until the crew ends.
+        self._start_span(
+            span_name, event.event_id, attributes, self._get_parent_event_id(event), root_event_id=event.event_id
+        )
+        # like _on_agent_start, so events that lose their CrewAI parent (e.g. native tool calls) still find this span
+        if agent_entry := self._event_id_to_span.get(event.event_id):
+            if agent_id := getattr(source, "id", None):
+                self._event_id_to_span.put(str(agent_id), agent_entry)
+
+    def _on_lite_agent_completed(
+        self, source: "BaseAgent", event: "LiteAgentExecutionCompletedEvent"  # pylint: disable=unused-argument
+    ) -> None:
+        output = getattr(event, "output", None)
+        agent_entry = self._event_id_to_span.get(event.started_event_id)
+        if output and agent_entry:
+            agent_entry.span.set_attribute(
+                GEN_AI_OUTPUT_MESSAGES,
+                serialize_to_json_string(
+                    [{"role": "assistant", "parts": content_to_parts(output), "finish_reason": "stop"}]
+                ),
+            )
+        # like _on_crew_completed, end by the entry's root: if CrewAI mis-pairs this event with a child start left
+        # open on its scope stack, started_event_id is that child's ID, whose root is still this agent span
+        self._end_spans_for_root_event(agent_entry.root_event_id if agent_entry else event.started_event_id)
+
+    def _on_lite_agent_error(
+        self, source: "BaseAgent", event: "LiteAgentExecutionErrorEvent"
+    ) -> None:  # pylint: disable=unused-argument
+        agent_entry = self._event_id_to_span.get(event.started_event_id)
+        self._end_spans_for_root_event(
+            agent_entry.root_event_id if agent_entry else event.started_event_id,
             error=getattr(event, "error", None),
         )
 
@@ -370,6 +523,9 @@ class OpenTelemetryEventHandler:
                 )
 
         parent_event_id = self._get_parent_event_id(event)
+        if tool_defs := self._llm_call_tool_definitions(event):
+            attributes[GEN_AI_TOOL_DEFINITIONS] = serialize_to_json_string(tool_defs, max_depth=sys.maxsize)
+
         self._start_span(
             span_name,
             event.event_id,
@@ -825,22 +981,143 @@ class OpenTelemetryEventHandler:
         return None
 
     @staticmethod
+    def _llm_call_tool_definitions(event: "LLMCallStartedEvent") -> list:
+        # event.tools has the tools sent on this call, in OpenAI function format
+        tool_defs = []
+        for tool in getattr(event, "tools", None) or []:
+            function = get_value(tool, "function") or {}
+            if not (name := get_value(function, "name")):
+                continue
+            tool_def: Dict[str, Any] = {"type": "function", "name": name}
+            if description := get_value(function, "description"):
+                tool_def["description"] = description
+            parameters = OpenTelemetryEventHandler._normalize_tool_parameters(get_value(function, "parameters"))
+            if parameters is not None:
+                tool_def["parameters"] = parameters
+            tool_defs.append(tool_def)
+        return tool_defs
+
+    @staticmethod
     def _extract_tool_definitions(tools: Any) -> list:
         defs = []
+        used_names = set()
         for tool in tools:
             tool_def: Dict[str, Any] = {"type": "function"}
             if name := getattr(tool, "name", None):
-                tool_def["name"] = name
-            if desc := OpenTelemetryEventHandler._normalize_tool_description(getattr(tool, "description", None)):
-                tool_def["description"] = desc
-            args_schema = getattr(tool, "args_schema", None)
-            if args_schema is not None:
-                try:
-                    tool_def["parameters"] = args_schema.model_json_schema()
-                except Exception:  # pylint: disable=broad-exception-caught
-                    pass
+                tool_def["name"] = OpenTelemetryEventHandler._normalize_tool_name(name, used_names)
+            description = OpenTelemetryEventHandler._normalize_tool_description(getattr(tool, "description", None))
+            if description:
+                tool_def["description"] = description
+            parameters = OpenTelemetryEventHandler._normalize_tool_parameters(getattr(tool, "args_schema", None))
+            if parameters is not None:
+                tool_def["parameters"] = parameters
             defs.append(tool_def)
         return defs
+
+    @staticmethod
+    def _normalize_tool_parameters(  # pylint: disable=too-many-branches
+        parameters: Any,
+    ) -> Optional[Dict[str, Any]]:
+        # A tool's parameters as a JSON schema, from its Pydantic args_schema or a schema dictionary
+        if isinstance(parameters, type) and hasattr(parameters, "model_json_schema"):
+            try:
+                parameters = parameters.model_json_schema()
+            except Exception:  # pylint: disable=broad-exception-caught
+                return None
+        if not isinstance(parameters, dict):
+            return None
+        # CrewAI passes LLMCallStartedEvent.tools through to_serializable(max_depth=5), which replaces every value two
+        # levels inside the schema with its repr(). Detect strings where JSON Schema requires schemas or collections;
+        # schemas can use references, composition, or additionalProperties without defining properties.
+        # Authored strings in intact schemas (for example enum values) must not be interpreted as Python literals.
+        serialized = False
+        for key in (
+            "properties",
+            "patternProperties",
+            "$defs",
+            "definitions",
+            "dependentSchemas",
+            "allOf",
+            "anyOf",
+            "oneOf",
+            "prefixItems",
+        ):
+            schemas = parameters.get(key)
+            if isinstance(schemas, dict):
+                schema_values = schemas.values()
+            elif isinstance(schemas, list):
+                schema_values = schemas
+            else:
+                continue
+
+            if any(isinstance(schema_value, str) for schema_value in schema_values):
+                serialized = True
+                break
+        for key in ("additionalProperties", "unevaluatedProperties", "items", "contains", "not", "if", "then", "else"):
+            schema = parameters.get(key)
+            if isinstance(schema, dict):
+                schema_type = schema.get("type")
+                serialized = (
+                    serialized
+                    or (isinstance(schema_type, str) and schema_type.startswith(("'", '"')))
+                    or any(
+                        isinstance(schema.get(field), str)
+                        for field in (
+                            "properties",
+                            "patternProperties",
+                            "$defs",
+                            "definitions",
+                            "dependentSchemas",
+                            "allOf",
+                            "anyOf",
+                            "oneOf",
+                            "prefixItems",
+                            "required",
+                            "enum",
+                        )
+                    )
+                )
+        if not serialized:
+            return parameters
+        # literal_eval reverses repr() for JSON values. Unrecoverable values, such as inf or nan, drop parameters.
+        restored = {}
+        try:
+            for key, value in parameters.items():
+                if isinstance(value, dict):  # e.g. properties: each property's schema is a repr() string
+                    value = {k: ast.literal_eval(v) for k, v in value.items()}
+                elif isinstance(value, list):  # e.g. required: each name is a repr() string
+                    value = [ast.literal_eval(v) for v in value]
+                restored[key] = value  # any other value, e.g. type, was never serialized
+        except Exception:  # pylint: disable=broad-exception-caught
+            return None
+        return restored
+
+    @staticmethod
+    def _normalize_tool_name(name: str, used_names: Optional[set[str]] = None) -> str:
+        # The name CrewAI sends the model for a tool, as crewai.utilities.string_utils.sanitize_tool_name (1.10.1+)
+        # makes it, so crew and agent spans name tools as chat and execute_tool spans do
+        # Reference from CrewAI main:
+        # https://github.com/crewAIInc/crewAI/blob/96c4d85b6423dd06b7f1c38f12dd472399c6ce43/lib/crewai/src/crewai/utilities/string_utils.py#L26-L60
+        name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
+        name = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)  # HTTPRequestTool -> HTTP_RequestTool
+        name = re.sub(r"([a-z])([A-Z])", r"\1_\2", name)  # HTTP_RequestTool -> HTTP_Request_Tool
+        name = re.sub(r"['\"]+", "", name.lower())
+        name = re.sub(r"[^a-z0-9]+", "_", name).strip("_")
+        if name[:1].isdigit():
+            name = f"_{name}"
+        if len(name) > 64:  # the tool name limit of OpenAI and Bedrock: CrewAI ends a longer name with its hash
+            suffix = "_" + hashlib.sha256(name.encode()).hexdigest()[:8]
+            name = name[: 64 - len(suffix)].rstrip("_") + suffix
+        # CrewAI's duplicate-name handling:
+        # https://github.com/crewAIInc/crewAI/blob/96c4d85b6423dd06b7f1c38f12dd472399c6ce43/lib/crewai/src/crewai/utilities/agent_utils.py#L292-L300
+        if used_names is not None:
+            base_name = name
+            counter = 2
+            while name in used_names:
+                name = OpenTelemetryEventHandler._normalize_tool_name(f"{base_name}_{counter}")
+                counter += 1
+            used_names.add(name)
+        return name
 
     @staticmethod
     def _normalize_tool_description(desc: Optional[str]) -> Optional[str]:
