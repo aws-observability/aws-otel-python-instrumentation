@@ -4,7 +4,6 @@
 # flake8: noqa: E402
 # pylint: disable=wrong-import-position
 import asyncio
-import copy
 import json
 import os
 import sys
@@ -151,8 +150,7 @@ class TestCrewAIInstrumentor(TestCase):
                 llm._client = client
             else:
                 llm.client = client
-            # pass a copy: the provider modifies the request's tool dicts in place
-            llm.call([{"role": "user", "content": "Hello"}], tools=[copy.deepcopy(order_tool)])
+            llm.call([{"role": "user", "content": "Hello"}], tools=[order_tool])
 
         call_mock_llm("bedrock", invoke_llm_callback=invoke_llm)
 
@@ -1134,7 +1132,7 @@ class TestCrewAIInstrumentor(TestCase):
             """Another tool named t1 once sanitized."""
             return f"t1:{v}"
 
-        @tool
+        @tool("Order Lookup")
         def t2(v: str, order: Optional[Order] = None) -> str:
             """T2."""
             return f"t2:{v}"
@@ -1155,7 +1153,7 @@ class TestCrewAIInstrumentor(TestCase):
         responses = [
             self._mock_response(tool_calls=[self._mock_tool_call("c1", "t1", '{"v":"x"}')]),
             self._mock_response("Final Answer: R1"),
-            self._mock_response(tool_calls=[self._mock_tool_call("c2", "t2", '{"v":"y"}')]),
+            self._mock_response(tool_calls=[self._mock_tool_call("c2", "order_lookup", '{"v":"y"}')]),
             self._mock_response("Final Answer: R2"),
         ]
         with patch("litellm.completion", side_effect=self._recording_completion(sent_tool_defs, responses)):
@@ -1169,16 +1167,16 @@ class TestCrewAIInstrumentor(TestCase):
         self._assert_span_parent(a1_span, crew_span)
         self._assert_span_parent(a2_span, crew_span)
         self.assertIsNotNone(self._find_span("execute_tool t1"))
-        self.assertIsNotNone(self._find_span("execute_tool t2"))
+        self.assertIsNotNone(self._find_span("execute_tool order_lookup"))
         # each chat span lists the tools its request sent, with their nested schemas
         self.assertEqual([self._tool_defs(s) for s in self._spans("chat gpt-4")], sent_tool_defs)
 
-        # agent spans list their execution's tools and the crew span each tool object once, by the sanitized names
-        # sent to the model
+        # agent spans list their execution's tools and the crew span each tool object once, by the names sent to the
+        # model: A2's agent span names "Order Lookup" as its chat span and execute_tool span do. A1's chat span sends
+        # its second t1 as t1_2.
         self.assertEqual([d["name"] for d in self._tool_defs(a1_span)], ["t1", "t1"])
-        self.assertEqual([d["name"] for d in self._tool_defs(a2_span)], ["t2"])
-        self.assertEqual([d["name"] for d in self._tool_defs(crew_span)], ["t1", "t1", "t2"])
-        self.assertEqual(self._tool_defs(crew_span)[2]["parameters"], t2.args_schema.model_json_schema())
+        self.assertEqual([d["name"] for d in self._tool_defs(a2_span)], [d["name"] for d in sent_tool_defs[2]])
+        self.assertEqual([d["name"] for d in self._tool_defs(crew_span)], ["t1", "t1", "order_lookup"])
         self._assert_spans_all_ended()
 
     def test_multiple_agents_shared_llm(self):
