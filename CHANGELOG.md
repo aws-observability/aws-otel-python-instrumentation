@@ -11,6 +11,13 @@ For any change that affects end users of this package, please add an entry under
 If your change does not need a CHANGELOG entry, add the "skip changelog" label to your PR.
 
 ## Unreleased
+- fix(crewai): record full tool definitions (name, description, and parameters) on CrewAI `chat`,
+  `invoke_agent`, and `invoke_workflow` spans
+  ([#972](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/972))
+- fix: add the experimental opt-in `OTEL_AWS_EXPERIMENTAL_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH=true` to include
+  content nested beyond three levels when estimating CloudWatch Logs batch sizes. The default depth remains 3.
+  This interim workaround reduces depth-related underestimation while legacy Gen AI log paths are migrated.
+  ([#944](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/944))
 
 - feat: support disabling Bedrock SDK instrumentation
   Setting `OTEL_PYTHON_DISABLED_INSTRUMENTATIONS=bedrock` skips SDK telemetry from Bedrock GenAI operations
