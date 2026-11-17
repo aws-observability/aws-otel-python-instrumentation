@@ -535,7 +535,8 @@ def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource, sa
     traces_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)
     if is_lambda_environment():
         # Override OTLP http default endpoint to UDP
-        if isinstance(span_exporter, OTLPSpanExporter) and traces_endpoint is None:
+        # Check for custom endpoint using both signal-specific and generic env vars per OTel spec
+        if isinstance(span_exporter, OTLPSpanExporter) and not _has_custom_otlp_traces_endpoint():
             traces_endpoint = os.environ.get(AWS_XRAY_DAEMON_ADDRESS_CONFIG, "127.0.0.1:2000")
             span_exporter = OTLPUdpSpanExporter(endpoint=traces_endpoint)
 
@@ -875,6 +876,18 @@ def _is_sigv4_disabled_by_configured_auth(signal_headers_env_var: str) -> bool:
         )
 
     return False
+
+
+def _has_custom_otlp_traces_endpoint():
+    """Check if a custom OTLP traces endpoint is configured.
+
+    Per OpenTelemetry OTLP Exporter specification, check for signal-specific
+    endpoint first, then fall back to generic endpoint.
+    """
+    return (
+        os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT) is not None
+        or os.environ.get(OTEL_EXPORTER_OTLP_ENDPOINT) is not None
+    )
 
 
 def _is_aws_otlp_endpoint(otlp_endpoint: Optional[str], service: str) -> bool:

@@ -66,7 +66,8 @@ class _JsonEncoder(json.JSONEncoder):
 
 class DictWithLock:
     def __init__(self):
-        self._lock = threading.Lock()
+        # Allow weak-reference cleanup to acquire the lock during garbage collection.
+        self._lock = threading.RLock()
         self._data: Dict[Any, Any] = {}
 
     def get(self, key: Any) -> Any:
@@ -76,6 +77,19 @@ class DictWithLock:
     def put(self, key: Any, value: Any) -> None:
         with self._lock:
             self._data[key] = value
+
+    def update_if_present(self, key: Any, updater: Callable[[Any], None]) -> bool:
+        """Update an existing value in place while holding the lock.
+
+        The updater must not call methods on this DictWithLock instance.
+        """
+        with self._lock:
+            try:
+                value = self._data[key]
+            except KeyError:
+                return False
+            updater(value)
+            return True
 
     def pop(self, key: Any) -> Any:
         with self._lock:
@@ -93,6 +107,16 @@ class DictWithLock:
                     matching_items.append((key, value))
                     del self._data[key]
             return matching_items
+
+    def get_dict(self, value_mapper: Callable[[Any], Any]) -> Dict[Any, Any]:
+        """Copy entries with their values transformed while holding the lock.
+
+        The value mapper must not call methods on this DictWithLock instance.
+        """
+        with self._lock:
+            # Copy entries before the mapper can trigger weak-reference cleanup.
+            entries = self._data.copy()
+            return {key: value_mapper(value) for key, value in entries.items()}
 
     def clear(self) -> None:
         with self._lock:
@@ -124,6 +148,7 @@ def get_value(source: Any, name: str) -> Any:
 
 
 def serialize_to_json_string(value: Any, max_depth: int = 10) -> str:
+    # Values nested deeper than max_depth are replaced with "..."; pass sys.maxsize for no practical limit.
     json_safe_types = (str, int, float, bool, bytes, dict, list, tuple, type(None))
 
     def _sanitize(obj: Any, depth: int) -> Any:
@@ -139,6 +164,9 @@ def serialize_to_json_string(value: Any, max_depth: int = 10) -> str:
         return json.dumps(_sanitize(value, max_depth), default=lambda o: b64encode(o).decode())
     except (TypeError, ValueError):
         return str(value)
+    except RecursionError:
+        # With a very large max_depth, a value that contains itself recurses until Python's recursion limit.
+        return '"..."'
 
 
 def to_tool_attribute_value(value: Any) -> Union[str, int, float, bool, bytes, None]:
