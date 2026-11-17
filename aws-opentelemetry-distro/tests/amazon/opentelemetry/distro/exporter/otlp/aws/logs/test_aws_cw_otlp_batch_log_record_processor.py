@@ -6,6 +6,7 @@ from typing import List
 from unittest.mock import MagicMock, patch
 
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor import (
+    OTEL_AWS_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH,
     AwsCloudWatchOtlpBatchLogRecordProcessor,
 )
 from opentelemetry._logs._internal import LogRecord
@@ -65,8 +66,22 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
 
         for index, log_body in enumerate(log_bodies):
             log = self.generate_test_log_data(log_body=log_body, count=1)
-            actual_size = self.processor._estimate_log_size(log[0])
+            actual_size = self.processor._estimate_log_size(log[0], depth=None)
             self.assertEqual(actual_size - self.processor._BASE_LOG_BUFFER_BYTE_SIZE, expected_sizes[index])
+
+            # With the default depth of 3, the deeply nested content is not counted
+            default_depth_size = self.processor._estimate_log_size(log[0])
+            self.assertLess(default_depth_size - self.processor._BASE_LOG_BUFFER_BYTE_SIZE, len(content))
+
+    def test_max_log_depth_from_env_var(self):
+        """Tests that OTEL_AWS_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH=true removes the depth limit, default is 3"""
+        self.assertEqual(self.processor._max_log_depth, 3)
+
+        cases = {"true": None, " TRUE ": None, "false": 3, "": 3, "abc": 3}
+        for value, expected in cases.items():
+            with patch.dict("os.environ", {OTEL_AWS_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH: value}):
+                processor = AwsCloudWatchOtlpBatchLogRecordProcessor(exporter=self.mock_exporter)
+                self.assertEqual(processor._max_log_depth, expected, value)
 
     def test_process_log_data_with_attributes(self):
         """Tests that the processor correctly handles both body and attributes"""
@@ -263,17 +278,21 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
     @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor.detach")
     @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor.set_value")
     def test_export_splits_gen_ai_logs_with_deeply_nested_content(self, _, __, ___):
-        """Should split Gen AI logs into sub-batches by the size of content nested more than three levels deep"""
-        content = "X" * (self.processor._MAX_LOG_REQUEST_BYTE_SIZE // 2)
+        """Should split Gen AI logs into sub-batches by the size of content nested more than three levels deep
+        when OTEL_AWS_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH is true"""
+        with patch.dict("os.environ", {OTEL_AWS_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH: "true"}):
+            processor = AwsCloudWatchOtlpBatchLogRecordProcessor(exporter=self.mock_exporter)
+
+        content = "X" * (processor._MAX_LOG_REQUEST_BYTE_SIZE // 2)
         log_body = {"input": {"messages": [{"role": "user", "content": {"content": content}}]}}
         test_logs = self.generate_test_log_data(log_body=log_body, count=3)
 
         for log in test_logs:
-            self.processor._batch_processor._queue.appendleft(log)
+            processor._batch_processor._queue.appendleft(log)
 
-        self.processor._export(batch_strategy=BatchExportStrategy.EXPORT_ALL)
+        processor._export(batch_strategy=BatchExportStrategy.EXPORT_ALL)
 
-        self.assertEqual(len(self.processor._batch_processor._queue), 0)
+        self.assertEqual(len(processor._batch_processor._queue), 0)
         self.assertEqual(self.mock_exporter.export.call_count, len(test_logs))
 
         for call in self.mock_exporter.export.call_args_list:

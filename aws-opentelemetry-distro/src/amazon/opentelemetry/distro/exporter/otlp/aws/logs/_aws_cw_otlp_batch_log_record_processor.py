@@ -3,6 +3,7 @@
 # Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
 
 import logging
+import os
 from typing import Mapping, Optional, Sequence, cast
 
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_log_record_exporter import OTLPAwsLogRecordExporter
@@ -13,6 +14,9 @@ from opentelemetry.sdk._shared_internal import BatchExportStrategy
 from opentelemetry.util.types import AnyValue
 
 _logger = logging.getLogger(__name__)
+
+# Set to "true" to estimate log sizes with no depth limit instead of the default depth of 3
+OTEL_AWS_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH = "OTEL_AWS_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH"
 
 
 class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
@@ -88,6 +92,9 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
         )
 
         self._exporter = exporter
+        self._max_log_depth: Optional[int] = (
+            None if os.environ.get(OTEL_AWS_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH, "").strip().lower() == "true" else 3
+        )
         self._batch_processor._export = self._export
 
     def _export(self, batch_strategy: BatchExportStrategy) -> None:
@@ -117,7 +124,7 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
 
                     for _ in range(batch_length):
                         log_data: ReadableLogRecord = self._batch_processor._queue.pop()
-                        log_size = self._estimate_log_size(log_data)
+                        log_size = self._estimate_log_size(log_data, depth=self._max_log_depth)
 
                         if batch and (batch_data_size + log_size > self._MAX_LOG_REQUEST_BYTE_SIZE):
                             self._exporter.export(batch)
@@ -134,40 +141,44 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
                 detach(token)
 
     def _estimate_log_size(  # pylint: disable=too-many-branches
-        self, log: ReadableLogRecord, depth: Optional[int] = None
+        self, log: ReadableLogRecord, depth: Optional[int] = 3
     ) -> int:
         """
         Estimates the size in bytes of a log by calculating the size of its body and its attributes
         and adding a buffer amount to account for other log metadata information.
 
         Features:
-        - Processes complex log structures, optionally up to the specified depth limit
+        - Processes complex log structures up to the specified depth limit
         - Includes cycle detection to prevent processing the same content more than once
         - Returns truncated calculation if depth limit is exceeded
 
-        There is no depth limit by default, since Gen AI log event content can be nested arbitrarily deep.
-        For example, LLOHandler builds the following body from a gen_ai.user.message span event,
-        where the message content is 5 levels deep:
+        We set depth to 3 as this is the minimum required depth to estimate our consolidated Gen AI log events:
 
         Example structure:
         {
+            "output": {
+                "messages": [
+                    {
+                        "content": "Hello, World!",
+                        "role": "assistant"
+                    }
+                ]
+            },
             "input": {
                 "messages": [
                     {
-                        "content": {
-                            "content": "Say Hello, World!"
-                        },
+                        "content": "Say Hello, World!",
                         "role": "user"
                     }
                 ]
             }
         }
 
-        The calculation already stops once the size reaches _MAX_LOG_REQUEST_BYTE_SIZE.
-
         Args:
             log: The Log object to calculate size for
-            depth: Maximum depth to traverse in nested structures (default: None, no limit)
+            depth: Maximum depth to traverse in nested structures, or None for no limit (default: 3).
+                Set OTEL_AWS_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH=true to use no limit, e.g. for Gen AI logs
+                whose content is nested more than 3 levels deep.
 
         Returns:
             int: The estimated size of the log object in bytes
