@@ -10,7 +10,8 @@ import sys
 import threading
 import time
 import unittest
-from typing import Any, Dict, Optional, Sequence
+from copy import deepcopy
+from typing import Annotated, Any, Callable, Dict, Literal, Optional, Sequence, Union
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
@@ -26,6 +27,7 @@ from crewai.events.types.llm_events import LLMCallCompletedEvent, LLMCallFailedE
 from crewai.flow.flow import Flow, start
 from crewai.llms.base_llm import BaseLLM, llm_call_context
 from crewai.tools import tool
+from pydantic import BaseModel, ConfigDict, Field, RootModel
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
     GEN_AI_WORKFLOW_NAME,
@@ -113,7 +115,7 @@ class TestCrewAIInstrumentor(TestCase):
                 os.environ[key] = value
 
     def test_bedrock_crew_kickoff(self):
-        self._run_crew_kickoff_test(
+        request_tools, expected_tool_definitions = self._run_crew_kickoff_test(
             "bedrock/anthropic.claude-3-haiku-20240307-v1:0",
             GenAiProviderNameValues.AWS_BEDROCK.value,
             "anthropic.claude-3-haiku-20240307-v1:0",
@@ -140,7 +142,7 @@ class TestCrewAIInstrumentor(TestCase):
                 llm._client = client
             else:
                 llm.client = client
-            llm.call([{"role": "user", "content": "Hello"}])
+            llm.call([{"role": "user", "content": "Hello"}], tools=deepcopy(request_tools))
 
         call_mock_llm("bedrock", invoke_llm_callback=invoke_llm)
 
@@ -153,10 +155,13 @@ class TestCrewAIInstrumentor(TestCase):
         self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_TOP_K], 40)
         self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_MAX_TOKENS], 100)
         self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_STOP_SEQUENCES], ("STOP",))
+        self._assert_tool_definitions(chat_span, expected_tool_definitions)
         self.assertIs(chat_span.attributes[GEN_AI_REQUEST_STREAM], False)
 
     def test_openai_crew_kickoff(self):
-        self._run_crew_kickoff_test("openai/gpt-4", GenAiProviderNameValues.OPENAI.value, "gpt-4")
+        request_tools, expected_tool_definitions = self._run_crew_kickoff_test(
+            "openai/gpt-4", GenAiProviderNameValues.OPENAI.value, "gpt-4"
+        )
 
         from amazon.opentelemetry.distro.instrumentation.crewai._event_handler import OpenTelemetryEventHandler
 
@@ -171,6 +176,7 @@ class TestCrewAIInstrumentor(TestCase):
         for provider, is_litellm in (("openai", False), ("litellm", True)):
             with self.subTest(client=provider):
                 self.span_exporter.clear()
+                tools = deepcopy(request_tools)
                 llm = LLM(
                     model=f"openai/{model}",
                     is_litellm=is_litellm,
@@ -192,9 +198,13 @@ class TestCrewAIInstrumentor(TestCase):
                             llm._client = client
                         else:
                             llm.client = client
-                    llm.call([{"role": "user", "content": "Hello"}])
+                    llm.call([{"role": "user", "content": "Hello"}], tools=tools)
 
-                call_mock_llm(provider, invoke_llm_callback=invoke_llm)
+                if is_litellm:
+                    with patch("litellm.completion", return_value=self._mock_response("Hello")):
+                        invoke_llm(None)
+                else:
+                    call_mock_llm(provider, invoke_llm_callback=invoke_llm)
 
                 chat_span = self._find_span(f"chat {model}")
                 self.assertIsNotNone(chat_span)
@@ -209,6 +219,7 @@ class TestCrewAIInstrumentor(TestCase):
                 self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_SEED], 42)
                 self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_CHOICE_COUNT], 2)
                 self.assertIs(chat_span.attributes[GEN_AI_REQUEST_STREAM], False)
+                self._assert_tool_definitions(chat_span, expected_tool_definitions)
 
     def test_anthropic_crew_kickoff(self):
         self._run_crew_kickoff_test(
@@ -571,6 +582,19 @@ class TestCrewAIInstrumentor(TestCase):
         self.assertIn(GEN_AI_TOOL_DESCRIPTION, tool_span.attributes)
         self.assertIn(GEN_AI_TOOL_CALL_ARGUMENTS, tool_span.attributes)
         self.assertIn(GEN_AI_TOOL_CALL_RESULT, tool_span.attributes)
+        # the agent span lists the agent's tools, though with text tool calling no request sends them
+        agent_span = self._find_span("invoke_agent Greeter")
+        self._assert_tool_definitions(
+            agent_span,
+            [
+                {
+                    "type": "function",
+                    "name": "get_greeting",
+                    "description": "Get a greeting message for the given name.",
+                    "parameters": crew.agents[0].tools[0].args_schema.model_json_schema(),
+                }
+            ],
+        )
 
     def test_single_agent_no_tools(self):
         llm = LLM(model="openai/gpt-4", is_litellm=True)
@@ -593,8 +617,14 @@ class TestCrewAIInstrumentor(TestCase):
         self._assert_spans_all_ended()
 
     def test_single_agent_multiple_tool_calls(self):
+        class LookupOptions(BaseModel):
+            regions: list[str]
+            labels: dict[str, list[str]]
+            window: tuple[int, int]
+            mode: Literal["exact", "prefix"] = "exact"
+
         @tool
-        def tool_a(value: str) -> str:
+        def tool_a(value: str, options: Optional[LookupOptions] = None) -> str:
             """Tool A."""
             return f"A: {value}"
 
@@ -609,14 +639,13 @@ class TestCrewAIInstrumentor(TestCase):
         task = Task(description="Use tools.", expected_output="Results.", agent=agent)
         crew = Crew(name="MultiToolCrew", agents=[agent], tasks=[task])
 
-        with patch(
-            "litellm.completion",
-            side_effect=[
-                self._mock_response(tool_calls=[self._mock_tool_call("c1", "tool_a", '{"value": "1"}')]),
-                self._mock_response(tool_calls=[self._mock_tool_call("c2", "tool_b", '{"value": "2"}')]),
-                self._mock_response("Final Answer: Done!"),
-            ],
-        ):
+        sent_tool_defs = []
+        responses = [
+            self._mock_response(tool_calls=[self._mock_tool_call("c1", "tool_a", '{"value": "1"}')]),
+            self._mock_response(tool_calls=[self._mock_tool_call("c2", "tool_b", '{"value": "2"}')]),
+            self._mock_response("Final Answer: Done!"),
+        ]
+        with patch("litellm.completion", side_effect=self._recording_completion(sent_tool_defs, responses)):
             crew.kickoff()
 
         self.assertIsNotNone(self._find_span("execute_tool tool_a"))
@@ -624,26 +653,77 @@ class TestCrewAIInstrumentor(TestCase):
         agent_span = self._find_span("invoke_agent Multi")
         self._assert_span_parent(self._find_span("execute_tool tool_a"), agent_span)
         self._assert_span_parent(self._find_span("execute_tool tool_b"), agent_span)
+        chat_spans = self._spans("chat gpt-4")
+        self.assertEqual(len(chat_spans), len(sent_tool_defs))
+        for index in range(len(chat_spans)):
+            self._assert_tool_definitions(chat_spans[index], sent_tool_defs[index])
+        expected_definitions = [
+            {
+                "type": "function",
+                "name": "tool_a",
+                "description": "Tool A.",
+                "parameters": tool_a.args_schema.model_json_schema(),
+            },
+            {
+                "type": "function",
+                "name": "tool_b",
+                "description": "Tool B.",
+                "parameters": tool_b.args_schema.model_json_schema(),
+            },
+        ]
+        self._assert_tool_definitions(agent_span, expected_definitions)
+        self._assert_tool_definitions(self._find_span("invoke_workflow MultiToolCrew"), expected_definitions)
         self._assert_spans_all_ended()
 
     def test_lite_agent_kickoff(self):
         # Agent.kickoff() without a Crew emits LiteAgentExecution* events instead of AgentExecution* events
+        class SearchFilter(BaseModel):
+            terms: list[str]
+            metadata: dict[str, list[str]]
+            bounds: tuple[float, float, float, float]
+            mode: Literal["1", "True", "'quoted'"] = "1"
+
         @tool
-        def tool_a(value: str) -> str:
+        def tool_a(value: str, filters: Optional[SearchFilter] = None) -> str:
             """Tool A."""
             return f"A: {value}"
 
+        @tool("ToolA")
+        def tool_a_other(value: str, options: Optional[SearchFilter] = None) -> str:
+            """Another tool A with different arguments."""
+            return f"Other A: {value}"
+
+        @tool
+        def tool_without_description(value: str, filters: Optional[SearchFilter] = None) -> str:
+            """Return a value."""
+            return f"No description: {value}"
+
+        # The decorator requires a docstring; the tool itself can have an empty description.
+        tool_without_description.description = ""
+
+        @tool("ToolA")
+        def tool_a_without_description(value: str, options: Optional[SearchFilter] = None) -> str:
+            """Return a value from the duplicate tool."""
+            return f"Duplicate without description: {value}"
+
+        tool_a_without_description.description = ""
+
         llm = LLM(model="openai/gpt-4", is_litellm=True)
         llm.supports_function_calling = lambda: True
-        agent = Agent(role="Researcher", goal="Answer questions", backstory="Agent.", llm=llm, tools=[tool_a])
+        agent = Agent(
+            role="Researcher",
+            goal="Answer questions",
+            backstory="Agent.",
+            llm=llm,
+            tools=[tool_a, tool_a_other, tool_without_description, tool_a_without_description],
+        )
 
-        with patch(
-            "litellm.completion",
-            side_effect=[
-                self._mock_response(tool_calls=[self._mock_tool_call("c1", "tool_a", '{"value": "1"}')]),
-                self._mock_response("Final Answer: Done!"),
-            ],
-        ):
+        sent_tool_defs = []
+        responses = [
+            self._mock_response(tool_calls=[self._mock_tool_call("c1", "tool_a", '{"value": "1"}')]),
+            self._mock_response("Final Answer: Done!"),
+        ]
+        with patch("litellm.completion", side_effect=self._recording_completion(sent_tool_defs, responses)):
             with self.tracer_provider.get_tracer("test").start_as_current_span("POST /chat", kind=SpanKind.SERVER):
                 agent.kickoff("What is A of 1?")
 
@@ -657,6 +737,14 @@ class TestCrewAIInstrumentor(TestCase):
         for span in self.span_exporter.get_finished_spans():
             if span.name in ("chat gpt-4", "execute_tool tool_a"):
                 self._assert_span_parent(span, agent_span)
+        # each chat span lists the tools its request sent
+        chat_spans = self._spans("chat gpt-4")
+        self.assertEqual(len(chat_spans), len(sent_tool_defs))
+        for index in range(len(chat_spans)):
+            expected_definitions = deepcopy(sent_tool_defs[index])
+            self.assertEqual(expected_definitions[2].pop("description"), "")
+            self.assertEqual(expected_definitions[3].pop("description"), "")
+            self._assert_tool_definitions(chat_spans[index], expected_definitions)
 
         self.assertEqual(agent_span.status.status_code, StatusCode.OK)
         attributes = dict(agent_span.attributes)
@@ -682,13 +770,24 @@ class TestCrewAIInstrumentor(TestCase):
                     "type": "function",
                     "name": "tool_a",
                     "description": "Tool A.",
-                    "parameters": {
-                        "properties": {"value": {"title": "Value", "type": "string"}},
-                        "required": ["value"],
-                        "title": "Tool_A",
-                        "type": "object",
-                    },
-                }
+                    "parameters": tool_a.args_schema.model_json_schema(),
+                },
+                {
+                    "type": "function",
+                    "name": "tool_a_2",
+                    "description": "Another tool A with different arguments.",
+                    "parameters": tool_a_other.args_schema.model_json_schema(),
+                },
+                {
+                    "type": "function",
+                    "name": "tool_without_description",
+                    "parameters": tool_without_description.args_schema.model_json_schema(),
+                },
+                {
+                    "type": "function",
+                    "name": "tool_a_3",
+                    "parameters": tool_a_without_description.args_schema.model_json_schema(),
+                },
             ],
         )
         # older crewai versions add their ReAct stop words to the agent's LLM; that request param is not under test
@@ -870,8 +969,38 @@ class TestCrewAIInstrumentor(TestCase):
 
     def test_lite_agent_events_with_missing_source_data(self):
         # the source may lack role/llm (e.g. customer code emitting events, or the deprecated LiteAgent class)
+        class UnreadableArguments(BaseModel):
+            value: str
+            formatter: Callable[[str], str]
+
+        @tool
+        def lookup(value: str) -> str:
+            """Look up a value."""
+            return value
+
+        @tool
+        def count_items(**quantities: int) -> str:
+            """Count items by product."""
+            return str(sum(quantities.values()))
+
+        @tool
+        def describe_order_references(**references: Union[str, bool]) -> str:
+            """Describe order references or their verification states."""
+            return json.dumps(references)
+
+        @tool
+        def describe_order_labels(**labels: list[str]) -> str:
+            """Describe labels keyed by order identifier."""
+            return json.dumps(labels)
+
+        lookup.args_schema = UnreadableArguments
+        count_items.args_schema = RootModel[dict[str, int]]
+        describe_order_references.args_schema = RootModel[Union[dict[str, str], dict[str, bool]]]
+        describe_order_labels.args_schema = RootModel[dict[Annotated[str, Field(pattern="^order_")], list[str]]]
         source = object()
-        start_event = LiteAgentExecutionStartedEvent(agent_info={}, tools=None, messages="")
+        start_event = LiteAgentExecutionStartedEvent(
+            agent_info={}, tools=[lookup, count_items, describe_order_references, describe_order_labels], messages=""
+        )
         crewai_event_bus.emit(source, start_event)
         crewai_event_bus.emit(source, LiteAgentExecutionCompletedEvent(agent_info={}, output=""))
 
@@ -886,6 +1015,30 @@ class TestCrewAIInstrumentor(TestCase):
             GEN_AI_OUTPUT_MESSAGES,
         ):
             self.assertNotIn(attribute, agent_span.attributes)
+        self._assert_tool_definitions(
+            agent_span,
+            [
+                {"type": "function", "name": "lookup", "description": "Look up a value."},
+                {
+                    "type": "function",
+                    "name": "count_items",
+                    "description": "Count items by product.",
+                    "parameters": count_items.args_schema.model_json_schema(),
+                },
+                {
+                    "type": "function",
+                    "name": "describe_order_references",
+                    "description": "Describe order references or their verification states.",
+                    "parameters": describe_order_references.args_schema.model_json_schema(),
+                },
+                {
+                    "type": "function",
+                    "name": "describe_order_labels",
+                    "description": "Describe labels keyed by order identifier.",
+                    "parameters": describe_order_labels.args_schema.model_json_schema(),
+                },
+            ],
+        )
         self._assert_spans_all_ended()
 
     def test_async_task_parenting(self):
@@ -1101,36 +1254,79 @@ class TestCrewAIInstrumentor(TestCase):
         self._assert_spans_all_ended()
 
     def test_multiple_agents_sequential_tasks(self):
+        class Coordinates(BaseModel):
+            latitude: float = Field(ge=-90, le=90)
+            longitude: float = Field(ge=-180, le=180)
+
+        class Address(BaseModel):
+            street: str
+            location: Coordinates
+            instructions: list[str]
+            labels: dict[str, list[str]]
+
+        class Item(BaseModel):
+            sku: str
+            quantity: int = Field(ge=1)
+            variant: tuple[str, int]
+
+        class Order(BaseModel):
+            ship_to: Address
+            items: list[Item]
+            priority: Literal["standard", "express"] = "standard"
+
         @tool
         def t1(v: str) -> str:
             """T1."""
             return f"t1:{v}"
 
-        @tool
-        def t2(v: str) -> str:
+        @tool("T1")
+        def t1_other(v: str) -> str:
+            """Another tool named t1 once sanitized."""
+            return f"t1:{v}"
+
+        @tool("T1")
+        def t2(v: str, order: Optional[Order] = None) -> str:
             """T2."""
             return f"t2:{v}"
+
+        @tool("t1_2")
+        def lookup_order(v: str, order: Optional[Order] = None) -> str:
+            """Look up an order with delivery coordinates, line items, and customer labels."""
+            return f"order:{v}"
 
         llm1 = LLM(model="openai/gpt-4", is_litellm=True)
         llm1.supports_function_calling = lambda: True
         llm2 = LLM(model="openai/gpt-4", is_litellm=True)
         llm2.supports_function_calling = lambda: True
 
-        a1 = Agent(role="A1", goal="Task1", backstory="First.", llm=llm1, tools=[t1])
-        a2 = Agent(role="A2", goal="Task2", backstory="Second.", llm=llm2, tools=[t2])
+        # A1 repeats the same object before resolving an occupied suffix and a distinct colliding tool.
+        # A2 shares the same tool objects, and A1 also receives CrewAI's delegation tools.
+        # Task2's shared t1 occupies its name before crew-level identity deduplication.
+        a1_tools = [t1, t1, lookup_order, t1_other]
+        a1 = Agent(role="A1", goal="Task1", backstory="First.", llm=llm1, tools=a1_tools, allow_delegation=True)
+        a2 = Agent(role="A2", goal="Task2", backstory="Second.", llm=llm2, tools=[t1, t1_other])
         task1 = Task(description="Do task1.", expected_output="R1.", agent=a1)
-        task2 = Task(description="Do task2.", expected_output="R2.", agent=a2)
+        task2_tools = [t1, t2]
+        task2 = Task(description="Do task2.", expected_output="R2.", agent=a2, tools=task2_tools)
         crew = Crew(name="MultiAgent", agents=[a1, a2], tasks=[task1, task2])
 
-        with patch(
-            "litellm.completion",
-            side_effect=[
-                self._mock_response(tool_calls=[self._mock_tool_call("c1", "t1", '{"v":"x"}')]),
-                self._mock_response("Final Answer: R1"),
-                self._mock_response(tool_calls=[self._mock_tool_call("c2", "t2", '{"v":"y"}')]),
-                self._mock_response("Final Answer: R2"),
-            ],
-        ):
+        sent_tool_defs = []
+        responses = [
+            self._mock_response(tool_calls=[self._mock_tool_call("c1", "t1_3", '{"v":"x"}')]),
+            self._mock_response("Final Answer: R1"),
+            self._mock_response(tool_calls=[self._mock_tool_call("c2", "t1_2", '{"v":"y"}')]),
+            self._mock_response("Final Answer: R2"),
+        ]
+        record_completion = self._recording_completion(sent_tool_defs, responses)
+
+        def completion(*args, **kwargs):
+            response = record_completion(*args, **kwargs)
+            for tool_call in response.choices[0].message.tool_calls or []:
+                tool_index = 3 if tool_call.id == "c1" else 1
+                tool_call.function.name = kwargs["tools"][tool_index]["function"]["name"]
+            return response
+
+        with patch("litellm.completion", side_effect=completion):
             crew.kickoff()
 
         crew_span = self._find_span("invoke_workflow MultiAgent")
@@ -1140,8 +1336,82 @@ class TestCrewAIInstrumentor(TestCase):
         self.assertIsNotNone(a2_span)
         self._assert_span_parent(a1_span, crew_span)
         self._assert_span_parent(a2_span, crew_span)
-        self.assertIsNotNone(self._find_span("execute_tool t1"))
-        self.assertIsNotNone(self._find_span("execute_tool t2"))
+        self.assertTrue(self._spans(f"execute_tool {sent_tool_defs[0][3]['name']}"))
+        self.assertTrue(self._spans(f"execute_tool {sent_tool_defs[2][1]['name']}"))
+        # each chat span lists the tools its request sent, with their nested schemas
+        chat_spans = self._spans("chat gpt-4")
+        self.assertEqual(len(chat_spans), len(sent_tool_defs))
+        for index in range(len(chat_spans)):
+            self._assert_tool_definitions(chat_spans[index], sent_tool_defs[index])
+
+        # Declared tools use the normalizer's names independently of the SDK's request aliases.
+        expected_a1_definitions = []
+        expected_a1_names = (
+            "t1",
+            "t1_2",
+            "t1_2_2",
+            "t1_3",
+            "delegate_work_to_coworker",
+            "ask_question_to_coworker",
+        )
+        self.assertEqual(len(a1.agent_executor.tools), len(a1_tools) + 2)
+        for index, execution_tool in enumerate(a1.agent_executor.tools):
+            request_definition = sent_tool_defs[0][index]
+            self.assertLessEqual(len(request_definition["name"]), 64)
+            expected_a1_definitions.append(
+                {
+                    "type": "function",
+                    "name": expected_a1_names[index],
+                    "description": request_definition["description"],
+                    "parameters": execution_tool.args_schema.model_json_schema(),
+                }
+            )
+        expected_a2_definitions = [
+            {
+                "type": "function",
+                "name": "t1",
+                "description": "T1.",
+                "parameters": t1.args_schema.model_json_schema(),
+            },
+            {
+                "type": "function",
+                "name": "t1_2",
+                "description": "T2.",
+                "parameters": t2.args_schema.model_json_schema(),
+            },
+        ]
+        expected_crew_definitions = [
+            expected_a1_definitions[0],
+            expected_a1_definitions[2],
+            expected_a1_definitions[3],
+            expected_a2_definitions[1],
+        ]
+        self._assert_tool_definitions(a1_span, expected_a1_definitions)
+        self._assert_tool_definitions(a2_span, expected_a2_definitions)
+        self._assert_tool_definitions(crew_span, expected_crew_definitions)
+        self._assert_spans_all_ended()
+
+        self.span_exporter.clear()
+        task_only_crew = Crew(
+            name="TaskOnlyCrew",
+            agents=[],
+            tasks=[Task(description="Run task tools.", expected_output="Done.", agent=a2, tools=[t1, t2])],
+        )
+        sent_tool_defs = []
+        with patch(
+            "litellm.completion",
+            side_effect=self._recording_completion(sent_tool_defs, [self._mock_response("Final Answer: Done.")]),
+        ):
+            task_only_crew.kickoff()
+
+        task_only_span = self._find_span("invoke_workflow TaskOnlyCrew")
+        task_only_agent_span = self._find_span("invoke_agent A2")
+        self.assertIsNotNone(task_only_span)
+        self.assertIsNotNone(task_only_agent_span)
+        self._assert_span_parent(task_only_agent_span, task_only_span)
+        self._assert_tool_definitions(task_only_span, expected_a2_definitions)
+        self._assert_tool_definitions(task_only_agent_span, expected_a2_definitions)
+        self._assert_tool_definitions(self._find_span("chat gpt-4"), sent_tool_defs[0])
         self._assert_spans_all_ended()
 
     def test_multiple_agents_shared_llm(self):
@@ -1363,9 +1633,24 @@ class TestCrewAIInstrumentor(TestCase):
         crew_b_entered_llm = threading.Event()
         crew_a_completed = threading.Event()
 
+        @tool("Lookup Orders")
+        def lookup_pending_orders(order_id: str, labels: dict[str, list[str]]) -> str:
+            """Look up pending orders by labels."""
+            return json.dumps({"order_id": order_id, "labels": labels})
+
+        @tool("Lookup Orders")
+        def lookup_shipped_orders(customer_id: str, regions: list[str]) -> str:
+            """Look up shipped orders by delivery region."""
+            return json.dumps({"customer_id": customer_id, "regions": regions})
+
         shared_llm = LLM(model="openai/gpt-4o-mini", is_litellm=True)
-        agent_a = Agent(role="ConcurrentA", goal="Complete A", backstory="A.", llm=shared_llm, tools=[])
-        agent_b = Agent(role="ConcurrentB", goal="Complete B", backstory="B.", llm=shared_llm, tools=[])
+        shared_llm.supports_function_calling = lambda: True
+        agent_a = Agent(
+            role="ConcurrentA", goal="Complete A", backstory="A.", llm=shared_llm, tools=[lookup_pending_orders]
+        )
+        agent_b = Agent(
+            role="ConcurrentB", goal="Complete B", backstory="B.", llm=shared_llm, tools=[lookup_shipped_orders]
+        )
         crew_a = Crew(
             name="ConcurrentCrewA",
             agents=[agent_a],
@@ -1376,29 +1661,33 @@ class TestCrewAIInstrumentor(TestCase):
             agents=[agent_b],
             tasks=[Task(description="Run B.", expected_output="B.", agent=agent_b)],
         )
+        sent_tool_defs_a = []
+        sent_tool_defs_b = []
+        completion_a = self._recording_completion(sent_tool_defs_a, [self._mock_response("Final Answer: A")])
+        completion_b = self._recording_completion(sent_tool_defs_b, [self._mock_response("Final Answer: B")])
 
         def wait_for(event: threading.Event, description: str) -> None:
             if not event.wait(timeout=10):
                 raise TimeoutError(f"Timed out waiting for {description}")
 
-        def coordinated_response(messages):
+        def coordinated_response(messages, tools):
             prompt = str(messages)
             if "Run A." in prompt:
                 crew_a_entered_llm.set()
                 wait_for(crew_b_entered_llm, "Crew B to enter its LLM call")
-                return self._mock_response("Final Answer: A")
+                return completion_a(messages=messages, tools=tools)
             if "Run B." in prompt:
                 crew_b_entered_llm.set()
                 wait_for(crew_a_entered_llm, "Crew A to enter its LLM call")
                 wait_for(crew_a_completed, "Crew A to complete")
-                return self._mock_response("Final Answer: B")
+                return completion_b(messages=messages, tools=tools)
             raise AssertionError(f"Unexpected messages: {messages}")
 
         async def mock_acompletion(*args, **kwargs):
-            return await asyncio.to_thread(coordinated_response, kwargs.get("messages"))
+            return await asyncio.to_thread(coordinated_response, kwargs.get("messages"), kwargs.get("tools"))
 
         def mock_completion(*args, **kwargs):
-            return coordinated_response(kwargs.get("messages"))
+            return coordinated_response(kwargs.get("messages"), kwargs.get("tools"))
 
         async def run():
             async def run_crew_a():
@@ -1426,6 +1715,35 @@ class TestCrewAIInstrumentor(TestCase):
         self.assertIsNotNone(agent_span_b)
         self._assert_span_parent(agent_span_a, workflow_a)
         self._assert_span_parent(agent_span_b, workflow_b)
+        expected_a = [
+            {
+                "type": "function",
+                "name": "lookup_orders",
+                "description": "Look up pending orders by labels.",
+                "parameters": lookup_pending_orders.args_schema.model_json_schema(),
+            }
+        ]
+        expected_b = [
+            {
+                "type": "function",
+                "name": "lookup_orders",
+                "description": "Look up shipped orders by delivery region.",
+                "parameters": lookup_shipped_orders.args_schema.model_json_schema(),
+            }
+        ]
+        for span in (workflow_a, agent_span_a):
+            self._assert_tool_definitions(span, expected_a)
+        for span in (workflow_b, agent_span_b):
+            self._assert_tool_definitions(span, expected_b)
+        chat_span_a = next(
+            span for span in self._spans("chat gpt-4o-mini") if span.parent.span_id == agent_span_a.context.span_id
+        )
+        chat_span_b = next(
+            span for span in self._spans("chat gpt-4o-mini") if span.parent.span_id == agent_span_b.context.span_id
+        )
+        self._assert_tool_definitions(chat_span_a, sent_tool_defs_a[0])
+        self._assert_tool_definitions(chat_span_b, sent_tool_defs_b[0])
+        self.assertNotEqual(sent_tool_defs_a[0], sent_tool_defs_b[0])
         self._assert_spans_all_ended()
 
     def test_concurrent_crew_trace_map(self):
@@ -1434,9 +1752,24 @@ class TestCrewAIInstrumentor(TestCase):
         crew_a_completed = threading.Event()
         test_tracer = self.tracer_provider.get_tracer("test")
 
+        @tool("Lookup Orders")
+        def lookup_pending_orders(order_id: str, labels: dict[str, list[str]]) -> str:
+            """Look up pending orders by labels."""
+            return json.dumps({"order_id": order_id, "labels": labels})
+
+        @tool("Lookup Orders")
+        def lookup_shipped_orders(customer_id: str, regions: list[str]) -> str:
+            """Look up shipped orders by delivery region."""
+            return json.dumps({"customer_id": customer_id, "regions": regions})
+
         shared_llm = LLM(model="openai/gpt-4o-mini", is_litellm=True)
-        agent_a = Agent(role="ConcurrentA", goal="Complete A", backstory="A.", llm=shared_llm, tools=[])
-        agent_b = Agent(role="ConcurrentB", goal="Complete B", backstory="B.", llm=shared_llm, tools=[])
+        shared_llm.supports_function_calling = lambda: True
+        agent_a = Agent(
+            role="ConcurrentA", goal="Complete A", backstory="A.", llm=shared_llm, tools=[lookup_pending_orders]
+        )
+        agent_b = Agent(
+            role="ConcurrentB", goal="Complete B", backstory="B.", llm=shared_llm, tools=[lookup_shipped_orders]
+        )
         crew_a = Crew(
             name="ConcurrentCrewA",
             agents=[agent_a],
@@ -1447,29 +1780,33 @@ class TestCrewAIInstrumentor(TestCase):
             agents=[agent_b],
             tasks=[Task(description="Run B.", expected_output="B.", agent=agent_b)],
         )
+        sent_tool_defs_a = []
+        sent_tool_defs_b = []
+        completion_a = self._recording_completion(sent_tool_defs_a, [self._mock_response("Final Answer: A")])
+        completion_b = self._recording_completion(sent_tool_defs_b, [self._mock_response("Final Answer: B")])
 
         def wait_for(event: threading.Event, description: str) -> None:
             if not event.wait(timeout=10):
                 raise TimeoutError(f"Timed out waiting for {description}")
 
-        def coordinated_response(messages):
+        def coordinated_response(messages, tools):
             prompt = str(messages)
             if "Run A." in prompt:
                 crew_a_entered_llm.set()
                 wait_for(crew_b_entered_llm, "Crew B to enter its LLM call")
-                return self._mock_response("Final Answer: A")
+                return completion_a(messages=messages, tools=tools)
             if "Run B." in prompt:
                 crew_b_entered_llm.set()
                 wait_for(crew_a_entered_llm, "Crew A to enter its LLM call")
                 wait_for(crew_a_completed, "Crew A to complete")
-                return self._mock_response("Final Answer: B")
+                return completion_b(messages=messages, tools=tools)
             raise AssertionError(f"Unexpected messages: {messages}")
 
         async def mock_acompletion(*args, **kwargs):
-            return await asyncio.to_thread(coordinated_response, kwargs.get("messages"))
+            return await asyncio.to_thread(coordinated_response, kwargs.get("messages"), kwargs.get("tools"))
 
         def mock_completion(*args, **kwargs):
-            return coordinated_response(kwargs.get("messages"))
+            return coordinated_response(kwargs.get("messages"), kwargs.get("tools"))
 
         async def run():
             async def run_crew_a():
@@ -1525,6 +1862,40 @@ class TestCrewAIInstrumentor(TestCase):
                 "chat gpt-4o-mini",
             ],
         )
+        expected_a = [
+            {
+                "type": "function",
+                "name": "lookup_orders",
+                "description": "Look up pending orders by labels.",
+                "parameters": lookup_pending_orders.args_schema.model_json_schema(),
+            }
+        ]
+        expected_b = [
+            {
+                "type": "function",
+                "name": "lookup_orders",
+                "description": "Look up shipped orders by delivery region.",
+                "parameters": lookup_shipped_orders.args_schema.model_json_schema(),
+            }
+        ]
+        for span in (workflow_a, agent_span_a):
+            self._assert_tool_definitions(span, expected_a)
+        for span in (workflow_b, agent_span_b):
+            self._assert_tool_definitions(span, expected_b)
+        chat_spans_a = [
+            span for span in self._spans("chat gpt-4o-mini") if span.parent.span_id == agent_span_a.context.span_id
+        ]
+        chat_spans_b = [
+            span for span in self._spans("chat gpt-4o-mini") if span.parent.span_id == agent_span_b.context.span_id
+        ]
+        self.assertEqual(len(chat_spans_a), len(sent_tool_defs_a))
+        self.assertEqual(len(chat_spans_b), len(sent_tool_defs_b))
+        for index in range(len(chat_spans_a)):
+            self._assert_tool_definitions(chat_spans_a[index], sent_tool_defs_a[index])
+        for index in range(len(chat_spans_b)):
+            self._assert_tool_definitions(chat_spans_b[index], sent_tool_defs_b[index])
+        self.assertNotEqual(sent_tool_defs_a[0], sent_tool_defs_b[0])
+
         self._assert_spans_all_ended()
 
     def test_concurrent_crew_same_instance_isolation(self):
@@ -1532,19 +1903,30 @@ class TestCrewAIInstrumentor(TestCase):
         release_first_call = threading.Event()
         call_count_lock = threading.Lock()
         call_count = 0
+
+        @tool
+        def summarize_order_ids(order_ids: list[str]) -> str:
+            """Summarize the order IDs for the shared crew."""
+            return ", ".join(order_ids)
+
         llm = LLM(model="openai/gpt-4o-mini", is_litellm=True)
+        llm.supports_function_calling = lambda: True
         agent = Agent(
             role="SharedCrewAgent",
             goal="Complete task",
             backstory="Agent.",
             llm=llm,
-            tools=[],
+            tools=[summarize_order_ids],
             max_retry_limit=0,
         )
         crew = Crew(
             name="SharedCrew",
             agents=[agent],
             tasks=[Task(description="Run shared crew.", expected_output="Done.", agent=agent)],
+        )
+        sent_tool_defs = []
+        completion = self._recording_completion(
+            sent_tool_defs, [self._mock_response("Final Answer: Done"), self._mock_response("Final Answer: Done")]
         )
 
         def concurrent_response(*args, **kwargs):
@@ -1556,7 +1938,7 @@ class TestCrewAIInstrumentor(TestCase):
                 first_call_entered.set()
                 if not release_first_call.wait(timeout=10):
                     raise TimeoutError("Timed out waiting to release the first LLM call")
-            return self._mock_response("Final Answer: Done")
+            return completion(*args, **kwargs)
 
         def kickoff_result():
             try:
@@ -1595,21 +1977,53 @@ class TestCrewAIInstrumentor(TestCase):
             [span.parent.span_id for span in agent_spans],
             [span.context.span_id for span in workflow_spans],
         )
+        expected_definitions = [
+            {
+                "type": "function",
+                "name": "summarize_order_ids",
+                "description": "Summarize the order IDs for the shared crew.",
+                "parameters": summarize_order_ids.args_schema.model_json_schema(),
+            }
+        ]
+        for span in [*workflow_spans, *agent_spans]:
+            self._assert_tool_definitions(span, expected_definitions)
+        chat_spans = self._spans("chat gpt-4o-mini")
+        self.assertEqual(len(chat_spans), len(sent_tool_defs))
+        for chat_span in chat_spans:
+            self._assert_tool_definitions(chat_span, sent_tool_defs[0])
         self._assert_spans_all_ended()
 
     def test_concurrent_crew_failure_isolation(self):
         crew_b_entered_llm = threading.Event()
         crew_a_failed = threading.Event()
+
+        @tool("Lookup Orders")
+        def lookup_failed_orders(order_ids: list[str]) -> str:
+            """Look up orders for the failing crew."""
+            return json.dumps({"order_ids": order_ids})
+
+        @tool("Lookup Orders")
+        def lookup_successful_orders(customer_ids: list[int]) -> str:
+            """Look up orders for the successful crew."""
+            return json.dumps({"customer_ids": customer_ids})
+
         shared_llm = LLM(model="openai/gpt-4o-mini", is_litellm=True)
+        shared_llm.supports_function_calling = lambda: True
         agent_a = Agent(
             role="FailingConcurrentAgent",
             goal="Fail",
             backstory="Agent.",
             llm=shared_llm,
-            tools=[],
+            tools=[lookup_failed_orders],
             max_retry_limit=0,
         )
-        agent_b = Agent(role="SuccessfulConcurrentAgent", goal="Complete", backstory="Agent.", llm=shared_llm, tools=[])
+        agent_b = Agent(
+            role="SuccessfulConcurrentAgent",
+            goal="Complete",
+            backstory="Agent.",
+            llm=shared_llm,
+            tools=[lookup_successful_orders],
+        )
         crew_a = Crew(
             name="FailingConcurrentCrew",
             agents=[agent_a],
@@ -1620,6 +2034,10 @@ class TestCrewAIInstrumentor(TestCase):
             agents=[agent_b],
             tasks=[Task(description="Run successful crew.", expected_output="Success.", agent=agent_b)],
         )
+        sent_tool_defs_a = []
+        sent_tool_defs_b = []
+        record_failed_request = self._recording_completion(sent_tool_defs_a, [None])
+        completion_b = self._recording_completion(sent_tool_defs_b, [self._mock_response("Final Answer: Success")])
 
         def wait_for(event: threading.Event, description: str) -> None:
             if not event.wait(timeout=10):
@@ -1629,11 +2047,12 @@ class TestCrewAIInstrumentor(TestCase):
             messages = str(kwargs.get("messages"))
             if "Run failing crew." in messages:
                 wait_for(crew_b_entered_llm, "successful crew to enter its LLM call")
+                record_failed_request(*args, **kwargs)
                 raise RuntimeError("Crew A failed")
             if "Run successful crew." in messages:
                 crew_b_entered_llm.set()
                 wait_for(crew_a_failed, "failing crew to finish cleanup")
-                return self._mock_response("Final Answer: Success")
+                return completion_b(*args, **kwargs)
             raise AssertionError(f"Unexpected messages: {kwargs.get('messages')}")
 
         def run_failing_crew():
@@ -1663,17 +2082,280 @@ class TestCrewAIInstrumentor(TestCase):
         self.assertEqual(failing_workflow.status.status_code.name, "ERROR")
         self.assertEqual(successful_workflow.status.status_code.name, "OK")
         self._assert_span_parent(successful_agent, successful_workflow)
+        failing_agent = self._find_span("invoke_agent FailingConcurrentAgent")
+        expected_a = [
+            {
+                "type": "function",
+                "name": "lookup_orders",
+                "description": "Look up orders for the failing crew.",
+                "parameters": lookup_failed_orders.args_schema.model_json_schema(),
+            }
+        ]
+        expected_b = [
+            {
+                "type": "function",
+                "name": "lookup_orders",
+                "description": "Look up orders for the successful crew.",
+                "parameters": lookup_successful_orders.args_schema.model_json_schema(),
+            }
+        ]
+        for span in (failing_workflow, failing_agent):
+            self._assert_tool_definitions(span, expected_a)
+        for span in (successful_workflow, successful_agent):
+            self._assert_tool_definitions(span, expected_b)
+        failing_chat = next(
+            span for span in self._spans("chat gpt-4o-mini") if span.parent.span_id == failing_agent.context.span_id
+        )
+        successful_chat = next(
+            span for span in self._spans("chat gpt-4o-mini") if span.parent.span_id == successful_agent.context.span_id
+        )
+        self._assert_tool_definitions(failing_chat, sent_tool_defs_a[0])
+        self._assert_tool_definitions(successful_chat, sent_tool_defs_b[0])
+        self.assertNotEqual(sent_tool_defs_a[0], sent_tool_defs_b[0])
         self._assert_spans_all_ended()
 
     def _run_crew_kickoff_test(self, model: str, provider: str, model_id: str):
         test_tracer = self.tracer_provider.get_tracer("test")
-        tc = self._mock_tool_call()
+
+        class EmailContact(BaseModel):
+            model_config = ConfigDict(populate_by_name=True)
+
+            channel: Literal["email"]
+            destination: str = Field(alias="emailAddress", min_length=3)
+            verified: bool = False
+
+        class PhoneContact(BaseModel):
+            channel: Literal["phone"]
+            destination: str = Field(pattern=r"^\+[0-9]+$")
+            extension: Optional[int] = Field(default=None, ge=0)
+
+        class NotificationTarget(BaseModel):
+            name: str = Field(min_length=1)
+            metadata: dict[str, Union[str, int, bool, None]]
+
+        class NotificationRoute(BaseModel):
+            name: str = Field(min_length=1)
+            children: list[NotificationTarget] = Field(default_factory=list)
+            metadata: dict[str, Union[str, int, bool, None]]
+
+        class GreetingPreferences(BaseModel):
+            model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+            contacts: list[Annotated[Union[EmailContact, PhoneContact], Field(discriminator="channel")]]
+            delivery_window: tuple[Annotated[int, Field(ge=0)], Annotated[int, Field(le=24)]]
+            labels: dict[Annotated[str, Field(pattern="^order_")], list[str]]
+            salutation: Literal["1", "True", "'quoted'"] = "1"
+            fallback: Optional[EmailContact] = None
+            routes: list[NotificationRoute]
+            locale: str = Field(default="en-US", alias="preferredLocale")
 
         @tool
-        def get_greeting(name: str) -> str:
+        def get_greeting(name: str, preferences: Optional[GreetingPreferences] = None) -> str:
             """Get a greeting message for the given name."""
             with test_tracer.start_as_current_span("custom_downstream_span"):
                 return f"Hello, {name}!"
+
+        @tool
+        def get_service_status() -> str:
+            """Get the greeting service's status."""
+            return "available"
+
+        class OrderNode(BaseModel):
+            order_id: str
+            children: list["OrderNode"] = Field(default_factory=list)
+
+        class RecursiveOrderArguments(BaseModel):
+            order: OrderNode
+
+        @tool
+        def describe_order_tree(order: dict[str, Any]) -> str:
+            """Describe an order and its dependent orders."""
+            order = OrderNode.model_validate(order)
+            return f"{order.order_id} has {len(order.children)} dependent orders."
+
+        describe_order_tree.args_schema = RecursiveOrderArguments
+
+        @tool
+        def cap_order_budget(limit: float = float("inf")) -> str:
+            """Set an optional order budget ceiling."""
+            return str(limit)
+
+        class Coordinates(BaseModel):
+            latitude: float = Field(ge=-90, le=90)
+            longitude: float = Field(ge=-180, le=180)
+
+        class Address(BaseModel):
+            model_config = ConfigDict(extra="forbid")
+
+            street: str = Field(min_length=1)
+            location: Coordinates
+            instructions: list[str]
+
+        class DeliveryItem(BaseModel):
+            sku: str
+            quantity: int = Field(ge=1)
+            options: dict[str, list[str]]
+
+        @tool
+        def create_delivery_order(
+            ship_to: Address, items: list[DeliveryItem], priority: Literal["1", "True", "'quoted'", "express"] = "1"
+        ) -> str:
+            """Create an order."""
+            ship_to = Address.model_validate(ship_to)
+            return f"Created {priority} order with {len(items)} items for {ship_to.street}."
+
+        class Contact(BaseModel):
+            channel: Literal["email", "phone"]
+            value: str
+
+        class Customer(BaseModel):
+            name: str
+            contacts: list[Contact]
+            labels: dict[str, list[str]]
+
+        class OrderItem(BaseModel):
+            sku: str
+            quantity: int = Field(ge=1)
+            variant: tuple[str, int]
+            options: dict[str, list[str]]
+
+        class Delivery(BaseModel):
+            method: Literal["delivery"]
+            street: str
+            coordinates: tuple[float, float]
+            window: tuple[int, int]
+
+        class Pickup(BaseModel):
+            method: Literal["pickup"]
+            store_id: str
+            authorized_customers: list[Customer]
+
+        @tool
+        def create_order(
+            customer: Customer,
+            items: list[OrderItem],
+            fulfillment: Annotated[Union[Delivery, Pickup], Field(discriminator="method")],
+            priority: Literal["1", "True", "'quoted'", "express"] = "1",
+        ) -> str:
+            """Create an order for delivery or pickup."""
+            customer = Customer.model_validate(customer)
+            if isinstance(fulfillment, dict):
+                fulfillment = (
+                    Delivery.model_validate(fulfillment)
+                    if fulfillment["method"] == "delivery"
+                    else Pickup.model_validate(fulfillment)
+                )
+            return f"Created {priority} {fulfillment.method} order with {len(items)} items for {customer.name}."
+
+        @tool
+        def lookup_order(
+            order_id: str, requested_fields: list[str], labels: Optional[dict[str, list[str]]] = None
+        ) -> str:
+            """Look up an order's requested fields and labels."""
+            return json.dumps({"order_id": order_id, "fields": requested_fields, "labels": labels})
+
+        @tool
+        def match_orders(
+            customers: dict[Annotated[str, Field(pattern="^order_")], Customer],
+            date_range: tuple[int, int],
+            states: list[Literal["pending", "shipped", "delivered"]],
+        ) -> str:
+            """Match customers' orders by date range and delivery state."""
+            return json.dumps({"customers": list(customers), "date_range": date_range, "states": states})
+
+        @tool("HTTPRequestTool")
+        def prepare_order_request(
+            url: str, headers: dict[str, str], query: dict[str, list[str]], timeout: int = 30
+        ) -> str:
+            """Prepare a request to the order service."""
+            return json.dumps({"url": url, "headers": headers, "query": query, "timeout": timeout})
+
+        @tool("camelCase")
+        def calculate_order_total(
+            quantities: dict[str, int], prices: dict[str, float], currency: Literal["USD", "CAD"] = "USD"
+        ) -> str:
+            """Calculate an order total from item quantities and prices."""
+            total = sum(quantity * prices[sku] for sku, quantity in quantities.items())
+            return f"{currency} {total:.2f}"
+
+        @tool('Café\'s "Order"')
+        def set_delivery_preferences(
+            order_id: str, address: Address, contact_channels: list[Literal["email", "phone"]]
+        ) -> str:
+            """Set an order's delivery address and contact preferences."""
+            address = Address.model_validate(address)
+            return f"{order_id}: {address.street}; contact via {', '.join(contact_channels)}"
+
+        @tool("Search---Web")
+        def search_orders(query: str, filters: dict[str, list[str]], regions: list[str], limit: int = 10) -> str:
+            """Search orders by query, filters, and delivery region."""
+            return json.dumps({"query": query, "filters": filters, "regions": regions, "limit": limit})
+
+        @tool("Search___Web")
+        def search_order_notes(query: str, labels: dict[str, list[str]], date_range: tuple[int, int]) -> str:
+            """Search order notes within a date range."""
+            return json.dumps({"query": query, "labels": labels, "date_range": date_range})
+
+        @tool("Look Up Customer Order History With Detailed Delivery Status And Payment Information")
+        def lookup_customer_history(
+            customer_id: str, date_range: tuple[int, int], states: list[Literal["pending", "shipped", "delivered"]]
+        ) -> str:
+            """Look up a customer's order history by date and delivery state."""
+            return json.dumps({"customer_id": customer_id, "date_range": date_range, "states": states})
+
+        @tool("Look-Up-Customer-Order-History-With-Detailed-Delivery-Status-And-Payment-Information")
+        def lookup_shipping_history(customer_ids: list[str], regions: list[str], per_customer_limit: int = 50) -> str:
+            """Look up shipping history for customers in selected regions."""
+            return json.dumps({"customer_ids": customer_ids, "regions": regions, "limit": per_customer_limit})
+
+        @tool("Search Web")
+        def search_catalog(query: str, filters: dict[str, list[str]], brands: list[str], countries: list[str]) -> str:
+            """Search the product catalog by brand and country."""
+            return json.dumps({"query": query, "filters": filters, "brands": brands, "countries": countries})
+
+        @tool("Lookup Customer Order History By Region And Delivery Window Date")
+        def lookup_delivery_window(customer_id: str, regions: list[str], delivery_window: tuple[int, int]) -> str:
+            """Look up delivery windows for a customer's orders."""
+            return json.dumps({"customer_id": customer_id, "regions": regions, "window": delivery_window})
+
+        @tool("Lookup Customer Orders With Current Shipping Addresses And Payment Information")
+        def lookup_shipping_addresses(customer_id: str, countries: list[str], include_payments: bool = False) -> str:
+            """Look up a customer's shipping addresses and payment information."""
+            return json.dumps({"customer_id": customer_id, "countries": countries, "payments": include_payments})
+
+        @tool("123 Lookup")
+        def lookup_monthly_order_statistics(customer_id: str, months: list[int]) -> str:
+            """Look up monthly order statistics."""
+            return json.dumps({"customer_id": customer_id, "months": months})
+
+        @tool("123---Lookup")
+        def lookup_yearly_order_statistics(customer_id: str, years: list[int]) -> str:
+            """Look up yearly order statistics."""
+            return json.dumps({"customer_id": customer_id, "years": years})
+
+        tools = [
+            get_greeting,
+            get_service_status,
+            create_delivery_order,
+            create_order,
+            lookup_order,
+            match_orders,
+            prepare_order_request,
+            calculate_order_total,
+            set_delivery_preferences,
+            search_orders,
+            search_order_notes,
+            lookup_customer_history,
+            lookup_shipping_history,
+            search_catalog,
+            lookup_delivery_window,
+            lookup_shipping_addresses,
+            lookup_monthly_order_statistics,
+            lookup_yearly_order_statistics,
+            cap_order_budget,
+            describe_order_tree,
+        ]
+        tc = self._mock_tool_call()
 
         llm = LLM(
             model=model,
@@ -1691,24 +2373,33 @@ class TestCrewAIInstrumentor(TestCase):
             goal="Greet the user",
             backstory="You are a friendly greeter.",
             llm=llm,
-            tools=[get_greeting],
+            tools=tools,
             verbose=True,
         )
         task = Task(description="Greet the user warmly.", expected_output="A friendly greeting.", agent=agent)
         crew = Crew(name="GreetingCrew", agents=[agent], tasks=[task], verbose=True)
 
-        with patch(
-            "litellm.completion",
-            side_effect=[
-                self._mock_response(content="", tool_calls=[tc], prompt_tokens=100, completion_tokens=50),
-                self._mock_response(
-                    content="Thought: I now know the final answer\nFinal Answer: Hello! Welcome!",
-                    prompt_tokens=200,
-                    completion_tokens=80,
-                ),
-            ],
-        ):
-            crew.kickoff()
+        sent_tool_defs = []
+        sent_tools = []
+        responses = [
+            self._mock_response(content="", tool_calls=[tc], prompt_tokens=100, completion_tokens=50),
+            self._mock_response(
+                content="Thought: I now know the final answer\nFinal Answer: Hello! Welcome!",
+                prompt_tokens=200,
+                completion_tokens=80,
+            ),
+        ]
+        with patch.object(crewai_event_bus, "emit", wraps=crewai_event_bus.emit) as emitted_events:
+            with patch(
+                "litellm.completion", side_effect=self._recording_completion(sent_tool_defs, responses, sent_tools)
+            ):
+                crew.kickoff()
+
+        llm_events = [
+            call.kwargs["event"]
+            for call in emitted_events.call_args_list
+            if isinstance(call.kwargs.get("event"), LLMCallStartedEvent)
+        ]
 
         spans = self.span_exporter.get_finished_spans()
         crew_span = next((s for s in spans if s.name == "invoke_workflow GreetingCrew"), None)
@@ -1726,8 +2417,51 @@ class TestCrewAIInstrumentor(TestCase):
         )
         self.assertNotIn(GEN_AI_PROVIDER_NAME, crew_span.attributes)
         self.assertNotIn(GEN_AI_REQUEST_MODEL, crew_span.attributes)
-        self.assertIn(GEN_AI_TOOL_DEFINITIONS, crew_span.attributes)
-        self.assertIn("get_greeting", crew_span.attributes[GEN_AI_TOOL_DEFINITIONS])
+        expected_definitions = []
+        expected_names = (
+            "get_greeting",
+            "get_service_status",
+            "create_delivery_order",
+            "create_order",
+            "lookup_order",
+            "match_orders",
+            "http_request_tool",
+            "camel_case",
+            "cafes_order",
+            "search_web",
+            "search_web_2",
+            "look_up_customer_order_history_with_detailed_delivery_s_7f489e1c",
+            "look_up_customer_order_history_with_detailed_delivery_s_f46e6453",
+            "search_web_3",
+            "lookup_customer_order_history_by_region_and_delivery_window_date",
+            "lookup_customer_orders_with_current_shipping_addresses_cc69af59",
+            "_123_lookup",
+            "_123_lookup_2",
+            "cap_order_budget",
+            "describe_order_tree",
+        )
+        for index, kickoff_tool in enumerate(tools):
+            expected_definitions.append(
+                {
+                    "type": "function",
+                    "name": expected_names[index],
+                    "description": sent_tool_defs[0][index]["description"],
+                    "parameters": kickoff_tool.args_schema.model_json_schema(),
+                }
+            )
+        self._assert_tool_definitions(crew_span, expected_definitions)
+        self._assert_tool_definitions(agent_span, expected_definitions)
+        chat_spans = self._spans(f"chat {model_id}")
+        self.assertEqual(len(chat_spans), len(sent_tool_defs))
+        self.assertEqual(len(llm_events), len(sent_tool_defs))
+        budget_tool_index = tools.index(cap_order_budget)
+        for index, chat_span in enumerate(chat_spans):
+            expected_request = deepcopy(sent_tool_defs[index])
+            budget_parameters = llm_events[index].tools[budget_tool_index]["function"]["parameters"]
+            if isinstance(budget_parameters["properties"]["limit"], str):
+                # repr(inf) is not a Python literal: retain the tool's identity without its parameters.
+                expected_request[budget_tool_index].pop("parameters")
+            self._assert_tool_definitions(chat_span, expected_request)
 
         self._assert_span_attributes(
             spans,
@@ -1809,6 +2543,14 @@ class TestCrewAIInstrumentor(TestCase):
         )
         self.assertEqual(usage, [(100, 50), (200, 80)])
 
+        self._assert_spans_all_ended()
+
+        native_tool_names = ("get_greeting", "get_service_status", "create_delivery_order", "create_order")
+        return (
+            [request_tool for request_tool in sent_tools[0] if request_tool["function"]["name"] in native_tool_names],
+            [tool_definition for tool_definition in sent_tool_defs[0] if tool_definition["name"] in native_tool_names],
+        )
+
     def _kickoff_failing_crew(self, completion_side_effect, **agent_kwargs):
         """Run a one-task crew whose task text is a secret and return the spans that ended in error."""
         llm = LLM(model="openai/gpt-4", is_litellm=True)
@@ -1889,8 +2631,35 @@ class TestCrewAIInstrumentor(TestCase):
             "Leaked entries in task_or_agent_id_to_started_llm_event_id map",
         )
 
+    def _assert_tool_definitions(self, span: ReadableSpan, expected: list) -> None:
+        self.assertIsNotNone(span)
+        self.assertIn(GEN_AI_TOOL_DEFINITIONS, span.attributes)
+        definitions = json.loads(span.attributes[GEN_AI_TOOL_DEFINITIONS])
+        validate_otel_genai_schema(definitions, "gen-ai-tool-definitions")
+        self.assertEqual(definitions, expected)
+
     def _find_span(self, name_contains: str) -> Optional[ReadableSpan]:
         return next((s for s in self.span_exporter.get_finished_spans() if name_contains in s.name), None)
+
+    def _spans(self, name: str) -> list:
+        return sorted(
+            (s for s in self.span_exporter.get_finished_spans() if s.name == name), key=lambda s: s.start_time
+        )
+
+    @staticmethod
+    def _recording_completion(sent_tool_defs: list, responses: list, sent_tools: Optional[list] = None):
+        # a litellm.completion mock that records the tools each request sends, as tool definitions
+        responses = iter(responses)
+
+        def completion(*args, **kwargs):
+            fields = ("name", "description", "parameters")
+            tools = kwargs.get("tools") or []
+            if sent_tools is not None:
+                sent_tools.append(deepcopy(tools))
+            sent_tool_defs.append([{"type": "function", **{k: t["function"][k] for k in fields}} for t in tools])
+            return next(responses)
+
+        return completion
 
     @staticmethod
     def _mock_response(
