@@ -7,7 +7,7 @@ import hashlib
 import re
 import sys
 import unicodedata
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
@@ -95,7 +95,6 @@ class _SpanEntry:
     # older CrewAI versions only expose cumulative token usage, so retain the
     # starting counts to calculate this LLM call's usage when the span ends
     initial_token_usage: Tuple[int, int] = (0, 0)
-    tool_descriptions: Dict[str, Optional[str]] = field(default_factory=dict)
 
 
 class _EventBusEmitWrapper:
@@ -454,27 +453,20 @@ class OpenTelemetryEventHandler:
         if tool_name:
             attributes[GEN_AI_TOOL_NAME] = tool_name
 
-        agent_entry = self._event_id_to_span.get(self._get_task_or_agent_id(event))
-        if agent_entry is None:
-            agent_entry = self._event_id_to_span.get(self._get_parent_event_id(event))
-        tool_descriptions = agent_entry.tool_descriptions if agent_entry else {}
-        desc = self._find_tool_description(source, event, tool_name, tool_descriptions)
+        desc = self._find_tool_description(source, event, tool_name)
         if desc:
             attributes[GEN_AI_TOOL_DESCRIPTION] = desc
 
         agent = first_not_none(getattr(source, "agent", None), self._get_event_agent(event))
-        llm = getattr(agent, "llm", None)
-        if llm is None:
-            llm = getattr(source, "llm", None)
-        if llm is None and hasattr(source, "get_token_usage_summary"):
-            llm = source
-        provider, model = self._extract_provider_and_model(llm)
-        if provider:
-            attributes[GEN_AI_PROVIDER_NAME] = provider
-        if model:
-            attributes[GEN_AI_REQUEST_MODEL] = model
+        if agent:
+            llm = getattr(agent, "llm", None)
+            provider, model = self._extract_provider_and_model(llm)
+            if provider:
+                attributes[GEN_AI_PROVIDER_NAME] = provider
+            if model:
+                attributes[GEN_AI_REQUEST_MODEL] = model
 
-        if event.tool_args is not None:
+        if event.tool_args:
             attributes[GEN_AI_TOOL_CALL_ARGUMENTS] = to_tool_attribute_value(event.tool_args)
 
         self._start_span(
@@ -491,7 +483,7 @@ class OpenTelemetryEventHandler:
         output = getattr(event, "output", None)
         if output is not None:
             attrs[GEN_AI_TOOL_CALL_RESULT] = to_tool_attribute_value(output)
-        self._end_span(event.started_event_id, attrs, error=getattr(event, "failure", None))
+        self._end_span(event.started_event_id, attrs)
 
     def _on_tool_error(
         self, source: "ToolUsage", event: "ToolUsageErrorEvent"
@@ -531,14 +523,8 @@ class OpenTelemetryEventHandler:
                 )
 
         parent_event_id = self._get_parent_event_id(event)
-        tool_defs = self._llm_call_tool_definitions(event)
-        if tool_defs:
+        if tool_defs := self._llm_call_tool_definitions(event):
             attributes[GEN_AI_TOOL_DEFINITIONS] = serialize_to_json_string(tool_defs, max_depth=sys.maxsize)
-        agent_entry = self._event_id_to_span.get(self._get_task_or_agent_id(event))
-        if agent_entry is None:
-            agent_entry = self._event_id_to_span.get(parent_event_id)
-        if agent_entry:
-            agent_entry.tool_descriptions = {tool_def["name"]: tool_def.get("description") for tool_def in tool_defs}
 
         self._start_span(
             span_name,
@@ -800,7 +786,7 @@ class OpenTelemetryEventHandler:
         # error.type must be a low-cardinality class name, not the message (which can contain task or tool content).
         # Most CrewAI failure events carry the error as a string, but this handler runs synchronously inside
         # CrewAI's except block, so the exception being handled gives the real type.
-        if isinstance(error, BaseException) or callable(getattr(error, "as_agent_message", None)):
+        if isinstance(error, BaseException):
             return type(error).__qualname__
         active_exception = sys.exc_info()[1]
         return type(active_exception).__qualname__ if active_exception else ErrorTypeValues.OTHER.value
@@ -956,8 +942,7 @@ class OpenTelemetryEventHandler:
                 function = tc.get("function") or {}
                 if name := tc.get("name") or function.get("name"):
                     part["name"] = name
-                arguments = first_not_none(tc.get("input"), tc.get("arguments"), function.get("arguments"))
-                if arguments is not None:
+                if arguments := tc.get("input") or tc.get("arguments") or function.get("arguments"):
                     part["arguments"] = arguments
                 tc_id = tc.get("toolUseId") or tc.get("id")
                 if tc_id:
@@ -966,9 +951,8 @@ class OpenTelemetryEventHandler:
                 func = tc.function
                 if getattr(func, "name", None):
                     part["name"] = func.name
-                arguments = getattr(func, "arguments", None)
-                if arguments is not None:
-                    part["arguments"] = arguments
+                if getattr(func, "arguments", None):
+                    part["arguments"] = func.arguments
                 if getattr(tc, "id", None):
                     part["id"] = tc.id
             else:
@@ -977,16 +961,9 @@ class OpenTelemetryEventHandler:
         return parts
 
     @staticmethod
-    def _find_tool_description(
-        source: Any, event: Any, tool_name: Optional[str], tool_descriptions: Dict[str, Optional[str]]
-    ) -> Optional[str]:
+    def _find_tool_description(source: Any, event: Any, tool_name: Optional[str]) -> Optional[str]:
         if not tool_name:
             return None
-        tool = (getattr(source, "_tool_name_mapping", None) or {}).get(tool_name)
-        if tool is not None:
-            return OpenTelemetryEventHandler._normalize_tool_description(getattr(tool, "description", None))
-        if tool_name in tool_descriptions:
-            return tool_descriptions[tool_name]
         tool_class = getattr(event, "tool_class", None)
         if tool_class:
             desc = getattr(tool_class, "description", None)
@@ -996,13 +973,8 @@ class OpenTelemetryEventHandler:
             tools = getattr(tools_holder, "tools", None) if tools_holder else None
             if not tools:
                 continue
-            used_names = set()
             for tool in tools:
-                name = getattr(tool, "name", None)
-                if not name:
-                    continue
-                normalized_name = OpenTelemetryEventHandler._normalize_tool_name(name, used_names)
-                if tool_name in (normalized_name, name):
+                if getattr(tool, "name", None) == tool_name:
                     desc = getattr(tool, "description", None)
                     if desc:
                         return OpenTelemetryEventHandler._normalize_tool_description(desc)
