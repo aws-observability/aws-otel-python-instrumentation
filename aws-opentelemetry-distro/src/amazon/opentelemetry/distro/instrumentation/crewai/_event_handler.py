@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import re
+import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
@@ -54,7 +55,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_USAGE_REASONING_OUTPUT_TOKENS,
     GenAiOperationNameValues,
 )
-from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
+from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE, ErrorTypeValues
 from opentelemetry.trace import SpanKind, Status, StatusCode
 
 if TYPE_CHECKING:
@@ -65,6 +66,9 @@ if TYPE_CHECKING:
         AgentExecutionCompletedEvent,
         AgentExecutionErrorEvent,
         AgentExecutionStartedEvent,
+        LiteAgentExecutionCompletedEvent,
+        LiteAgentExecutionErrorEvent,
+        LiteAgentExecutionStartedEvent,
     )
     from crewai.events.types.crew_events import (
         CrewKickoffCompletedEvent,
@@ -115,12 +119,20 @@ class _EventBusEmitWrapper:
 
 class OpenTelemetryEventHandler:
 
-    def __init__(self, tracer: trace.Tracer) -> None:
+    def __init__(self, tracer: trace.Tracer) -> None:  # pylint: disable=too-many-locals
         # pylint: disable=import-outside-toplevel
+        # CrewAI lets users run an agent with Agent.kickoff() without it belonging to a Crew. Those runs emit
+        # LiteAgentExecution* events instead of AgentExecution* events, see:
+        # https://docs.crewai.com/v1.15.35/en/concepts/agents#direct-agent-interaction-with-kickoff
+        # TODO: crewai 2.0 removes the deprecated LiteAgent class. When adding crewai 2.x support, check
+        # whether Agent.kickoff() still emits these events (or renamed them) and update these handlers.
         from crewai.events.types.agent_events import (
             AgentExecutionCompletedEvent,
             AgentExecutionErrorEvent,
             AgentExecutionStartedEvent,
+            LiteAgentExecutionCompletedEvent,
+            LiteAgentExecutionErrorEvent,
+            LiteAgentExecutionStartedEvent,
         )
         from crewai.events.types.crew_events import (
             CrewKickoffCompletedEvent,
@@ -153,6 +165,9 @@ class OpenTelemetryEventHandler:
             LLMCallStartedEvent: self._on_llm_start,
             LLMCallCompletedEvent: self._on_llm_completed,
             LLMCallFailedEvent: self._on_llm_failed,
+            LiteAgentExecutionStartedEvent: self._on_lite_agent_started,
+            LiteAgentExecutionCompletedEvent: self._on_lite_agent_completed,
+            LiteAgentExecutionErrorEvent: self._on_lite_agent_error,
         }
 
     @skip_instrumentation_if_suppressed
@@ -285,6 +300,94 @@ class OpenTelemetryEventHandler:
             error=getattr(event, "error", None),
         )
 
+    # LiteAgent will be deprecated starting in version 2.0.0
+    # https://github.com/crewAIInc/crewAI/blob/main/lib/crewai/src/crewai/lite_agent.py
+    #
+    # LiteAgent exists so you can invoke an agent without building a Crew or a Task.
+    # It is only used by Agent.kickoff().
+    # They carry less than crew agent events (no task, agent info as a plain dict), so this span is started
+    # as its own root and paired with its end event by started_event_id.
+    def _on_lite_agent_started(  # pylint: disable=too-many-branches,too-many-locals
+        self, source: "BaseAgent", event: "LiteAgentExecutionStartedEvent"
+    ) -> None:
+        agent = source
+        agent_role = getattr(agent, "role", None) if agent else None
+        span_name = (
+            f"{GenAiOperationNameValues.INVOKE_AGENT.value} {agent_role}"
+            if agent_role
+            else GenAiOperationNameValues.INVOKE_AGENT.value
+        )
+        attributes: Dict[str, Any] = {
+            GEN_AI_OPERATION_NAME: GenAiOperationNameValues.INVOKE_AGENT.value,
+        }
+        if agent:
+            if agent_role:
+                attributes[GEN_AI_AGENT_NAME] = agent_role
+            if hasattr(agent, "id"):
+                attributes[GEN_AI_AGENT_ID] = str(agent.id)
+            goal = getattr(agent, "goal", None)
+            if goal:
+                attributes[GEN_AI_AGENT_DESCRIPTION] = goal
+
+            llm = getattr(agent, "llm", None)
+            provider, model = self._extract_provider_and_model(llm)
+            if provider:
+                attributes[GEN_AI_PROVIDER_NAME] = provider
+            if model:
+                attributes[GEN_AI_REQUEST_MODEL] = model
+            if llm:
+                self._set_llm_request_span_attributes(attributes, llm)
+
+        messages = getattr(event, "messages", None)
+        if messages:
+            if isinstance(messages, str):
+                messages = [{"role": "user", "content": messages}]
+            attributes[GEN_AI_INPUT_MESSAGES] = serialize_to_json_string(
+                [self._to_input_message(m) for m in messages if isinstance(m, dict)]
+            )
+
+        # same attribute the crew span sets in _on_crew_start
+        tools = first_not_none(getattr(event, "tools", None), getattr(agent, "tools", None))
+        if tools and (tool_defs := self._extract_tool_definitions(tools)):
+            attributes[GEN_AI_TOOL_DEFINITIONS] = serialize_to_json_string(tool_defs)
+
+        # Agent.kickoff() runs an agent on its own, without a Crew or Task, and emits LiteAgentExecution* events:
+        # https://docs.crewai.com/v1.15.35/en/concepts/agents#direct-agent-interaction-with-kickoff
+        # Unlike _on_agent_start, this passes its own root_event_id so _end_spans_for_root_event ends this span and
+        # its children when the kickoff completes. When kickoff() runs inside a crew (from a tool or a Task string
+        # guardrail), inheriting the crew's root would leave this span open until the crew ends.
+        self._start_span(
+            span_name, event.event_id, attributes, self._get_parent_event_id(event), root_event_id=event.event_id
+        )
+        # like _on_agent_start, so events that lose their CrewAI parent (e.g. native tool calls) still find this span
+        if (agent_entry := self._event_id_to_span.get(event.event_id)) and (agent_id := getattr(source, "id", None)):
+            self._event_id_to_span.put(str(agent_id), agent_entry)
+
+    def _on_lite_agent_completed(
+        self, source: "BaseAgent", event: "LiteAgentExecutionCompletedEvent"  # pylint: disable=unused-argument
+    ) -> None:
+        output = getattr(event, "output", None)
+        agent_entry = self._event_id_to_span.get(event.started_event_id)
+        if output and agent_entry:
+            agent_entry.span.set_attribute(
+                GEN_AI_OUTPUT_MESSAGES,
+                serialize_to_json_string(
+                    [{"role": "assistant", "parts": content_to_parts(output), "finish_reason": "stop"}]
+                ),
+            )
+        # like _on_crew_completed, end by the entry's root: if CrewAI mis-pairs this event with a child start left
+        # open on its scope stack, started_event_id is that child's ID, whose root is still this agent span
+        self._end_spans_for_root_event(agent_entry.root_event_id if agent_entry else event.started_event_id)
+
+    def _on_lite_agent_error(
+        self, source: "BaseAgent", event: "LiteAgentExecutionErrorEvent"
+    ) -> None:  # pylint: disable=unused-argument
+        agent_entry = self._event_id_to_span.get(event.started_event_id)
+        self._end_spans_for_root_event(
+            agent_entry.root_event_id if agent_entry else event.started_event_id,
+            error=getattr(event, "error", None),
+        )
+
     def _on_tool_start(self, source: "ToolUsage", event: "ToolUsageStartedEvent") -> None:
         tool_name = event.tool_name
         span_name = (
@@ -334,7 +437,7 @@ class OpenTelemetryEventHandler:
     def _on_tool_error(
         self, source: "ToolUsage", event: "ToolUsageErrorEvent"
     ) -> None:  # pylint: disable=unused-argument
-        self._end_span(event.started_event_id, error=str(event.error))
+        self._end_span(event.started_event_id, error=event.error)
 
     def _on_llm_start(self, source: "BaseLLM", event: "LLMCallStartedEvent") -> None:
         attributes: Dict[str, Any] = {
@@ -584,7 +687,7 @@ class OpenTelemetryEventHandler:
         self,
         started_event_id: Optional[str],
         set_attrs: Optional[Dict[str, Any]] = None,
-        error: Optional[str] = None,
+        error: Optional[Any] = None,
     ) -> None:
         if not started_event_id:
             return
@@ -595,16 +698,17 @@ class OpenTelemetryEventHandler:
                     if value is not None:
                         entry.span.set_attribute(key, value)
             if error:
-                entry.span.set_status(Status(StatusCode.ERROR, error))
-                entry.span.set_attribute(ERROR_TYPE, error)
+                entry.span.set_status(Status(StatusCode.ERROR, str(error)))
+                entry.span.set_attribute(ERROR_TYPE, self._get_error_type(error))
             else:
                 entry.span.set_status(Status(StatusCode.OK))
             entry.span.end()
             try_detach(entry.token)
 
-    def _end_spans_for_root_event(self, root_event_id: Optional[str], error: Optional[str] = None) -> None:
+    def _end_spans_for_root_event(self, root_event_id: Optional[str], error: Optional[Any] = None) -> None:
         if not root_event_id:
             return
+        error_type = self._get_error_type(error) if error else None
 
         removed_span_entries = self._event_id_to_span.pop_items_if_matches(
             lambda _, span_entry: span_entry.root_event_id == root_event_id
@@ -616,12 +720,22 @@ class OpenTelemetryEventHandler:
         for _, entry in reversed(removed_span_entries):
             if entry.span.is_recording():
                 if error:
-                    entry.span.set_status(Status(StatusCode.ERROR, error))
-                    entry.span.set_attribute(ERROR_TYPE, error)
+                    entry.span.set_status(Status(StatusCode.ERROR, str(error)))
+                    entry.span.set_attribute(ERROR_TYPE, error_type)
                 else:
                     entry.span.set_status(Status(StatusCode.OK))
                 entry.span.end()
                 try_detach(entry.token)
+
+    @staticmethod
+    def _get_error_type(error: Any) -> str:
+        # error.type must be a low-cardinality class name, not the message (which can contain task or tool content).
+        # Most CrewAI failure events carry the error as a string, but this handler runs synchronously inside
+        # CrewAI's except block, so the exception being handled gives the real type.
+        if isinstance(error, BaseException):
+            return type(error).__qualname__
+        active_exception = sys.exc_info()[1]
+        return type(active_exception).__qualname__ if active_exception else ErrorTypeValues.OTHER.value
 
     @staticmethod
     def _extract_provider_and_model(llm: Any) -> Tuple[Optional[str], Optional[str]]:

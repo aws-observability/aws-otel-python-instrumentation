@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from contextvars import Token
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, Optional
@@ -19,6 +20,7 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
     DictWithLock,
     content_to_parts,
     first_not_none,
+    get_value,
     serialize_to_json_string,
     skip_instrumentation_if_suppressed,
     to_tool_attribute_value,
@@ -50,6 +52,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_TOOL_CALL_ARGUMENTS,
     GEN_AI_TOOL_CALL_ID,
     GEN_AI_TOOL_CALL_RESULT,
+    GEN_AI_TOOL_DEFINITIONS,
     GEN_AI_TOOL_DESCRIPTION,
     GEN_AI_TOOL_NAME,
     GEN_AI_TOOL_TYPE,
@@ -216,9 +219,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             self._end_span(run_id)
             return
         span = entry.span
-        llm_output: dict | None = response.llm_output
-        model: str | None = (llm_output.get("model_name") or llm_output.get("model_id")) if llm_output else None
-        response_id: str | None = llm_output.get("id") if llm_output else None
+        model, response_id = self._extract_llm_model_and_response_id(response)
         (
             input_tokens,
             output_tokens,
@@ -256,6 +257,49 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         self._set_span_attribute(span, GEN_AI_USAGE_REASONING_OUTPUT_TOKENS, reasoning_output_tokens)
 
         self._end_span(run_id)
+
+    @staticmethod
+    def _extract_llm_model_and_response_id(response: LLMResult) -> tuple[str | None, str | None]:
+        # LLMResult(
+        #     llm_output=None,
+        #     generations=[[
+        #         ChatGeneration(
+        #             message=AIMessage(
+        #                 content=[{"type": "text", "text": "Hello, World!", "annotations": [], "id": "msg-mock"}],
+        #                 response_metadata={
+        #                     "id": "resp-mock",
+        #                     "model": "gpt-5.6-sol",
+        #                     "model_name": "gpt-5.6-sol",
+        #                 },
+        #             ),
+        #             generation_info=None,
+        #         )
+        #     ]],
+        # )
+        # https://github.com/langchain-ai/langchain/blob/16a08bda1247010c23fcfa887e421259a5fced5e/libs/partners/openai/langchain_openai/chat_models/base.py#L5195-L5382
+        llm_output = response.llm_output or {}
+        model_keys = ("model_name", "model_id", "model")
+        model = first_not_none(
+            *(str(llm_output[key]).strip() or None for key in model_keys if llm_output.get(key) is not None)
+        )
+        response_id = llm_output.get("id")
+        if response_id is not None:
+            response_id = str(response_id).strip() or None
+        for batch in response.generations:
+            for generation in batch:
+                if model and response_id:
+                    return model, response_id
+                message_metadata = getattr(getattr(generation, "message", None), "response_metadata", None) or {}
+                generation_info = generation.generation_info or {}
+                for metadata in (message_metadata, generation_info):
+                    model = first_not_none(
+                        model,
+                        *(metadata[key].strip() or None for key in model_keys if isinstance(metadata.get(key), str)),
+                    )
+                    value = metadata.get("id")
+                    if isinstance(value, str):
+                        response_id = first_not_none(response_id, value.strip() or None)
+        return model, response_id
 
     @staticmethod
     def _extract_token_usage(
@@ -856,6 +900,27 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
                 nested_additional_model_request_fields.get("streaming"),
             ),
         )
+        tools = first_not_none(
+            params.get("tools"),
+            params.get("functions"),
+            params_model_kwargs.get("tools"),
+            params_model_kwargs.get("functions"),
+            (metadata or {}).get("tools"),
+            (metadata or {}).get("functions"),
+            config.get("tools"),
+            config.get("functions"),
+            config_model_kwargs.get("tools"),
+            config_model_kwargs.get("functions"),
+            additional_model_request_fields.get("tools"),
+            additional_model_request_fields.get("functions"),
+            nested_additional_model_request_fields.get("tools"),
+            nested_additional_model_request_fields.get("functions"),
+        )
+        if tool_defs := self._extract_tool_definitions(tools):
+            # No depth limit: the default truncates nested tool parameter schemas.
+            self._set_span_attribute(
+                span, GEN_AI_TOOL_DEFINITIONS, serialize_to_json_string(tool_defs, max_depth=sys.maxsize)
+            )
 
     def _should_skip_chain(
         self, serialized: dict[str, Any], name: Optional[str], metadata: Optional[dict] = None
@@ -1049,6 +1114,42 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
                 return provider
 
         return None
+
+    # Adapted from opentelemetry-python-genai (Apache-2.0), prepare_tool_definitions in
+    # https://github.com/open-telemetry/opentelemetry-python-genai/blob/main/instrumentation/opentelemetry-instrumentation-genai-langchain/src/opentelemetry/instrumentation/genai/langchain/utils.py
+    @staticmethod
+    def _extract_tool_definitions(tools: Any) -> list[dict[str, Any]]:
+        """Normalize LangChain provider tool formats to OTel gen_ai.tool.definitions entries."""
+        if not tools:
+            return []
+        definitions = []
+        for tool in tools:
+            tool_type = get_value(tool, "type")
+            if tool_type == "function":
+                # OpenAI format (ChatOpenAI, ChatBedrockConverse, Gemini, Mistral, Cohere, ...):
+                # {"type": "function", "function": {"name", "description", "parameters"}}
+                spec = get_value(tool, "function") or {}
+                parameters = get_value(spec, "parameters")
+            elif tool_type is None:
+                # Flat formats with no "type":
+                #   Legacy OpenAI functions: {"name", "description", "parameters"}
+                #   Anthropic (ChatAnthropic, ChatBedrock InvokeModel): {"name", "description", "input_schema"}
+                spec = tool
+                parameters = get_value(spec, "parameters") or get_value(spec, "input_schema")
+            else:
+                # Provider built-in tools (e.g. web search) are not function tools.
+                continue
+
+            name = get_value(spec, "name")
+            if not name:
+                continue
+            definition = {"type": "function", "name": name}
+            if description := get_value(spec, "description"):
+                definition["description"] = description
+            if parameters:
+                definition["parameters"] = parameters
+            definitions.append(definition)
+        return definitions
 
     def _update_agent_span_content(
         self,
