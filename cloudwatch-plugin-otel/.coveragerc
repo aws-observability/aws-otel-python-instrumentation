@@ -10,6 +10,10 @@ source =
     src/plugins
     .tox/*/lib/python*/site-packages/plugins
     */site-packages/plugins
+hooks =
+    src/cloudwatch_plugin_otel_hooks.py
+    .tox/*/lib/python*/site-packages/cloudwatch_plugin_otel_hooks.py
+    */site-packages/cloudwatch_plugin_otel_hooks.py
 
 [report]
 include_namespace_packages = true

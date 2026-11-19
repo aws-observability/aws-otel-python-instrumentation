@@ -1,0 +1,30 @@
+# GenAI envs, oldest supported versions. The OTel floor is higher than requirements.oldest.txt because
+# opentelemetry-util-genai 1.3b0 requires opentelemetry-api ~= 1.43 and opentelemetry-instrumentation >= 0.64b0.
+opentelemetry-api==1.43.0
+opentelemetry-sdk==1.43.0
+opentelemetry-instrumentation==0.64b0
+opentelemetry-semantic-conventions==0.64b0
+opentelemetry-test-utils==0.64b0
+opentelemetry-instrumentation-botocore==0.64b0
+opentelemetry-instrumentation-flask==0.64b0
+opentelemetry-instrumentation-requests==0.64b0
+opentelemetry-instrumentation-sqlalchemy==0.64b0
+opentelemetry-instrumentation-sqlite3==0.64b0
+opentelemetry-instrumentation-genai-langchain==1.3b0
+opentelemetry-util-genai==1.3b0
+# langchain-core 0.3.49 is the floor that langchain 0.3.22 (the instrumentor's declared minimum) requires, and the
+# upstream package's own oldest test pin; 0.3.45 and older lack the set_config_context execution boundary the
+# instrumentor wraps.
+langchain-core==0.3.49
+# langgraph 0.3.29 is the first release with which the 1.3b0 instrumentor emits no spurious
+# `invoke_agent ChannelWrite<...>` spans for a create_react_agent run (measured: 0.3.18 through 0.3.28 emit them,
+# 0.3.29 and 0.3.30 do not). 0.3.18 is the oldest with the node boundary (langgraph.utils.runnable.set_config_context).
+langgraph==0.3.29
+# What langgraph 0.3.29 resolves to with the pins above, pinned so the oldest env is reproducible.
+langgraph-prebuilt==0.1.8
+langgraph-checkpoint==2.1.2
+langgraph-sdk==0.1.74
+# Not langchain-core's floor (pydantic 2.7.4): its pydantic-core 2.18.4 has no cp313/cp314 wheels (pydantic-core
+# has cp314 wheels only from 2.35). CI runs genai-oldest on py3.10 only, but the py3.11-3.14 genai-oldest tox envs
+# exist for local runs and need a newer one.
+pydantic==2.14.3
