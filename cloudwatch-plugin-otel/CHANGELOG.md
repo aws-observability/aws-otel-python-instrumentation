@@ -17,7 +17,7 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   instrumentors. Privacy: if you already set `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true` (ADOT agent
   mode sets it for you) and use util-genai-based instrumentations, their prompts and responses are now captured on
   spans after upgrading
-  ([#TBD](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/TBD))
+  ([#979](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/979))
 - Fix unbounded span metrics cardinality on SERVER spans: the legacy fallback for
   `server.address`/`server.port` now uses `net.host.name`/`net.host.port` on SERVER spans instead of
   `net.peer.name`/`net.peer.port`, which describe the client (including its ephemeral port)
