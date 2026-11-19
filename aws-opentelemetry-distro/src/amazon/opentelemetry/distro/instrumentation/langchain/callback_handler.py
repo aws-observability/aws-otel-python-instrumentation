@@ -604,24 +604,27 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
                     if isinstance(msg, AIMessage) and isinstance(content, list):
                         # Chat models keep each tool call in content as a provider block and also parse it into
                         # msg.tool_calls, which middleware such as HumanInTheLoopMiddleware edits in place. Tool calls
-                        # are recorded from msg.tool_calls below, so drop the content copies:
-                        # - "tool_use": Bedrock Converse and Anthropic, default output_version
-                        # https://github.com/langchain-ai/langchain-aws/blob/28cd7f70b943e1aa71a8d8903d7fb1251317d104/libs/aws/langchain_aws/chat_models/bedrock_converse.py#L3549-L3551
-                        # https://github.com/langchain-ai/langchain-aws/blob/28cd7f70b943e1aa71a8d8903d7fb1251317d104/libs/aws/langchain_aws/chat_models/bedrock_converse.py#L3818-L3826
-                        # https://github.com/langchain-ai/langchain/blob/bbcdd568cd02b81e5ede5aa525744e79e67c2278/libs/partners/anthropic/langchain_anthropic/chat_models.py#L2539-L2589
-                        # - "tool_call", and "tool_call_chunk" until the last streamed chunk: output_version="v1"
-                        # https://github.com/langchain-ai/langchain/blob/1a41b51b0295d7cc6df45cdede199b4a34649b1d/libs/core/langchain_core/messages/block_translators/bedrock_converse.py#L213-L256
-                        # https://github.com/langchain-ai/langchain/blob/1a41b51b0295d7cc6df45cdede199b4a34649b1d/libs/core/langchain_core/messages/ai.py#L573-L596
-                        # - "function_call" and "custom_tool_call": OpenAI Responses API
-                        # https://github.com/langchain-ai/langchain/blob/16a08bda1247010c23fcfa887e421259a5fced5e/libs/partners/openai/langchain_openai/chat_models/base.py#L5278-L5315
+                        # are recorded from msg.tool_calls below, so drop the content copies.
+                        tool_call_block_types = {
+                            # Bedrock Converse and Anthropic, default output_version
+                            # https://github.com/langchain-ai/langchain-aws/blob/28cd7f70b943e1aa71a8d8903d7fb1251317d104/libs/aws/langchain_aws/chat_models/bedrock_converse.py#L3549-L3551
+                            # https://github.com/langchain-ai/langchain-aws/blob/28cd7f70b943e1aa71a8d8903d7fb1251317d104/libs/aws/langchain_aws/chat_models/bedrock_converse.py#L3818-L3826
+                            # https://github.com/langchain-ai/langchain/blob/bbcdd568cd02b81e5ede5aa525744e79e67c2278/libs/partners/anthropic/langchain_anthropic/chat_models.py#L2539-L2589
+                            "tool_use",
+                            # output_version="v1"; "tool_call_chunk" until the last streamed chunk
+                            # https://github.com/langchain-ai/langchain/blob/1a41b51b0295d7cc6df45cdede199b4a34649b1d/libs/core/langchain_core/messages/block_translators/bedrock_converse.py#L213-L256
+                            # https://github.com/langchain-ai/langchain/blob/1a41b51b0295d7cc6df45cdede199b4a34649b1d/libs/core/langchain_core/messages/ai.py#L573-L596
+                            "tool_call",
+                            "tool_call_chunk",
+                            # OpenAI Responses API
+                            # https://github.com/langchain-ai/langchain/blob/16a08bda1247010c23fcfa887e421259a5fced5e/libs/partners/openai/langchain_openai/chat_models/base.py#L5278-L5315
+                            "function_call",
+                            "custom_tool_call",
+                        }
                         content = [
                             block
                             for block in content
-                            if not (
-                                isinstance(block, dict)
-                                and block.get("type")
-                                in ("tool_use", "tool_call", "tool_call_chunk", "function_call", "custom_tool_call")
-                            )
+                            if not (isinstance(block, dict) and block.get("type") in tool_call_block_types)
                         ]
                     parts.extend(content_to_parts(content))
                 tool_calls: list[dict] = getattr(msg, "tool_calls", None) or []
