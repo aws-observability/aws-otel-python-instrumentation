@@ -623,6 +623,28 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             os.environ.pop(OTEL_EXPORTER_OTLP_ENDPOINT, None)
             self.assertFalse(_has_custom_otlp_traces_endpoint())
 
+    def test_customize_span_exporter_lambda_with_empty_otlp_endpoint(self):
+        """Empty OTLP endpoint env vars are treated as unset, so Lambda still falls back to UDP."""
+        for empty_env in (
+            {OTEL_EXPORTER_OTLP_ENDPOINT: ""},
+            {OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: ""},
+            {OTEL_EXPORTER_OTLP_ENDPOINT: "", OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: ""},
+        ):
+            env = {
+                "AWS_LAMBDA_FUNCTION_NAME": "myLambdaFunc",
+                "OTEL_AWS_APPLICATION_SIGNALS_ENABLED": "false",
+                **empty_env,
+            }
+            with self.subTest(env=empty_env), patch.dict(os.environ, env):
+                for name in (OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_EXPORTER_OTLP_TRACES_ENDPOINT):
+                    if name not in empty_env:
+                        os.environ.pop(name, None)
+                self.assertFalse(_has_custom_otlp_traces_endpoint())
+
+                mock_exporter = MagicMock(spec=OTLPSpanExporter)
+                customized_exporter = _customize_span_exporter(mock_exporter, Resource.get_empty())
+                self.assertIsInstance(customized_exporter, OTLPUdpSpanExporter)
+
     def test_customize_span_exporter_with_agent_observability(self):
         # Test that logger_provider is passed when agent observability is enabled
         os.environ["AGENT_OBSERVABILITY_ENABLED"] = "true"

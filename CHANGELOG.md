@@ -19,6 +19,11 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   generates fully random trace and span IDs, but reads them from `os.urandom`, so sessions restored from the same
   memory snapshot don't repeat IDs. An explicitly set `OTEL_PYTHON_ID_GENERATOR` still takes precedence.
   ([#985](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/985))
+- fix: in Lambda, treat empty `OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` values as
+  unset, so traces fall back to the X-Ray UDP exporter again instead of being dropped. A non-empty
+  `OTEL_EXPORTER_OTLP_ENDPOINT` still selects the OTLP exporter instead of X-Ray UDP, a behavior change
+  since v0.23.0 ([#562](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/562))
+  ([#987](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/987))
 
 ## v0.23.0 - 2026-11-18
 - fix(crewai): record full tool definitions (name, description, and parameters) on CrewAI `chat`,
