@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 """Shared fakes and helpers for the GenAI tests (importable because pytest puts this directory on sys.path)."""
+import importlib.machinery
 import json
 import os
 import subprocess
@@ -13,19 +14,14 @@ from plugins.opentelemetry.cloudwatch.genai import _settings
 
 from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
 
-# Every env var the GenAI layer reads.
+# Every env var the GenAI steps read.
 GENAI_ENV = (
     "CW_PLUGIN_GENAI_ENABLED",
     "OTEL_SDK_DISABLED",
-    "AGENT_OBSERVABILITY_ENABLED",
-    "OTEL_PYTHON_DISTRO",
-    "OTEL_PYTHON_CONFIGURATOR",
     "OTEL_PYTHON_DISABLED_INSTRUMENTATIONS",
     "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT",
     "OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT",
     "OTEL_PYTHON_LOG_LEVEL",
-    "AWS_GENAI_INSTRUMENTATION",
-    "AWS_AGENTIC_INSTRUMENTATION",
 )
 
 OLD = "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"
@@ -52,30 +48,6 @@ class FakeLangChainInstrumentor(BaseInstrumentor):
         pass
 
 
-class FakeOtherLangChainInstrumentor(BaseInstrumentor):
-    """Stands in for another vendor's LangChain instrumentor (OpenInference, ADOT aws_langchain, ...)."""
-
-    def instrumentation_dependencies(self):
-        return ()
-
-    def _instrument(self, **kwargs):
-        pass
-
-    def _uninstrument(self, **kwargs):
-        pass
-
-
-def fake_entry_point(name, cls_name, dist):
-    """An ``opentelemetry_instrumentor`` entry point for a fake defined in this module, from distribution ``dist``."""
-    return types.SimpleNamespace(
-        name=name,
-        value=f"genai_helpers:{cls_name}",
-        module="genai_helpers",
-        attr=cls_name,
-        dist=types.SimpleNamespace(metadata={"Name": dist} if dist else {}),
-    )
-
-
 def fake_upstream_module(cls=None):
     """A stand-in for ``opentelemetry.instrumentation.genai.langchain`` exposing ``cls`` as LangChainInstrumentor."""
     module = types.ModuleType("opentelemetry.instrumentation.genai.langchain")
@@ -84,7 +56,7 @@ def fake_upstream_module(cls=None):
 
 
 # BaseInstrumentor subclasses are per-class singletons, so each test starts and ends with them uninstrumented.
-FAKE_INSTRUMENTORS = (FakeLangChainInstrumentor, FakeOtherLangChainInstrumentor)
+FAKE_INSTRUMENTORS = (FakeLangChainInstrumentor,)
 
 
 def plugin_records(caplog, level=None):
@@ -101,10 +73,9 @@ def messages(caplog, level=None):
 
 
 def summary_parts(line):
-    """``(content capture part, langchain part)`` of the startup summary line."""
-    assert line.startswith("CW-PLUGIN genai: active; content capture="), line
-    content, _, langchain = line[len("CW-PLUGIN genai: active; content capture=") :].rpartition("; langchain=")
-    return content, langchain
+    """``{step: outcome}`` of the startup summary line."""
+    assert line.startswith("CW-PLUGIN genai: "), line
+    return dict(part.split("=", 1) for part in line[len("CW-PLUGIN genai: ") :].split("; "))
 
 
 def plugin_entry_points(group):
@@ -214,11 +185,14 @@ FAKE_SITES = (
 
 
 def install_fake_util_genai(monkeypatch, handler_source=FAKE_HANDLER_SOURCE, invocation_source=FAKE_INVOCATION_SOURCE):
-    """Stand-ins for util-genai 1.3b0's utils, handler and _invocation modules (the resolver's binding sites),
-    registered in sys.modules. Returns ``(utils, handler, invocation)``."""
+    """Stand-ins for util-genai 1.3b0's package and its utils, handler and _invocation modules (the resolver's
+    binding sites), registered in sys.modules. Returns ``(utils, handler, invocation)``."""
     # pylint: disable=import-outside-toplevel
     from plugins.opentelemetry.cloudwatch.genai import content_capture
 
+    package = types.ModuleType("opentelemetry.util.genai")
+    package.__spec__ = importlib.machinery.ModuleSpec(package.__name__, None, is_package=True)
+    monkeypatch.setitem(sys.modules, package.__name__, package)  # what find_spec sees
     # There are no source files to scan for the stand-ins: report exactly the known binding sites.
     monkeypatch.setattr(content_capture, "_binding_sites", lambda: set(FAKE_SITES))
     modules = []

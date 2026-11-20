@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from genai_helpers import plugin_entry_points, run_child, write_stub_dist
+from genai_helpers import plugin_entry_points, run_child
 
 CHILD = Path(__file__).with_name("child_isolation.py")
 PLUGIN_LOGGER = "plugins.opentelemetry.cloudwatch"
@@ -34,8 +34,6 @@ class SentinelInstrumentor(BaseInstrumentor):
 @pytest.fixture
 def workdir(tmp_path):
     (tmp_path / "cw_plugin_sentinel.py").write_text(SENTINEL_MODULE, encoding="utf-8")
-    # The shim only imports `plugins.*` when a supported GenAI distribution is installed: make one visible.
-    write_stub_dist(tmp_path, "opentelemetry-instrumentation-genai-langchain", "0.0.0")
     dist_info = tmp_path / "cw_plugin_sentinel-1.0.dist-info"
     dist_info.mkdir()
     (dist_info / "METADATA").write_text("Metadata-Version: 2.1\nName: cw-plugin-sentinel\nVersion: 1.0\n", "utf-8")

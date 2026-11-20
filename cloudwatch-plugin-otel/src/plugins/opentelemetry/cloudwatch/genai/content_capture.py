@@ -2,7 +2,22 @@
 # SPDX-License-Identifier: Apache-2.0
 """Honor ``OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true`` for util-genai instrumentations, without
 writing the environment (a pre step). The plugin never turns content capture on by itself: unset stays
-util-genai's NO_CONTENT."""
+util-genai's NO_CONTENT.
+
+Why ``true``: the AgentCore documentation (and ADOT) tell users to set ``true``, and the botocore and older
+openai-v2 instrumentations accept only ``true``. util-genai accepts only the mode names and reads ``true`` as
+NO_CONTENT, so without this, users who follow those docs silently get no util-genai content and AgentCore
+Evaluations cannot score their traces.
+
+``true`` or ``SPAN_ONLY``: ``true`` makes botocore, openai-v2 and (through this module) util-genai instrumentations
+capture content on spans; ``SPAN_ONLY`` works for util-genai instrumentations only and turns botocore content off.
+Both are fine for AgentCore Evaluations.
+
+Limits: ``true`` is not translated while ``OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT`` is set, so that name wins
+once util-genai reads it. Code that imported util-genai's resolver by name before the hook keeps the original.
+Installs without ``.py`` sources cannot be scanned, so nothing is installed there (a warning if ``true`` is set).
+When it retires: see the workaround marker on ``_resolve``.
+"""
 
 import ast
 import dis
@@ -12,7 +27,7 @@ import importlib.util
 import inspect
 import logging
 import os
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, Optional, Set, Tuple
 
 from plugins.opentelemetry.cloudwatch.genai._settings import distribution_version, get_logger, warn_once
 
@@ -24,10 +39,6 @@ _UTILS = "opentelemetry.util.genai.utils"
 # Every util-genai module that binds the resolver by name (util-genai 1.3b0): its definition, the handler and the
 # invocations (which resolve it themselves when created without a handler).
 _SITES = (_UTILS, "opentelemetry.util.genai.handler", "opentelemetry.util.genai._invocation")
-UNSET_HINT = (
-    "NO_CONTENT (unset: upstream default; AgentCore Evaluations needs content: set "
-    f"{CAPTURE_MESSAGE_CONTENT}=true or SPAN_ONLY)"
-)
 
 _patch: Dict[str, Any] = {}  # what the installed patch replaced; empty when none is installed
 _patch_skipped: Dict[str, bool] = {}  # why nothing was installed, when util-genai no longer reads the old name
@@ -47,14 +58,9 @@ def _translates() -> bool:
 # nothing); or contrib botocore/openai-v2 accept the mode names and the AgentCore docs and ADOT's agent-mode
 # default switch to SPAN_ONLY)
 def _resolve(original, mode_enum) -> Tuple[Any, bool]:
-    """``(mode, translated)``: util-genai's own result, except SPAN_ONLY where it read `true` as NO_CONTENT.
-
-    Why: the AgentCore docs and ADOT set ``true``, and contrib botocore and older openai-v2 accept only ``true``,
-    but util-genai (like semantic-conventions-genai#543) accepts only the mode names and reads ``true`` as
-    NO_CONTENT. Without this, users who follow the AgentCore docs silently get no util-genai content and AgentCore
-    Evaluations cannot score their traces; setting SPAN_ONLY instead would turn botocore content off. The original
-    is always called first, so a util-genai that resolves `true` itself makes this a no-op.
-    """
+    """``(mode, translated)``: util-genai's own result, except SPAN_ONLY where it read `true` as NO_CONTENT (like
+    semantic-conventions-genai#543, util-genai accepts only the mode names). The original is always called first,
+    so a util-genai that resolves `true` itself makes this a no-op."""
     mode = original()
     if mode is mode_enum.NO_CONTENT and _translates():
         return mode_enum.SPAN_ONLY, True
@@ -130,7 +136,7 @@ def _install() -> Optional[str]:
         return None
     sites = _sites()
     if sites is None:
-        return distribution_version("opentelemetry-util-genai") or "(not installed)"
+        return distribution_version("opentelemetry-util-genai") or "(unknown version)"
     modules, original, mode_enum = sites
 
     @functools.wraps(original)
@@ -155,44 +161,26 @@ def _unpatch() -> None:
     _patch_skipped.clear()
 
 
-def content_capture_step() -> Tuple[Optional[str], str]:
-    """The ``genai.content_capture`` pre step: ``(mode or raw value, how)`` for the summary line."""
+def content_capture_step() -> Optional[str]:
+    """The ``content capture`` pre step: the summary's content part, or None when util-genai is not importable."""
+    if importlib.util.find_spec("opentelemetry.util.genai") is None:
+        return None
     value, unavailable = _value(), _install()
     if unavailable is not None and _patch_skipped:
         if value:
             msg = "util-genai %s no longer reads %s, so %s=%s is not translated. Fix: set the content-capture mode "
             old = CAPTURE_MESSAGE_CONTENT
             warn_once("unavailable", msg + "util-genai documents", unavailable, old, old, value)
-        return "unknown", f"{CAPTURE_MESSAGE_CONTENT} not read by util-genai {unavailable}"
+        return "unknown (translation unavailable)"
     if unavailable is not None and value.lower() == "true":
         msg = "%s=true means NO_CONTENT for util-genai %s (the plugin's translation is unavailable). "
         warn_once(
             "unavailable", msg + "Fix: %s=SPAN_ONLY", CAPTURE_MESSAGE_CONTENT, unavailable, CAPTURE_MESSAGE_CONTENT
         )
-        return "NO_CONTENT", f"true not translated: util-genai {unavailable} unsupported"
+        return "NO_CONTENT (translation unavailable)"
     if not value:
-        return None, "unset"
-    if value.upper() in VALID_MODES:
-        return value.upper(), "user"
-    if value.lower() != "true" or not _patch:
-        return "NO_CONTENT", f"{value!r} unrecognized"  # util-genai warns about it itself
-    mode, translated = _resolve(_patch["original"], _patch["mode_enum"])
-    return mode.name, ("translated from true" if translated else "resolved by util-genai")
-
-
-def summary(result: Optional[Tuple[Optional[str], str]], upstream_active: bool, others: List[str]) -> str:
-    """The content part of the summary line; ``others`` are other active LangChain instrumentors' dists."""
-    if result is None:
-        part = "unknown (the pre_instrument step did not run or failed)"
-    elif result[1] == "unset":
-        part = "NO_CONTENT (unset)" if others else UNSET_HINT
-    else:
-        part = f"{result[0]} ({result[1]})"
-    if os.environ.get(CAPTURE_CONTENT, "").strip():
-        part += f" ({CAPTURE_CONTENT} is not read by util-genai {distribution_version('opentelemetry-util-genai')})"
-    if not others:
-        return part
-    if upstream_active:
-        return f"{part}; LangChain also instrumented by {', '.join(others)} (its own content settings apply)"
-    owned = f"n/a for LangChain (instrumented by {others[0]}; its own settings apply)"
-    return owned + (f"; util-genai: {part}" if result and result[1].startswith("translated") else "")
+        return "NO_CONTENT (unset)"
+    if value.lower() == "true":  # the patch is installed here
+        mode, translated = _resolve(_patch["original"], _patch["mode_enum"])
+        return mode.name + (" (translated from true)" if translated else "")
+    return value.upper() if value.upper() in VALID_MODES else "NO_CONTENT"  # util-genai warns about other values

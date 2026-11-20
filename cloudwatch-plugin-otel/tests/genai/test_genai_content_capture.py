@@ -3,7 +3,7 @@
 """Content capture: `true`/`false` honored for util-genai handlers, nothing else changed, never a default.
 
 Resolution tests run against the real util-genai when it is installed, and always against a stand-in module with
-the same shape, so the non-GenAI tox envs cover the logic too.
+the same shape, so the oldest tox envs (without util-genai) cover the logic too.
 """
 import logging
 import os
@@ -21,10 +21,9 @@ from genai_helpers import (
     messages,
 )
 from plugins.opentelemetry.cloudwatch import _auto_instrumentation
-from plugins.opentelemetry.cloudwatch.genai import _settings, content_capture
+from plugins.opentelemetry.cloudwatch.genai import content_capture
 
 LANGCHAIN = "opentelemetry.instrumentation.genai.langchain"
-NEW_NOTE = f" ({NEW} is not read by util-genai "
 OTHER = "opentelemetry.instrumentation.openai_v2"
 
 
@@ -47,8 +46,8 @@ def _mode(handler_module, scope):
     return handler._content_capturing_mode.name
 
 
-def _summary(upstream_active=True, others=()):
-    return content_capture.summary(content_capture.content_capture_step(), upstream_active, list(others))
+def _summary():
+    return content_capture.content_capture_step()
 
 
 def _warnings(caplog):
@@ -61,58 +60,54 @@ def _warnings(caplog):
 @pytest.mark.parametrize(
     "env,mode,summary",
     [
-        ({}, "NO_CONTENT", content_capture.UNSET_HINT),
-        ({OLD: " "}, "NO_CONTENT", content_capture.UNSET_HINT),
-        ({NEW: "SPAN_ONLY"}, "NO_CONTENT", content_capture.UNSET_HINT + NEW_NOTE),  # the new name is not read
-        ({NEW: "true"}, "NO_CONTENT", content_capture.UNSET_HINT + NEW_NOTE),
-        ({OLD: "true", NEW: "SPAN_ONLY"}, "NO_CONTENT", "NO_CONTENT (resolved by util-genai)" + NEW_NOTE),
+        ({}, "NO_CONTENT", "NO_CONTENT (unset)"),
+        ({OLD: " "}, "NO_CONTENT", "NO_CONTENT (unset)"),
+        ({NEW: "SPAN_ONLY"}, "NO_CONTENT", "NO_CONTENT (unset)"),  # the new name is not read
+        ({NEW: "true"}, "NO_CONTENT", "NO_CONTENT (unset)"),
+        ({OLD: "true", NEW: "SPAN_ONLY"}, "NO_CONTENT", "NO_CONTENT"),  # not translated: the new name must win
         ({OLD: "true"}, "SPAN_ONLY", "SPAN_ONLY (translated from true)"),
         ({OLD: " TRUE "}, "SPAN_ONLY", "SPAN_ONLY (translated from true)"),
-        ({OLD: "False"}, "NO_CONTENT", "NO_CONTENT ('False' unrecognized)"),  # upstream's own NO_CONTENT
-        ({OLD: "span_and_event"}, "SPAN_AND_EVENT", "SPAN_AND_EVENT (user)"),
-        ({OLD: "EVENT_ONLY", NEW: "SPAN_ONLY"}, "EVENT_ONLY", "EVENT_ONLY (user)" + NEW_NOTE),
-        ({OLD: "bogus"}, "NO_CONTENT", "NO_CONTENT ('bogus' unrecognized)"),
+        ({OLD: "False"}, "NO_CONTENT", "NO_CONTENT"),  # upstream's own NO_CONTENT
+        ({OLD: "span_and_event"}, "SPAN_AND_EVENT", "SPAN_AND_EVENT"),
+        ({OLD: "EVENT_ONLY", NEW: "SPAN_ONLY"}, "EVENT_ONLY", "EVENT_ONLY"),
+        ({OLD: "bogus"}, "NO_CONTENT", "NO_CONTENT"),
     ],
 )
-def test_resolution_is_the_same_for_every_handler(handler_module, genai_installed, monkeypatch, env, mode, summary):
+def test_resolution_is_the_same_for_every_handler(handler_module, monkeypatch, env, mode, summary):
     for name, value in env.items():
         monkeypatch.setenv(name, value)
     before = dict(os.environ)
 
-    assert _summary().startswith(summary)
+    assert _summary() == summary
     assert _mode(handler_module, LANGCHAIN) == mode
     assert _mode(handler_module, OTHER) == mode
     assert _mode(handler_module, None) == mode
     assert dict(os.environ) == before
 
 
-def test_unset_is_upstream_no_content_with_a_hint_not_a_warning(handler_module, genai_installed, caplog):
-    assert _summary() == content_capture.UNSET_HINT
-    assert "AgentCore Evaluations needs content" in content_capture.UNSET_HINT and OLD in content_capture.UNSET_HINT
+def test_unset_is_upstream_no_content_without_a_warning(handler_module, caplog):
+    assert _summary() == "NO_CONTENT (unset)"
     assert _warnings(caplog) == []
 
 
+def test_without_util_genai_the_step_does_not_apply(monkeypatch, caplog):
+    monkeypatch.setattr(content_capture.importlib.util, "find_spec", lambda name: None)
+    monkeypatch.setenv(OLD, "true")
+
+    assert content_capture.content_capture_step() is None
+    assert content_capture._patch == {} and _warnings(caplog) == []
+
+
 @pytest.mark.parametrize("value", ["true", "True", "false", "SPAN_ONLY", "bogus"])
-def test_no_plugin_warning_for_any_value(handler_module, genai_installed, monkeypatch, caplog, value):
+def test_no_plugin_warning_for_any_value(handler_module, monkeypatch, caplog, value):
     monkeypatch.setenv(OLD, value)
     content_capture.content_capture_step()
     _mode(handler_module, LANGCHAIN)
     assert not [m for m in _warnings(caplog) if m.startswith("CW-PLUGIN")]  # util-genai warns about invalid values
 
 
-def test_adot_agent_mode_gets_the_alias(handler_module, genai_installed, monkeypatch, caplog):
-    monkeypatch.setenv("AGENT_OBSERVABILITY_ENABLED", "true")
-    monkeypatch.setenv("OTEL_PYTHON_DISTRO", "aws_distro")
-    monkeypatch.setenv(OLD, "true")  # what ADOT sets (setdefault) in agent mode
-
-    _auto_instrumentation.pre_instrument()
-
-    assert _settings.genai_status() == "active"  # no ADOT special case
-    assert _mode(handler_module, LANGCHAIN) == "SPAN_ONLY"
-
-
 @pytest.mark.parametrize("env", [{"CW_PLUGIN_GENAI_ENABLED": "false"}, {"OTEL_SDK_DISABLED": "true"}])
-def test_layer_off_installs_nothing(handler_module, genai_installed, monkeypatch, env):
+def test_genai_disabled_installs_nothing(handler_module, monkeypatch, env):
     monkeypatch.setenv(OLD, "true")
     for name, value in env.items():
         monkeypatch.setenv(name, value)
@@ -124,20 +119,18 @@ def test_layer_off_installs_nothing(handler_module, genai_installed, monkeypatch
     assert _mode(handler_module, LANGCHAIN) == "NO_CONTENT"  # upstream: `true` is not a mode
 
 
-def test_no_langchain_core_turns_the_layer_off(handler_module, genai_installed, monkeypatch, caplog):
-    caplog.set_level(logging.DEBUG, logger=_settings.LOGGER_NAME)
-    monkeypatch.setattr(_settings, "langchain_core_present", lambda: False)
-    resolver = handler_module.get_content_capturing_mode
+def test_applies_without_langchain(handler_module, monkeypatch, caplog):
+    monkeypatch.setitem(sys.modules, "langchain_core", None)  # not importable
+    monkeypatch.setenv(OLD, "true")
 
     _auto_instrumentation.pre_instrument()
     _auto_instrumentation.post_instrument()
 
-    assert _settings.genai_status() == "off"
-    assert handler_module.get_content_capturing_mode is resolver
-    assert any("langchain_core" in m for m in messages(caplog, logging.DEBUG))
+    assert _mode(handler_module, OTHER) == "SPAN_ONLY"
+    assert messages(caplog, logging.INFO) == ["CW-PLUGIN genai: content capture=SPAN_ONLY (translated from true)"]
 
 
-def test_env_changes_after_the_hook_are_honoured(handler_module, genai_installed, monkeypatch):
+def test_env_changes_after_the_hook_are_honoured(handler_module, monkeypatch):
     content_capture.content_capture_step()
     monkeypatch.setenv(OLD, "true")
     assert _mode(handler_module, OTHER) == "SPAN_ONLY"
@@ -145,46 +138,17 @@ def test_env_changes_after_the_hook_are_honoured(handler_module, genai_installed
     assert _mode(handler_module, OTHER) == "NO_CONTENT"
 
 
-# The summary's content part ------------------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("other", ["openinference-instrumentation-langchain", "aws-opentelemetry-distro"])
-def test_summary_makes_no_langchain_claim_when_another_instrumentor_owns_it(handler_module, genai_installed, other):
-    summary = _summary(upstream_active=False, others=[other])
-    assert summary == f"n/a for LangChain (instrumented by {other}; its own settings apply)"
-
-
-def test_summary_with_another_owner_still_reports_the_alias(handler_module, genai_installed, monkeypatch):
-    monkeypatch.setenv(OLD, "true")
-    summary = _summary(upstream_active=False, others=["openinference-instrumentation-langchain"])
-    assert summary.endswith("; util-genai: SPAN_ONLY (translated from true)")
-
-
-@pytest.mark.parametrize("value,mode", [("true", "SPAN_ONLY (translated from true)"), ("", "NO_CONTENT (unset)")])
-def test_duplicate_summary_keeps_upstreams_real_mode(handler_module, genai_installed, monkeypatch, value, mode):
-    monkeypatch.setenv(OLD, value)
-    summary = _summary(upstream_active=True, others=["aws-opentelemetry-distro"])
-    assert (
-        summary == f"{mode}; LangChain also instrumented by aws-opentelemetry-distro (its own content settings apply)"
-    )
-    assert "AgentCore Evaluations" not in summary
-
-
-def test_summary_when_the_step_did_not_run():
-    assert content_capture.summary(None, True, []).startswith("unknown")
-
-
 # Every call site, and deferring to upstream -------------------------------------------------------------------
 
 
-def test_every_binding_site_resolves_the_alias(util_genai, genai_installed, monkeypatch):
+def test_every_binding_site_resolves_the_alias(util_genai, monkeypatch):
     monkeypatch.setenv(OLD, "true")
     content_capture.content_capture_step()
     for module in util_genai:  # utils, handler, and invocations created without a handler
         assert module.get_content_capturing_mode().name == "SPAN_ONLY", module.__name__
 
 
-def test_invocation_created_without_a_handler_resolves_the_alias(genai_installed, monkeypatch):
+def test_invocation_created_without_a_handler_resolves_the_alias(monkeypatch):
     _, _, invocation = install_fake_util_genai(monkeypatch)
     monkeypatch.setenv(OLD, "true")
     content_capture.content_capture_step()
@@ -192,7 +156,7 @@ def test_invocation_created_without_a_handler_resolves_the_alias(genai_installed
 
 
 @pytest.mark.parametrize("upstream_mode", ["SPAN_ONLY", "SPAN_AND_EVENT"])
-def test_a_util_genai_that_resolves_true_itself_wins(genai_installed, monkeypatch, upstream_mode):
+def test_a_util_genai_that_resolves_true_itself_wins(monkeypatch, upstream_mode):
     utils, handler, _ = install_fake_util_genai(monkeypatch)
 
     def resolves_true():  # a future util-genai that still reads the old name and resolves `true` itself
@@ -203,11 +167,11 @@ def test_a_util_genai_that_resolves_true_itself_wins(genai_installed, monkeypatc
         monkeypatch.setattr(module, "get_content_capturing_mode", resolves_true)
     monkeypatch.setenv(OLD, "true")
 
-    assert _summary() == f"{upstream_mode} (resolved by util-genai)"
+    assert _summary() == upstream_mode
     assert _mode(handler, LANGCHAIN) == upstream_mode  # the plugin defers: no override
 
 
-def test_a_util_genai_that_stops_reading_the_old_name_gets_no_patch(genai_installed, monkeypatch, caplog):
+def test_a_util_genai_that_stops_reading_the_old_name_gets_no_patch(monkeypatch, caplog):
     utils, handler, invocation = install_fake_util_genai(monkeypatch)
 
     def reads_only_the_new_name():
@@ -218,7 +182,7 @@ def test_a_util_genai_that_stops_reading_the_old_name_gets_no_patch(genai_instal
         monkeypatch.setattr(module, "get_content_capturing_mode", reads_only_the_new_name)
     monkeypatch.setenv(OLD, "true")
 
-    assert _summary().startswith(f"unknown ({OLD} not read by util-genai ")
+    assert _summary() == "unknown (translation unavailable)"
     assert _mode(handler, LANGCHAIN) == "NO_CONTENT"  # `true` is not revived under a name util-genai ignores
     assert content_capture._patch == {}
     (warning,) = _warnings(caplog)
@@ -226,27 +190,25 @@ def test_a_util_genai_that_stops_reading_the_old_name_gets_no_patch(genai_instal
     assert f"Fix: {OLD}" not in warning
 
 
-def test_binding_sites_must_be_exactly_the_known_ones(genai_installed, monkeypatch):
+def test_binding_sites_must_be_exactly_the_known_ones(monkeypatch):
     install_fake_util_genai(monkeypatch)
     monkeypatch.setattr(content_capture, "_binding_sites", lambda: set(FAKE_SITES) | {"opentelemetry.util.genai.new"})
     assert content_capture._install() is not None and content_capture._patch == {}
 
 
 def test_installed_util_genai_has_exactly_the_known_binding_sites():
-    """Runs the real source scan in the genai envs (genai-latest is unpinned), so upstream drift fails CI."""
+    """Runs the real source scan in the latest envs (unpinned), so upstream drift fails CI."""
     pytest.importorskip("opentelemetry.util.genai.handler")
     assert content_capture._binding_sites() == set(content_capture._SITES)
 
 
-def test_false_is_upstreams_own_result(handler_module, genai_installed, monkeypatch):
+def test_false_is_upstreams_own_result(handler_module, monkeypatch):
     monkeypatch.setenv(OLD, "false")
     content_capture.content_capture_step()
     assert _mode(handler_module, LANGCHAIN) == "NO_CONTENT"
 
 
-def test_upstreams_false_warning_about_true_is_dropped_while_translating(
-    handler_module, genai_installed, monkeypatch, caplog
-):
+def test_upstreams_false_warning_about_true_is_dropped_while_translating(handler_module, monkeypatch, caplog):
     monkeypatch.setenv(OLD, "true")
     content_capture.content_capture_step()
     _mode(handler_module, LANGCHAIN)
@@ -257,7 +219,7 @@ def test_upstreams_false_warning_about_true_is_dropped_while_translating(
     assert [r for r in caplog.records if r.name == FAKE_SITES[0] and "not a valid option" in r.getMessage()]
 
 
-def test_unrecognized_values_keep_upstreams_warning(handler_module, genai_installed, monkeypatch, caplog):
+def test_unrecognized_values_keep_upstreams_warning(handler_module, monkeypatch, caplog):
     monkeypatch.setenv(OLD, "bogus")
     content_capture.content_capture_step()
     _mode(handler_module, LANGCHAIN)
@@ -290,7 +252,7 @@ def ATTRIBUTE_ACCESS(source):  # pylint: disable=invalid-name
 )
 @pytest.mark.parametrize("value", ["true", "True"])
 def test_unexpected_util_genai_shape_installs_nothing_and_warns(
-    genai_installed, monkeypatch, caplog, handler_change, invocation_change, value
+    monkeypatch, caplog, handler_change, invocation_change, value
 ):
     sources = {}
     if handler_change:
@@ -304,12 +266,12 @@ def test_unexpected_util_genai_shape_installs_nothing_and_warns(
     summary = _summary()
 
     assert [getattr(module, "get_content_capturing_mode", None) for module in modules] == before
-    assert summary.startswith("NO_CONTENT (true not translated: util-genai ") and summary.endswith(" unsupported)")
+    assert summary == "NO_CONTENT (translation unavailable)"
     (warning,) = _warnings(caplog)
     assert f"{OLD}=true means NO_CONTENT" in warning and f"Fix: {OLD}=SPAN_ONLY" in warning
 
 
-def test_resolver_with_parameters_installs_nothing(genai_installed, monkeypatch):
+def test_resolver_with_parameters_installs_nothing(monkeypatch):
     utils, _, _ = install_fake_util_genai(monkeypatch)
     source = FAKE_UTILS_SOURCE.replace(
         "def get_content_capturing_mode():", "def get_content_capturing_mode(name=None):"
@@ -319,12 +281,13 @@ def test_resolver_with_parameters_installs_nothing(genai_installed, monkeypatch)
 
 
 @pytest.mark.parametrize("value", ["", "SPAN_ONLY", "false"])
-def test_unavailable_translation_is_silent_when_nothing_needs_translating(genai_installed, monkeypatch, caplog, value):
+def test_unavailable_translation_is_silent_when_nothing_needs_translating(monkeypatch, caplog, value):
+    install_fake_util_genai(monkeypatch)
     monkeypatch.setitem(sys.modules, "opentelemetry.util.genai.handler", None)  # import raises ImportError
     monkeypatch.setenv(OLD, value)
 
-    expected = {"": "NO_CONTENT (unset", "SPAN_ONLY": "SPAN_ONLY (user)", "false": "NO_CONTENT ('false' unrecognized)"}
-    assert _summary().startswith(expected[value])  # the effective mode
+    expected = {"": "NO_CONTENT (unset)", "SPAN_ONLY": "SPAN_ONLY", "false": "NO_CONTENT"}
+    assert _summary() == expected[value]  # the effective mode
     assert content_capture._patch == {}
     assert _warnings(caplog) == []
 
@@ -336,7 +299,7 @@ def test_attribute_access_stand_in_still_resolves_without_the_patch(monkeypatch)
     assert handler.TelemetryHandler()._content_capturing_mode.name == "SPAN_ONLY"
 
 
-def test_patch_is_idempotent_and_reversible(util_genai, genai_installed):
+def test_patch_is_idempotent_and_reversible(util_genai):
     originals = [module.get_content_capturing_mode for module in util_genai]
 
     content_capture.content_capture_step()

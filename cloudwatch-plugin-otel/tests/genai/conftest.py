@@ -36,9 +36,7 @@ def _uninstrument_all():
 
 
 def reset_plugin_state():
-    _auto_instrumentation._done.clear()
     _auto_instrumentation._results.clear()
-    _settings._status = None
     _settings._warned.clear()
     content_capture._unpatch()
 
@@ -65,18 +63,6 @@ def clean_genai_state():
 
 
 @pytest.fixture
-def genai_installed(monkeypatch):
-    """Makes the gating see a supported GenAI instrumentation distribution, whatever is really installed."""
-    monkeypatch.setattr(_settings, "genai_distribution_installed", lambda: True)
-    monkeypatch.setattr(_settings, "langchain_core_present", lambda: True)
-
-
-@pytest.fixture
-def genai_not_installed(monkeypatch):
-    monkeypatch.setattr(_settings, "genai_distribution_installed", lambda: False)
-
-
-@pytest.fixture
 def span_exporter():
     """A fresh SDK TracerProvider, set globally, with an in-memory exporter."""
     exporter = InMemorySpanExporter()
@@ -87,7 +73,3 @@ def span_exporter():
     yield exporter
     provider.shutdown()
     reset_trace_globals()
-
-
-def pytest_configure(config):
-    config.addinivalue_line("markers", "shim_gate: keep the hook shim's real GenAI gate (test_genai_hooks.py)")

@@ -1,13 +1,13 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""The real auto-instrumentation loader with our hooks and the real upstream LangChain entry point."""
+"""The real auto-instrumentation loader with our hooks and the real upstream LangChain entry point: in process,
+and in ``python -I`` children against real installed-distribution metadata for a `langchain` package."""
 import importlib.metadata
 import logging
 import os
 
 import pytest
-from genai_helpers import OLD, messages, plugin_entry_points, summary_parts
-from plugins.opentelemetry.cloudwatch.genai import content_capture
+from genai_helpers import OLD, messages, plugin_entry_points, run_child, summary_parts, write_stub_dist
 from plugins.opentelemetry.cloudwatch.genai import langchain as lc
 
 from opentelemetry.instrumentation.auto_instrumentation import _load
@@ -79,7 +79,7 @@ def test_loader_skips_upstream_and_the_post_hook_activates_it(
     assert _instrumented()
     assert dict(os.environ) == before  # `true` is honored without touching the environment
     (line,) = messages(caplog, logging.INFO)
-    assert summary_parts(line) == ("SPAN_ONLY (translated from true)", lc.ACTIVATED)
+    assert summary_parts(line) == {"content capture": "SPAN_ONLY (translated from true)", "langchain": lc.ACTIVATED}
     assert messages(caplog, logging.WARNING) == []
 
     _chat_once()
@@ -92,7 +92,7 @@ def test_unset_content_capture_stays_off(restricted_entry_points, span_exporter,
     _load._load_instrumentors(DefaultDistro())
 
     (line,) = messages(caplog, logging.INFO)
-    assert summary_parts(line) == (content_capture.UNSET_HINT, lc.ACTIVATED)
+    assert summary_parts(line) == {"content capture": "NO_CONTENT (unset)", "langchain": lc.ACTIVATED}
     _chat_once()
     (chat,) = [s for s in span_exporter.get_finished_spans() if s.attributes.get("gen_ai.operation.name") == "chat"]
     assert "gen_ai.input.messages" not in chat.attributes  # the plugin never turns content capture on
@@ -106,3 +106,29 @@ def test_loader_and_plugin_respect_a_disabled_langchain(restricted_entry_points,
 
     assert not _instrumented()
     assert any(m.endswith("langchain=disabled") for m in messages(caplog, logging.INFO))
+
+
+# A `langchain` package installed: the loader's dependency check decides, and the plugin stays silent -----------
+
+UPSTREAM_SCOPE = "opentelemetry.instrumentation.genai.langchain"
+
+
+def _plugin(report, level):
+    return [r["msg"] for r in report["records"] if r["name"].startswith("plugins.") and r["level"] == level]
+
+
+@pytest.mark.parametrize(
+    "version,instrumented,langchain_part",
+    [("0.3.25", True, {"langchain": "instrumented"}), ("2.0.0", False, {})],  # in / out of the declared range
+)
+def test_installed_langchain_leaves_the_decision_to_the_loader(tmp_path, version, instrumented, langchain_part):
+    plugin_entry_points(PRE)
+    write_stub_dist(tmp_path, "langchain", version)
+
+    report, _ = run_child("child_langchain_loader.py", tmp_path)
+
+    assert report["upstream_instrumented"] is instrumented
+    (line,) = _plugin(report, "INFO")
+    assert summary_parts(line) == {"content capture": "NO_CONTENT (unset)", **langchain_part}
+    assert _plugin(report, "WARNING") == []
+    assert [s["scope"] for s in report["spans"]] == ([UPSTREAM_SCOPE] if instrumented else [])

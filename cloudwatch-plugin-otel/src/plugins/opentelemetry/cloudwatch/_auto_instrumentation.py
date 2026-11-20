@@ -5,7 +5,8 @@
 
 They run only under auto-instrumentation (``opentelemetry-instrument`` or ``auto_instrumentation.initialize()``):
 after the distro and configurator, pre hooks run before every ``opentelemetry_instrumentor`` entry point and post
-hooks after them. The loader does not guard hook calls, so every step is isolated by ``_run``.
+hooks after them. The loader does not guard hook calls, so every step is isolated by ``_run``. Each step decides
+whether it applies, and returns None when it does not.
 
 A pre step that sets env vars, or changes how instrumentors resolve them, must run before any ``instrument()``:
 util-genai resolves its content-capture mode in ``TelemetryHandler.__init__`` (built by a GenAI instrumentor's
@@ -14,7 +15,7 @@ util-genai resolves its content-capture mode in ``TelemetryHandler.__init__`` (b
 
 import importlib
 import logging
-from typing import Any, Dict, Set
+from typing import Any, Dict
 
 from plugins.opentelemetry.cloudwatch.genai import _settings
 
@@ -23,21 +24,18 @@ _LOGGER = logging.getLogger(_settings.PLUGIN_LOGGER_NAME)
 
 
 def _lazy(module: str, function: str):
-    """A GenAI step that imports ``module`` only when it runs (isolating import errors), and not at all when the
-    layer is off: processes without GenAI import ``_settings`` only, never the step modules or util-genai."""
+    """A step that imports its module only when it runs, so an import error is isolated like any other."""
 
     def step():
-        if _settings.genai_status() == "off":
-            return None
         return getattr(importlib.import_module(_GENAI + module), function)()
 
     return step
 
 
-_PRE_STEPS = [("genai.content_capture", _lazy("content_capture", "content_capture_step"))]
-_POST_STEPS = [("genai.langchain_activation", _lazy("langchain", "langchain_activation_step"))]
+# (name in the summary line, step)
+_PRE_STEPS = [("content capture", _lazy("content_capture", "content_capture_step"))]
+_POST_STEPS = [("langchain", _lazy("langchain", "langchain_step"))]
 
-_done: Set[str] = set()  # hooks that already ran in this process
 _results: Dict[str, Any] = {}  # step name -> return value, for the summary
 
 
@@ -48,33 +46,21 @@ def _run(name: str, func) -> None:
         _LOGGER.warning("CW-PLUGIN: %s setup failed; continuing without it", name, exc_info=True)
 
 
-def _run_once(hook: str, steps) -> bool:
-    if hook in _done:
-        _LOGGER.debug("%s already ran in this process; skipping", hook)
-        return False
-    _done.add(hook)
-    for name, func in steps:
-        _run(name, func)
-    return True
-
-
 def pre_instrument() -> None:
-    _run_once("pre_instrument", _PRE_STEPS)
+    if _settings.genai_enabled():
+        for name, func in _PRE_STEPS:
+            _run(name, func)
 
 
 def post_instrument() -> None:
-    if _run_once("post_instrument", _POST_STEPS):
-        _run("genai.summary", _log_genai_summary)
+    if _settings.genai_enabled():
+        for name, func in _POST_STEPS:
+            _run(name, func)
+        _run("summary", _log_summary)
 
 
-def _log_genai_summary() -> None:
-    """The GenAI layer's one INFO line, when it is active."""
-    if not _settings.genai_active():
-        return
-    # pylint: disable=import-outside-toplevel
-    from plugins.opentelemetry.cloudwatch.genai import content_capture, langchain
-
-    others = [dist for dist, _ in langchain.others_active()]
-    content = content_capture.summary(_results.get("genai.content_capture"), langchain.upstream_active(), others)
-    outcome = _results.get("genai.langchain_activation") or "failed"
-    _settings.get_logger().info("CW-PLUGIN genai: active; content capture=%s; langchain=%s", content, outcome)
+def _log_summary() -> None:
+    """One INFO line, when any step applied."""
+    parts = [f"{name}={result}" for name, result in _results.items() if result is not None]
+    if parts:
+        _settings.get_logger().info("%s%s", _settings.LOG_PREFIX, "; ".join(parts))

@@ -6,7 +6,6 @@ the SDK eagerly, and the loader does not guard hook calls (a raise would abort a
 raises an ``Exception``; ``BaseException`` propagates."""
 
 import importlib
-import importlib.metadata
 import logging
 import os
 import sys
@@ -14,8 +13,6 @@ import traceback
 
 _IMPLEMENTATION = "plugins.opentelemetry.cloudwatch._auto_instrumentation"
 CW_PLUGIN_GENAI_ENABLED = "CW_PLUGIN_GENAI_ENABLED"  # kill switch for every GenAI feature
-# The GenAI layer can be active only when one of these distributions is installed (later releases add more).
-SUPPORTED_GENAI_DISTRIBUTIONS = ("opentelemetry-instrumentation-genai-langchain",)
 _LOGGER_NAME = _IMPLEMENTATION.rpartition(".")[0]
 _shadow_reported = False
 
@@ -47,35 +44,22 @@ def _warn_shadowed(logger: logging.Logger, shadow: str, exc: Exception) -> None:
     logger.warning(msg)  # logging.lastResort prints it when no handler is configured at all
     logger.debug("import error", exc_info=exc)
     root = logging.getLogger().handlers
-    # ...but not when the root logger has only OTel's LoggingHandler (ADOT agent mode): print it ourselves.
+    # ...but not when the root logger has only OTel's LoggingHandler (logs auto-instrumentation): print it ourselves.
     if root and logger.isEnabledFor(logging.WARNING) and all(is_otel_logging_handler(h) for h in root):
         print(msg, file=sys.stderr)
         if logger.isEnabledFor(logging.DEBUG):
             traceback.print_exception(exc, file=sys.stderr)
 
 
-def _genai_possible() -> bool:
-    """Cheap gate, so processes without GenAI never import ``plugins.*`` from the hooks (the hooks only do GenAI
-    work today). ``_settings`` decides the rest, including warning about an invalid kill-switch value."""
-    if os.environ.get(CW_PLUGIN_GENAI_ENABLED, "").strip().lower() == "false":
-        return False
-    if os.environ.get("OTEL_SDK_DISABLED", "").strip().lower() == "true":
-        return False
-    for name in SUPPORTED_GENAI_DISTRIBUTIONS:
-        try:
-            importlib.metadata.distribution(name)
-            return True
-        except importlib.metadata.PackageNotFoundError:
-            continue
-    return False
-
-
 def _call(hook_name: str) -> None:
     global _shadow_reported  # pylint: disable=global-statement
+    # Cheap early returns (the hooks only do GenAI work today); `_settings` warns about an invalid kill switch.
+    if os.environ.get(CW_PLUGIN_GENAI_ENABLED, "").strip().lower() == "false":
+        return
+    if os.environ.get("OTEL_SDK_DISABLED", "").strip().lower() == "true":
+        return
     logger = logging.getLogger(_LOGGER_NAME)
     try:
-        if not _genai_possible():  # inside the try: metadata finders can raise
-            return
         hook = getattr(importlib.import_module(_IMPLEMENTATION), hook_name)
     except Exception as exc:  # pylint: disable=broad-exception-caught
         try:

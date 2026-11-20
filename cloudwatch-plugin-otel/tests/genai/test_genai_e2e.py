@@ -28,7 +28,7 @@ def child_run():
         importlib.metadata.version("langchain")  # precondition: only langchain-core is installed
 
     # Only what this test sets: no inherited OTEL_* (exporters, disabled lists, ...) or plugin switch.
-    env = child_env(**{OLD: "true"})  # `true` is what the AgentCore docs and ADOT tell users to set
+    env = child_env(**{OLD: "true"})  # `true` is what the AgentCore docs tell users to set
     proc = subprocess.run(
         [sys.executable, "-I", str(CHILD)], capture_output=True, text=True, env=env, timeout=300, check=False
     )
@@ -84,4 +84,6 @@ def test_summary_line_reaches_stderr(child_run):
     assert not any("WARNING" in line for line in plugin_lines), stderr  # `true` just works: no warning
     summary = [line for line in plugin_lines if " INFO " in line]
     assert len(summary) == 1, f"expected exactly one INFO line (the summary): {plugin_lines}"
-    assert "active; content capture=SPAN_ONLY (translated from true); langchain=activated (" in summary[0], summary
+    assert summary[0].endswith(
+        "CW-PLUGIN genai: content capture=SPAN_ONLY (translated from true); langchain=activated (langchain-core only)"
+    ), summary

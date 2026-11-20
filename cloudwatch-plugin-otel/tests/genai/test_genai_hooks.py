@@ -15,25 +15,16 @@ from genai_helpers import (
     NEW,
     OLD,
     FakeLangChainInstrumentor,
-    FakeOtherLangChainInstrumentor,
-    fake_entry_point,
     fake_upstream_module,
     install_fake_util_genai,
     messages,
     summary_parts,
 )
 from plugins.opentelemetry.cloudwatch import _auto_instrumentation
-from plugins.opentelemetry.cloudwatch.genai import _settings, content_capture
+from plugins.opentelemetry.cloudwatch.genai import _settings
 from plugins.opentelemetry.cloudwatch.genai import langchain as lc
 
 _IMPL = "plugins.opentelemetry.cloudwatch._auto_instrumentation"
-
-
-@pytest.fixture(autouse=True)
-def _shim_gate_open(request, monkeypatch):
-    """The shim returns before importing `plugins.*` without a GenAI distribution; open that gate for these tests."""
-    if "shim_gate" not in request.keywords:
-        monkeypatch.setattr(shim, "_genai_possible", lambda: True)
 
 
 # Shim --------------------------------------------------------------------------------------------------------
@@ -47,63 +38,32 @@ def test_shim_imports_only_the_standard_library_at_module_level():
     assert names and all(name.split(".")[0] in sys.stdlib_module_names for name in names), names
 
 
-@pytest.mark.shim_gate
 @pytest.mark.parametrize(
-    "env,installed,imports",
+    "env,imports",
     [
-        ({}, False, False),
-        ({"CW_PLUGIN_GENAI_ENABLED": "False"}, True, False),
-        ({}, True, True),
-        ({"CW_PLUGIN_GENAI_ENABLED": "bogus"}, True, True),
+        ({}, True),
+        ({"CW_PLUGIN_GENAI_ENABLED": " False "}, False),
+        ({"OTEL_SDK_DISABLED": " True "}, False),
+        ({"OTEL_SDK_DISABLED": "false"}, True),
+        ({"CW_PLUGIN_GENAI_ENABLED": "bogus"}, True),  # `_settings` warns about it
     ],
 )
-def test_shim_gates_before_importing_the_plugin_package(monkeypatch, env, installed, imports):
+@pytest.mark.parametrize("hook", ["pre_instrument", "post_instrument"])
+def test_kill_switch_and_sdk_disabled_return_before_importing_the_plugin_package(monkeypatch, env, imports, hook):
     for name, value in env.items():
         monkeypatch.setenv(name, value)
-    monkeypatch.setattr(shim, "SUPPORTED_GENAI_DISTRIBUTIONS", ("pytest",) if installed else ("no-such-dist-cw",))
     calls = []
     real_import_module = importlib.import_module
     monkeypatch.setattr(
         importlib, "import_module", lambda name, package=None: calls.append(name) or real_import_module(name, package)
     )
-    monkeypatch.setattr(_auto_instrumentation, "pre_instrument", lambda: None)
+    monkeypatch.setattr(_auto_instrumentation, hook, lambda: None)
 
-    shim.pre_instrument()
+    getattr(shim, hook)()
     assert (_IMPL in calls) is imports
 
 
-@pytest.mark.shim_gate
-def test_shim_gate_closes_when_the_sdk_is_disabled(monkeypatch):
-    monkeypatch.setenv("OTEL_SDK_DISABLED", " True ")
-    monkeypatch.setattr(shim, "SUPPORTED_GENAI_DISTRIBUTIONS", ("pytest",))
-    assert shim._genai_possible() is False
-
-
-class _RaisingDistributionFinder:
-    """A third-party meta-path finder whose distribution lookup blows up."""
-
-    @staticmethod
-    def find_spec(fullname, path=None, target=None):
-        return None
-
-    @staticmethod
-    def find_distributions(context=None):
-        raise RuntimeError("broken finder")
-
-
-@pytest.mark.shim_gate
-@pytest.mark.parametrize("hook", ["pre_instrument", "post_instrument"])
-def test_a_raising_metadata_finder_never_escapes_the_shim(monkeypatch, caplog, hook):
-    caplog.set_level(logging.DEBUG, logger="plugins.opentelemetry.cloudwatch")
-    monkeypatch.setattr(sys, "meta_path", [_RaisingDistributionFinder(), *sys.meta_path])
-
-    getattr(shim, hook)()  # must not raise
-
-    assert any(r.exc_info and "broken finder" in str(r.exc_info[1]) for r in _shim_records(caplog))
-
-
-def test_settings_uses_the_shims_distribution_list():
-    assert _settings.SUPPORTED_GENAI_DISTRIBUTIONS is shim.SUPPORTED_GENAI_DISTRIBUTIONS
+def test_settings_uses_the_shims_kill_switch_name():
     assert _settings.CW_PLUGIN_GENAI_ENABLED == shim.CW_PLUGIN_GENAI_ENABLED
 
 
@@ -173,7 +133,7 @@ def test_shadowing_plugins_package_is_a_warning_once(failing_import, monkeypatch
 
 
 class LoggingHandler(logging.Handler):
-    """Looks like OTel's LoggingHandler (as ADOT agent mode installs on the root logger)."""
+    """Looks like OTel's LoggingHandler (as logs auto-instrumentation installs on the root logger)."""
 
     def emit(self, record):
         pass
@@ -274,8 +234,8 @@ def test_shim_lets_base_exceptions_from_the_import_propagate(failing_import):
 
 
 def test_step_lists():
-    assert [name for name, _ in _auto_instrumentation._PRE_STEPS] == ["genai.content_capture"]
-    assert [name for name, _ in _auto_instrumentation._POST_STEPS] == ["genai.langchain_activation"]
+    assert [name for name, _ in _auto_instrumentation._PRE_STEPS] == ["content capture"]
+    assert [name for name, _ in _auto_instrumentation._POST_STEPS] == ["langchain"]
 
 
 def test_a_failing_step_logs_one_warning_and_the_next_step_runs(monkeypatch, caplog):
@@ -298,18 +258,15 @@ def test_a_failing_step_logs_one_warning_and_the_next_step_runs(monkeypatch, cap
 
 
 @pytest.mark.parametrize("hook,steps", [("pre_instrument", "_PRE_STEPS"), ("post_instrument", "_POST_STEPS")])
-def test_each_hook_runs_once_per_process(monkeypatch, caplog, hook, steps):
-    caplog.set_level(logging.DEBUG, logger="plugins.opentelemetry.cloudwatch")
+@pytest.mark.parametrize("env", [{"CW_PLUGIN_GENAI_ENABLED": "false"}, {"OTEL_SDK_DISABLED": "true"}])
+def test_no_step_runs_when_genai_is_disabled(monkeypatch, caplog, hook, steps, env):
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
     ran = []
     monkeypatch.setattr(_auto_instrumentation, steps, [("test.count", lambda: ran.append(1))])
 
     getattr(_auto_instrumentation, hook)()
-    caplog.clear()
-    getattr(_auto_instrumentation, hook)()
-
-    assert ran == [1]
-    assert [r.levelno for r in caplog.records] == [logging.DEBUG]
-    assert "already ran" in caplog.records[0].getMessage()
+    assert ran == [] and caplog.records == []
 
 
 def test_run_records_the_step_result():
@@ -322,21 +279,21 @@ def test_run_records_the_step_result():
 
 @pytest.fixture
 def fake_discovery(monkeypatch):
-    monkeypatch.setattr(_settings, "langchain_core_present", lambda: True)
+    """langchain-core and the upstream instrumentor (a fake) installed, `langchain` not."""
+    monkeypatch.setattr(lc, "_langchain_core_present", lambda: True)
     monkeypatch.setitem(sys.modules, lc.UPSTREAM_MODULE, fake_upstream_module())
-    monkeypatch.setattr(lc, "distribution_version", lambda name: "0.3.60" if name == "langchain-core" else None)
-    monkeypatch.setattr(lc, "_entry_points", lambda: [])
+    monkeypatch.setattr(lc, "distribution_version", lambda name: "1.3b0" if name == lc.UPSTREAM_DIST else None)
 
 
 @pytest.fixture
 def stand_in_util_genai(monkeypatch):
-    """A stand-in util-genai handler module, so the content-capture patch installs in every env."""
+    """A stand-in util-genai, so the content-capture patch installs in every env."""
     install_fake_util_genai(monkeypatch)
 
 
 def _summary(caplog):
     infos = messages(caplog, logging.INFO)
-    assert all(m.startswith("CW-PLUGIN genai: active;") for m in infos), infos  # the one INFO line
+    assert all(m.startswith("CW-PLUGIN genai: ") for m in infos), infos  # the one INFO line
     return infos
 
 
@@ -345,96 +302,65 @@ def _run_hooks():
     _auto_instrumentation.post_instrument()
 
 
-def test_exactly_one_info_line_after_a_full_run(genai_installed, fake_discovery, stand_in_util_genai, caplog):
+def test_exactly_one_info_line_after_a_full_run(fake_discovery, stand_in_util_genai, caplog):
     _run_hooks()
     (line,) = _summary(caplog)
-    assert summary_parts(line) == (content_capture.UNSET_HINT, lc.ACTIVATED)
+    assert line == f"CW-PLUGIN genai: content capture=NO_CONTENT (unset); langchain={lc.ACTIVATED}"
 
 
 @pytest.mark.parametrize(
     "env,expected",
     [
-        ({OLD: "true"}, ("translated from true", lc.ACTIVATED)),
-        ({OLD: "SPAN_AND_EVENT"}, ("SPAN_AND_EVENT (user)", lc.ACTIVATED)),
-        ({"OTEL_PYTHON_DISABLED_INSTRUMENTATIONS": "langchain"}, ("unset: upstream default", lc.DISABLED)),
+        ({OLD: "true"}, {"content capture": "SPAN_ONLY (translated from true)", "langchain": lc.ACTIVATED}),
+        ({OLD: "span_and_event"}, {"content capture": "SPAN_AND_EVENT", "langchain": lc.ACTIVATED}),
+        (
+            {"OTEL_PYTHON_DISABLED_INSTRUMENTATIONS": "langchain"},
+            {"content capture": "NO_CONTENT (unset)", "langchain": lc.DISABLED},
+        ),
     ],
 )
-def test_summary_line_reflects_the_outcomes(
-    genai_installed, fake_discovery, stand_in_util_genai, monkeypatch, caplog, env, expected
-):
+def test_summary_line_reflects_the_outcomes(fake_discovery, stand_in_util_genai, monkeypatch, caplog, env, expected):
     for name, value in env.items():
         monkeypatch.setenv(name, value)
     _run_hooks()
     (line,) = _summary(caplog)
-    content, langchain = summary_parts(line)
-    assert expected[0] in content and langchain == expected[1]
+    assert summary_parts(line) == expected
 
 
-def test_summary_when_already_instrumented(genai_installed, fake_discovery, stand_in_util_genai, caplog):
+def test_summary_when_already_instrumented(fake_discovery, stand_in_util_genai, caplog):
     FakeLangChainInstrumentor().instrument(skip_dep_check=True)
     _run_hooks()
-    assert _summary(caplog)[0].endswith("langchain=instrumented by loader")
+    assert _summary(caplog)[0].endswith("langchain=instrumented")
 
 
-def test_no_summary_without_langchain_core(genai_installed, fake_discovery, stand_in_util_genai, monkeypatch, caplog):
-    monkeypatch.setattr(_settings, "langchain_core_present", lambda: False)
+def test_summary_when_activation_fails(fake_discovery, stand_in_util_genai, caplog):
+    FakeLangChainInstrumentor.fail = True
     _run_hooks()
-    assert _summary(caplog) == []
+    assert _summary(caplog)[0].endswith("langchain=failed")
 
 
-@pytest.mark.parametrize(
-    "setup,outcome",
-    [
-        (
-            lambda mp: FakeOtherLangChainInstrumentor().instrument(),
-            "skipped: other-vendor already instruments LangChain",
-        ),
-        (lambda mp: setattr(FakeLangChainInstrumentor, "fail", True), "failed"),
-        (
-            lambda mp: mp.setattr(lc, "distribution_version", lambda name: "2.0" if name == "langchain" else None),
-            "failed",
-        ),
-    ],
-    ids=["other-vendor", "instrument-raises", "langchain-out-of-range"],
-)
-def test_summary_does_not_claim_the_default_when_upstream_stayed_inactive(
-    genai_installed, fake_discovery, stand_in_util_genai, monkeypatch, caplog, setup, outcome
-):
-    monkeypatch.setattr(
-        lc, "_entry_points", lambda: [fake_entry_point("langchain", "FakeOtherLangChainInstrumentor", "other-vendor")]
-    )
-    setup(monkeypatch)
+def test_summary_has_only_the_steps_that_applied(fake_discovery, stand_in_util_genai, monkeypatch, caplog):
+    monkeypatch.setattr(lc, "_langchain_core_present", lambda: False)
     _run_hooks()
-    (summary,) = _summary(caplog)
-    assert summary.endswith(f"langchain={outcome}")
-    if outcome.startswith("skipped"):  # another instrumentor's own settings apply: no claim for LangChain
-        assert "content capture=n/a for LangChain (instrumented by other-vendor; its own settings apply)" in summary
-    else:
-        assert "content capture=" + content_capture.UNSET_HINT in summary
+    assert _summary(caplog) == ["CW-PLUGIN genai: content capture=NO_CONTENT (unset)"]
 
 
-def test_summary_when_steps_raise(genai_installed, fake_discovery, monkeypatch, caplog):
+def test_no_summary_when_no_step_applied(monkeypatch, caplog):
+    monkeypatch.setattr(lc, "_langchain_core_present", lambda: False)
+    monkeypatch.setattr(_auto_instrumentation, "_PRE_STEPS", [("content capture", lambda: None)])
+    _run_hooks()
+    assert _summary(caplog) == [] and messages(caplog, logging.WARNING) == []
+
+
+def test_summary_omits_steps_that_raised(fake_discovery, monkeypatch, caplog):
     def boom():
         raise RuntimeError("bug")
 
-    monkeypatch.setattr(_auto_instrumentation, "_PRE_STEPS", [("genai.content_capture", boom)])
-    monkeypatch.setattr(_auto_instrumentation, "_POST_STEPS", [("genai.langchain_activation", boom)])
+    monkeypatch.setattr(_auto_instrumentation, "_PRE_STEPS", [("content capture", boom)])
     _run_hooks()
 
-    (line,) = _summary(caplog)
-    content, langchain = summary_parts(line)
-    assert content.startswith("unknown") and langchain == lc.FAILED
-    assert len(messages(caplog, logging.WARNING)) == 2
-
-
-def test_inactive_layer_logs_nothing_at_info_or_above(genai_not_installed, fake_discovery, monkeypatch, caplog):
-    caplog.set_level(logging.DEBUG, logger="plugins.opentelemetry.cloudwatch")
-    monkeypatch.setenv(OLD, "true")
-
-    _run_hooks()
-
-    assert [r for r in caplog.records if r.levelno >= logging.INFO] == []
-    assert not FakeLangChainInstrumentor().is_instrumented_by_opentelemetry
+    assert _summary(caplog) == [f"CW-PLUGIN genai: langchain={lc.ACTIVATED}"]
+    assert len([r for r in caplog.records if r.levelno == logging.WARNING]) == 1
 
 
 @pytest.mark.parametrize(
@@ -445,11 +371,10 @@ def test_inactive_layer_logs_nothing_at_info_or_above(genai_not_installed, fake_
         {OLD: "bogus"},
         {NEW: "true"},
         {OLD: "SPAN_ONLY", NEW: "NO_CONTENT"},
+        {"CW_PLUGIN_GENAI_ENABLED": "false", OLD: "true"},
     ],
 )
-@pytest.mark.parametrize("active", [True, False])
-def test_hooks_never_change_the_environment(monkeypatch, fake_discovery, stand_in_util_genai, env, active):
-    monkeypatch.setattr(_settings, "genai_distribution_installed", lambda: active)
+def test_hooks_never_change_the_environment(monkeypatch, fake_discovery, stand_in_util_genai, env):
     for name, value in env.items():
         monkeypatch.setenv(name, value)
     before = dict(os.environ)

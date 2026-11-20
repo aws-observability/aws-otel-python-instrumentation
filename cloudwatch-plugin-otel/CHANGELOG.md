@@ -10,14 +10,10 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
-- Add GenAI observability for LangChain/LangGraph (auto-instrumentation, `[langchain]` extra): activates the upstream
-  LangChain instrumentation when only `langchain-core` is installed, and honors
-  `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true` for util-genai instrumentations; content capture is
-  never enabled by default. `CW_PLUGIN_GENAI_ENABLED=false` turns this off; a warning names duplicate LangChain
-  instrumentors. Privacy: if you already set `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true` (ADOT agent
-  mode sets it for you) and use util-genai-based instrumentations, their prompts and responses are now captured on
-  spans after upgrading
-  ([#979](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/979))
+- Add GenAI observability: activate the upstream LangChain instrumentation when only `langchain-core` is installed,
+  and honor `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true` for util-genai instrumentations (content capture
+  is never enabled by default). Privacy: if you already set it to `true`, util-genai instrumentations now capture
+  prompts and responses on spans ([#979](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/979))
 - Fix unbounded span metrics cardinality on SERVER spans: the legacy fallback for
   `server.address`/`server.port` now uses `net.host.name`/`net.host.port` on SERVER spans instead of
   `net.peer.name`/`net.peer.port`, which describe the client (including its ephemeral port)
