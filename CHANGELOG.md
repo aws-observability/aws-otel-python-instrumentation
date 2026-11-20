@@ -11,6 +11,9 @@ For any change that affects end users of this package, please add an entry under
 If your change does not need a CHANGELOG entry, add the "skip changelog" label to your PR.
 
 ## Unreleased
+- fix(langchain): report `stop` / `tool_call` / `length` instead of the raw Responses API status (`completed`)
+  in `gen_ai.response.finish_reasons` with langchain-openai >= 1.8.5, using LangChain's `normalized_finish_reason`
+  ([#983](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/983))
 - feat: in Amazon Bedrock AgentCore Runtime (`AWS_EXECUTION_ENV=AWS_BedrockAgentCore_Runtime`), default
   `OTEL_PYTHON_ID_GENERATOR` to the new `snapshot_safe` ID generator. Like the upstream `random` generator, it
   generates fully random trace and span IDs, but reads them from `os.urandom`, so sessions restored from the same
