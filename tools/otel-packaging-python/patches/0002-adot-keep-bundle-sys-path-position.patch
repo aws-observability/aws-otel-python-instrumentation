@@ -1,0 +1,35 @@
+--- a/sitecustomize.py
++++ b/sitecustomize.py
+@@ -521,14 +521,21 @@
+     _log_debug("checking for double instrumentation")
+ 
+     # Temporarily remove this site so the double-instrumentation check only sees the application's
+-    # own packages. After the check we re-append it, which also moves it to the end of sys.path so
+-    # the application's package versions win over ours in case of overlap.
++    # own packages. After the check we put it back.
++    # ADOT patch 0002: put it back at the position it had instead of appending it. The bundle stays ahead of the
++    # application's site-packages, as it always has been in the ADOT image, so the dependency-conflict check below
++    # sees the bundle's versions unless an earlier sys.path entry shadows them.
+     # Compared normalized: the sys.path entry can differ textually from
+     # dirname(__file__) (e.g. a trailing slash in the injected PYTHONPATH
+     # value). Leaving the site on sys.path here would make the
+     # double-instrumentation check see the bundle's own packages and falsely
+     # self-deactivate; an unguarded exact remove() would raise instead.
+     normalized_site = normpath(current_site)
++    site_index = len(path)
++    for index, entry in enumerate(path):
++        if normpath(entry) == normalized_site:
++            site_index = index
++            break
+     path[:] = [entry for entry in path if normpath(entry) != normalized_site]
+ 
+     if _check_for_double_instrumentation(current_site):
+@@ -537,7 +544,7 @@
+     _log_debug("no double instrumentation detected")
+     _log_debug("checking for dependency conflicts")
+ 
+-    path.append(current_site)
++    path.insert(site_index, current_site)
+ 
+     version_conflicts = {}
+     requirements_to_check = _read_all_dependencies()

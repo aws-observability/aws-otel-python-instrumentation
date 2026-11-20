@@ -1,0 +1,23 @@
+--- a/sitecustomize.py
++++ b/sitecustomize.py
+@@ -558,17 +558,9 @@
+         _check_dependency_version_conflict(req_string, version_conflicts)
+ 
+     if not version_conflicts:
+-        if not config_file:
+-            # Select the bundled pure-Python OTLP exporter matching each
+-            # signal's protocol (otlp_proto_grpc or otlp_proto_http), both
+-            # registered as drop-in replacements under the standard entry
+-            # points. Per signal, because the protocol is resolved per signal:
+-            # a deployment can ask for http/protobuf traces and grpc metrics.
+-            # No-ops if the user already set these. Skipped under
+-            # OTEL_CONFIG_FILE, where the configuration file drives exporter
+-            # selection and these are ignored.
+-            for signal in otlp_signals:
+-                environ.setdefault("OTEL_{}_EXPORTER".format(signal), exporter_by_signal[signal])
++        # ADOT patch 0003: do not set OTEL_{TRACES,METRICS,LOGS}_EXPORTER. The upstream bundle selects its vendored
++        # pure-Python exporters here, which the ADOT payload does not contain; the ADOT distro sets its own defaults,
++        # and only if these are still unset.
+         try:
+             _log_debug("importing and initializing the Python auto-instrumentation now")
+             from opentelemetry.instrumentation import auto_instrumentation

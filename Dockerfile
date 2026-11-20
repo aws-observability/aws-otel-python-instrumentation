@@ -20,6 +20,12 @@ RUN sed -i "/opentelemetry-exporter-otlp-proto-grpc/d" ./aws-opentelemetry-distr
 
 RUN mkdir workspace && pip install --target workspace ./aws-opentelemetry-distro
 
+# Install the auto-instrumentation bootstrap: OpenTelemetry Packaging's sitecustomize.py with ADOT's patches, which
+# skips auto-instrumentation instead of breaking the application when it cannot start safely (for example on an
+# unsupported Python). See tools/otel-packaging-python/README.md.
+ADD tools/otel-packaging-python/ ./otel-packaging-python/
+RUN ./otel-packaging-python/build.sh workspace
+
 # Stage 2: Build the cp-utility binary
 FROM public.ecr.aws/docker/library/rust:1.89 AS builder
 

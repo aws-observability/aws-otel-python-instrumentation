@@ -1,0 +1,606 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# Derived from sitecustomize.py in the Dash0 operator
+# (https://github.com/dash0hq/dash0-operator, images/instrumentation/python/),
+# Copyright 2026 Dash0 Inc., Apache-2.0. See the NOTICE file at the repository root.
+
+# Trigger the load of the OpenTelemetry distribution for Python. This is enabled by prepending a
+# directory with this script to the PYTHONPATH environment variable via the OpenTelemetry injector.
+
+# IMPORTANT: This file must be valid Python 2.7+ so that it can be parsed without crashing
+# older interpreters. The version gate below prevents execution on unsupported versions.
+
+from os import environ, pathsep
+from os.path import dirname, isfile, join, normpath
+# sys is imported as a module, unlike everything else here, because
+# _log_cannot_auto_instrument_warning probes it with hasattr: sys.argv is
+# absent under some embedded interpreters, where "from sys import argv" would
+# raise at import time instead of letting the diagnostic degrade.
+import sys
+from sys import path, version, version_info, stderr
+
+# Distributions whose presence in the application means it is already
+# instrumented. Activating on top of one of them would put a second copy of the
+# same modules and entry points in the process, which the distributions cannot
+# survive: they ship conflicting files. Every distribution this bundle installs
+# that owns a public opentelemetry.* module path belongs here, which includes
+# the whole vendored pyproto chain in requirements.txt. Kept sorted so a new
+# requirements.txt entry is easy to check against this list.
+double_instrumentation_check_packages = [
+    "opentelemetry-distro",
+    "opentelemetry-exporter-otlp",
+    "opentelemetry-exporter-otlp-proto-common",
+    "opentelemetry-exporter-otlp-proto-grpc",
+    "opentelemetry-exporter-otlp-proto-http",
+    "opentelemetry-exporter-otlp-pyproto-common",
+    "opentelemetry-exporter-otlp-pyproto-grpc",
+    "opentelemetry-exporter-otlp-pyproto-http",
+    "opentelemetry-exporter-prometheus",
+    "opentelemetry-instrumentation",
+    "opentelemetry-proto",
+    "opentelemetry-pyproto",
+    "opentelemetry-sdk",
+]
+
+# Packages exempt from deactivation on version conflicts: general-purpose
+# libraries with stable APIs where the application's version (which wins on
+# sys.path) is expected to keep working with the bundled SDK. A mismatch logs
+# a warning instead of deactivating; e.g. Debian's python3-yaml 6.0 versus the
+# bundled PyYAML pin.
+version_conflict_exempt_packages = [
+    "pyyaml",
+    "jsonschema",
+]
+
+# The levels OTEL_INJECTOR_LOG_LEVEL accepts, mapped to the numbers logging
+# uses. Spelled out rather than read from logging, because this is resolved at
+# module scope and importing logging here would cost every Python process on
+# the host, which is the whole point of _get_logger. These are logging's
+# documented constants, fixed by its own API.
+log_level_by_name = {
+    "critical": 50,
+    "error": 40,
+    "warn": 30,
+    "warning": 30,
+    "info": 20,
+    "debug": 10,
+}
+
+# A warning is the only report an operator gets when a guard deactivates the
+# agent, so no configured level may silence one. A level above WARNING is
+# accepted and clamped to it rather than honoured literally.
+default_log_level = log_level_by_name["warning"]
+
+
+def _resolve_log_level(value):
+    # Returns (level, unrecognized value). An unrecognized value is handed back
+    # to be reported rather than quietly meaning "off", which is what made this
+    # variable read as a boolean: only the exact string "debug" did anything, so
+    # DEBUG, info and warning all produced silence with nothing to explain it.
+    if value is None or not value.strip():
+        return default_log_level, None
+    level = log_level_by_name.get(value.strip().lower())
+    if level is None:
+        return default_log_level, value
+    return min(level, default_log_level), None
+
+
+injector_log_level, unrecognized_log_level = _resolve_log_level(
+    environ.get("OTEL_INJECTOR_LOG_LEVEL"))
+
+# Kept as its own name because it guards more than the logger's level: it is
+# what stops a process that is not in debug from importing logging at all.
+debug_enabled = injector_log_level <= log_level_by_name["debug"]
+
+_logger = None
+
+
+def _get_logger():
+    # logging is imported here rather than at module scope. The injector
+    # prepends this file to every Python process on the host, including the
+    # short-lived ones and the ones that deactivate at the version gate, and
+    # importing logging costs 22 ms and 34 modules (threading, re, traceback)
+    # against 2.7 ms for site itself. A process that emits no diagnostic pays
+    # none of it.
+    global _logger
+    if _logger is not None:
+        return _logger
+    from logging import Formatter, Logger, StreamHandler
+
+    class _SilentStreamHandler(StreamHandler):
+        # A diagnostic that cannot be written must fail silently, which is what
+        # `print(file=stderr)` wrapped in `except Exception: pass` did.
+        # Handler.handleError instead writes a "--- Logging error ---"
+        # traceback to sys.stderr, which is usually the stream that just
+        # failed, and it swallows only OSError while doing so. Subclassed
+        # rather than switching logging.raiseExceptions, which is global state
+        # the application owns.
+        def handleError(self, record):
+            pass
+
+    class _SingleLineFormatter(Formatter):
+        def format(self, record):
+            return " ".join(Formatter.format(self, record).split())
+
+    # Built by instantiating logging.Logger directly instead of through
+    # logging.getLogger(), so that nothing about the application's logging
+    # changes: the logger never enters logging.Logger.manager.loggerDict, so
+    # the application cannot reach it by name and dictConfig cannot disable it
+    # while disabling existing loggers, and its parent is None, so no record
+    # can reach the root handlers. getLogger() exists so that one name yields
+    # one shared logger; here not sharing is the point.
+    logger = Logger("opentelemetry-python-autoinstrumentation")
+    # sys.stderr can be None (daemons, pythonw) or closed. The handler holds
+    # the stream from construction, so a later replacement cannot silence the
+    # diagnostics, and a write to a None or closed stream is dropped instead
+    # of raising or falling through to the application's stdout.
+    handler = _SilentStreamHandler(stderr)
+    handler.setFormatter(_SingleLineFormatter(
+        "[opentelemetry-python-autoinstrumentation] %(levelname)s: %(message)s"))
+    logger.addHandler(handler)
+    # Both filters logging applies by default sit at WARNING: the level
+    # inherited from the root logger, and the level of the fallback handler
+    # (logging.lastResort, which does not exist before Python 3.2 and drops
+    # every record with a "No handlers could be found" line instead). Owning
+    # the level and the handler bypasses both, so a debug run is verbose on
+    # every interpreter this file can reach.
+    logger.setLevel(injector_log_level)
+    _logger = logger
+    return _logger
+
+
+def _log_warn(message):
+    _get_logger().warning(message)
+
+
+def _log_debug(message):
+    # Not a level filter, the logger's own level is that. This keeps a process
+    # running with debug off from importing logging at all.
+    if debug_enabled:
+        _get_logger().debug(message)
+
+
+if unrecognized_log_level is not None:
+    # Reported rather than silently treated as "off". This is the variable an
+    # operator reaches for to make the agent explain itself, so answering a
+    # typo with silence leaves them unable to tell a rejected value from a
+    # working one that had nothing to say. It does mean a process with a
+    # mistyped value pays the import logging this file otherwise avoids, which
+    # stops as soon as the value is corrected.
+    _log_warn(
+        'OTEL_INJECTOR_LOG_LEVEL="{}" is not a level; using warning. '
+        "Supported levels: {}.".format(
+            unrecognized_log_level, ", ".join(sorted(log_level_by_name))))
+
+_log_debug("running sitecustomize.py")
+_log_debug("PYTHONPATH: {}".format(environ.get("PYTHONPATH")))
+
+
+def _log_cannot_auto_instrument_warning(reason):
+    if hasattr(sys, "argv"):
+        _log_warn("cannot auto-instrument Python process: {} [{}]".format(reason, " ".join(sys.argv)))
+    else:
+        _log_warn("cannot auto-instrument Python process: {}".format(reason))
+
+
+def _self_deactivate(current_site):
+    # Starting child processes is quite common in Python (e.g. gunicorn etc.), and in particular,
+    # the OpenTelemetry instrumentation wrapper (opentelemetry-instrument python app.py) does this.
+    # When self-deactivating, we must also deactivate for child processes so they do not attempt
+    # to load our packages in a potentially conflicting state.
+
+    # Remove this site from PYTHONPATH so child processes do not load it.
+    # Compared normalized: the injected entry can differ textually from
+    # dirname(__file__) (e.g. a trailing slash).
+    normalized_site = normpath(current_site)
+    current_pythonpath = environ.get("PYTHONPATH", "")
+    pythonpath_entries = [
+        entry for entry in current_pythonpath.split(pathsep)
+        if normpath(entry) != normalized_site
+    ]
+    new_pythonpath = pathsep.join(pythonpath_entries)
+    _log_debug('setting PYTHONPATH in _self_deactivate: "{}"'.format(new_pythonpath))
+    environ["PYTHONPATH"] = new_pythonpath
+
+    # Clear the injector's Python agent path so it does not re-add our site to child processes.
+    _log_debug("clearing PYTHON_AUTO_INSTRUMENTATION_AGENT_PATH_PREFIX in _self_deactivate")
+    environ["PYTHON_AUTO_INSTRUMENTATION_AGENT_PATH_PREFIX"] = ""
+
+    path[:] = [entry for entry in path if normpath(entry) != normalized_site]
+
+
+def _normalized_package_name(name):
+    # PEP 503: runs of "-", "_" and "." collapse to a single "-", lowercased.
+    # importlib.metadata normalizes the name a distribution is looked up by, but
+    # distributions() reports the Name each package declared, verbatim, and
+    # non-canonical ones are ordinary (PyYAML, typing_extensions, ruamel.yaml).
+    # So a comparison against one of the canonical lists above has to normalize.
+    #
+    # re is imported here rather than at module scope: the injector prepends this
+    # file to every Python process on the host, and re is not loaded at that
+    # point on any supported interpreter. Both callers import importlib.metadata,
+    # which pulls in re itself, so by the time this runs the import is free.
+    import re
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _check_for_double_instrumentation(current_site):
+    from importlib.metadata import distributions
+    offending_packages = []
+    for dist in distributions():
+        # The location is read before the metadata because it is path
+        # arithmetic that does not touch METADATA, so it is still available to
+        # describe a distribution whose name turns out not to be readable.
+        location = "an unknown location"
+        try:
+            location = dist.locate_file("")
+            name = dist.metadata["Name"]
+        except Exception as e:
+            # importlib.metadata decodes METADATA as UTF-8, and a distribution
+            # whose file is not valid UTF-8 raises here; a Latin-1 author field
+            # written by older tooling is the usual cause. Skip that one
+            # distribution rather than letting it abort the scan, which
+            # deactivated the agent for the whole process over a package that
+            # has nothing to do with OpenTelemetry.
+            _log_warn(
+                "cannot read the metadata of the distribution installed in {}, so it cannot be "
+                "checked for double instrumentation; skipping it: {}: {}".format(
+                    location, type(e).__name__, e))
+            continue
+        if name is not None and _normalized_package_name(name) in double_instrumentation_check_packages:
+            # The operator reading the deactivation message has to find and
+            # remove this package, so name it with its version and its install
+            # directory. locate_file("") is abstract on Distribution, so that
+            # directory resolves for any finder, not just path-based installs.
+            # Reported under the name the package declared, which is the one
+            # they will see in pip list, not the normalized one matched above.
+            offending_packages.append("{} {} ({})".format(name, dist.version, dist.locate_file("")))
+    if offending_packages:
+        _self_deactivate(current_site)
+        _log_cannot_auto_instrument_warning(
+            "The application has OpenTelemetry dependencies which indicate that it is already instrumented. "
+            "The following problematic dependencies have been found: {}. ".format(", ".join(offending_packages)) +
+            "Skipping Python auto-instrumentation to avoid double instrumentation. Remove the mentioned "
+            "dependencies and make sure the opentelemetry-instrument wrapper is not used if you want to "
+            "use the system-package Python auto-instrumentation.")
+        return True
+    return False
+
+
+def _interpreter_site(current_site):
+    """Return the bundle subdirectory holding the wheels built for this interpreter.
+
+    The bundle ships one subdirectory per supported interpreter, named after that
+    interpreter's CPython ABI tag, because the compiled extensions it carries are
+    each built against a single ABI. Only reached behind the version gate, so the
+    directory named here is always one the bundle actually contains.
+    """
+    return join(current_site, "cp3{}".format(version_info[1]))
+
+
+def _read_all_dependencies():
+    """Read all flattened dependencies from all-dependencies.txt. Returns list of requirement strings or None."""
+    dependencies_file = join(_interpreter_site(dirname(__file__)), "all-dependencies.txt")
+    requirements_to_check = []
+    try:
+        # Decoded as UTF-8 explicitly rather than in whatever the locale says.
+        # This file ships inside the bundle, so its encoding is a property of
+        # the package and not of the process that happens to be reading it: a
+        # C locale with PEP 538 coercion disabled decodes as ASCII, which would
+        # make the same bundle readable in one process and not in the next.
+        with open(dependencies_file, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                requirements_to_check.append(line)
+        return requirements_to_check
+    except (OSError, UnicodeDecodeError):
+        # IOError is an alias of OSError since 3.3, and this runs only behind
+        # the version_info gate on 3.10+, so naming both caught nothing extra.
+        #
+        # A manifest that cannot be decoded is as unusable as one that cannot
+        # be opened, and the caller already turns None into a deactivation that
+        # names this file. Without UnicodeDecodeError here it would instead
+        # surface as the blanket handler's "unexpected error".
+        return None
+
+
+def _check_dependency_version_conflict(req_string, version_conflicts):
+    """Check for a dependency version conflict. Accumulates conflicts in version_conflicts (modified in place)."""
+    from importlib.metadata import PackageNotFoundError, distribution
+    from packaging.requirements import Requirement
+    from packaging.version import Version
+
+    _log_debug("_check_dependency_version_conflict({})".format(req_string))
+    # An exception escaping this module aborts no application, but it prints a
+    # traceback on every process start; parse failures must never propagate.
+    # Unparsable input makes the requirement unverifiable, not conflicting:
+    # warn and skip it.
+    try:
+        req = Requirement(req_string)
+    except Exception as e:
+        _log_warn(
+            'cannot parse requirement "{}" from all-dependencies.txt; '
+            "skipping its dependency-conflict check: {}: {}".format(req_string, type(e).__name__, e))
+        return
+
+    if req.marker and not req.marker.evaluate():
+        return
+
+    if req.name == "pip":
+        return
+
+    try:
+        installed_distribution = distribution(req.name)
+    except PackageNotFoundError:
+        _log_debug("adding version error for {}".format(req.name))
+        version_conflicts[req.name] = {"error": "required package not found"}
+        return
+
+    # Read the version out once, before parsing it. distribution() above is
+    # lazy and does not touch METADATA, so an unreadable file surfaces here,
+    # and holding the value in a local is what lets the parse handler below
+    # quote it without going back to the attribute that just failed.
+    try:
+        installed_version_string = installed_distribution.version
+    except Exception as e:
+        _log_warn(
+            'cannot read the installed version of package "{}"; skipping its '
+            "dependency-conflict check: {}: {}".format(req.name, type(e).__name__, e))
+        return
+
+    # Distributions patched by Linux distros can carry versions that do not
+    # parse as PEP 440 (and metadata may lack a version entirely).
+    try:
+        installed_version = Version(installed_version_string)
+    except Exception as e:
+        _log_warn(
+            'cannot parse the installed version "{}" of package "{}"; '
+            "skipping its dependency-conflict check: {}: {}".format(
+                installed_version_string, req.name, type(e).__name__, e))
+        return
+
+    _log_debug("installed_version: {}".format(installed_version))
+    if req.specifier and installed_version not in req.specifier:
+        if _normalized_package_name(req.name) in version_conflict_exempt_packages:
+            _log_warn(
+                'the installed version {} of package "{}" differs from the bundled requirement {}; '
+                "continuing anyway (the installed version takes precedence)".format(
+                    installed_version, req.name, req.specifier))
+            return
+        _log_debug("adding version conflict for {}".format(req.name))
+        version_conflicts[req.name] = {
+            "version_required": str(req.specifier),
+            "version_found": str(installed_version),
+        }
+
+
+def _validate_config_file(current_site, config_file):
+    """Validate the declarative configuration file with the bundled otel-config-check.
+
+    Returns None when the file is usable (or when validation is impossible, in
+    which case a debug/warning line explains why), and a human-readable error
+    message when the file would break the SDK's file configurator.
+    """
+    from subprocess import run
+
+    validator = join(dirname(current_site), "otel-config-check")
+    if not isfile(validator):
+        _log_debug("otel-config-check not found at {}; skipping configuration file validation".format(validator))
+        return None
+    try:
+        result = run([validator, config_file], capture_output=True, text=True, timeout=10)
+    except Exception as e:
+        _log_warn("cannot run otel-config-check ({}: {}); skipping configuration file validation".format(
+            type(e).__name__, e))
+        return None
+    if result.returncode != 0:
+        return (result.stdout + result.stderr).strip()
+    return None
+
+
+def _render_version_conflicts(version_conflicts):
+    descriptions = []
+    for name in sorted(version_conflicts):
+        conflict = version_conflicts[name]
+        if "error" in conflict:
+            descriptions.append("{} ({})".format(name, conflict["error"]))
+        else:
+            descriptions.append("{} (requires {}, found {})".format(
+                name, conflict["version_required"], conflict["version_found"]))
+    return "; ".join(descriptions)
+
+
+otlp_signals = ["TRACES", "METRICS", "LOGS"]
+
+
+def _otlp_protocol_for_signal(signal):
+    # The signal-specific variable takes precedence over the generic one, per
+    # the OTLP specification, and opentelemetry.sdk._configuration implements
+    # exactly that precedence when it resolves an exporter. A guard that reads
+    # only the generic variable therefore validates a value the SDK may never
+    # read and misses the one it does.
+    #
+    # A blank (empty or only-whitespaces) value counts as unset here too, so a
+    # blank signal-specific variable lets the generic one through instead of
+    # shadowing it with nothing. The value is returned stripped so a rejection
+    # message quotes it the way _exporter_for_protocol read it.
+    #
+    # Returns (variable name, protocol), so a rejection can name the variable
+    # that actually carried the value. Both are None when no variable sets one.
+    for name in ("OTEL_EXPORTER_OTLP_{}_PROTOCOL".format(signal), "OTEL_EXPORTER_OTLP_PROTOCOL"):
+        value = environ.get(name)
+        if value is not None and value.strip():
+            return name, value.strip()
+    return None, None
+
+
+def _exporter_for_protocol(otlp_protocol):
+    # This package bundles pure-Python OTLP exporters for both gRPC and
+    # HTTP/protobuf (the gRPC one transports over the stdlib-only _pygrpc
+    # client, so neither needs a C extension). http/json is not supported: the
+    # exporters emit protobuf only. An unset protocol follows the OpenTelemetry
+    # default of grpc. Returns the exporter entry-point name, or None if the
+    # protocol is unsupported.
+    #
+    # A blank (empty or only-whitespaces) value counts as unset.
+    protocol = (otlp_protocol or "").strip()
+    if not protocol or protocol == "grpc":
+        return "otlp_proto_grpc"
+    if protocol == "http/protobuf":
+        return "otlp_proto_http"
+    return None
+
+
+def import_distro():
+    _log_debug("checking Python version")
+    current_site = dirname(__file__)
+
+    # Require Python >= 3.10 (opentelemetry-exporter-otlp-pyproto-http minimum).
+    # We cannot use named attributes (e.g. sys.version_info.major) as those were introduced in 3.1.
+    _SUPPORTED_PYTHON_MINORS = (10, 11, 12, 13,)  # supported-python-minors
+    if version_info[0] != 3 or version_info[1] not in _SUPPORTED_PYTHON_MINORS:
+        _self_deactivate(current_site)
+        _log_cannot_auto_instrument_warning("unsupported Python version: {}".format(version))
+        return
+    _log_debug("found eligible Python version: {}".format(version_info))
+
+    interpreter_site = _interpreter_site(current_site)
+    if interpreter_site not in path:
+        normalized_site = normpath(current_site)
+        insert_at = 0
+        for index, entry in enumerate(path):
+            if normpath(entry) == normalized_site:
+                insert_at = index + 1
+                break
+        path.insert(insert_at, interpreter_site)
+    _log_debug("using interpreter-specific packages from {}".format(interpreter_site))
+
+    # Exporter selected per signal from the OTLP protocol variables below
+    # (env-var mode). Under OTEL_CONFIG_FILE the configuration file drives
+    # exporter selection and OTEL_*_EXPORTER is ignored, so this stays empty
+    # in that mode.
+    exporter_by_signal = {}
+    config_file = environ.get("OTEL_CONFIG_FILE")
+    if config_file:
+        # With OTEL_CONFIG_FILE in effect the SDK ignores the OTEL_* exporter
+        # environment variables, so the protocol guard below would check
+        # values that are never used. Validate the configuration file instead
+        # (readable, valid YAML, and a supported file_format).
+        _log_debug("validating OTEL_CONFIG_FILE: {}".format(config_file))
+        validation_error = _validate_config_file(current_site, config_file)
+        if validation_error is not None:
+            _self_deactivate(current_site)
+            _log_cannot_auto_instrument_warning(
+                "the configuration file set via OTEL_CONFIG_FILE ({}) is not usable: {}".format(
+                    config_file, validation_error))
+            return
+    else:
+        _log_debug("checking the OTLP protocol of each signal")
+
+        # Resolved per signal, because the SDK resolves it per signal: an
+        # exporter chosen from the generic variable alone would silently
+        # discard OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http/protobuf and export
+        # over grpc instead.
+        for signal in otlp_signals:
+            variable, otlp_protocol = _otlp_protocol_for_signal(signal)
+            exporter = _exporter_for_protocol(otlp_protocol)
+            if exporter is None:
+                _self_deactivate(current_site)
+                _log_cannot_auto_instrument_warning(
+                    "{}={} is not supported. "
+                    "This package supports grpc and http/protobuf.".format(variable, otlp_protocol)
+                )
+                return
+            exporter_by_signal[signal] = exporter
+            _log_debug("{} resolves to the {} exporter".format(signal, exporter))
+
+    _log_debug("checking for double instrumentation")
+
+    # Temporarily remove this site so the double-instrumentation check only sees the application's
+    # own packages. After the check we re-append it, which also moves it to the end of sys.path so
+    # the application's package versions win over ours in case of overlap.
+    # Compared normalized: the sys.path entry can differ textually from
+    # dirname(__file__) (e.g. a trailing slash in the injected PYTHONPATH
+    # value). Leaving the site on sys.path here would make the
+    # double-instrumentation check see the bundle's own packages and falsely
+    # self-deactivate; an unguarded exact remove() would raise instead.
+    normalized_site = normpath(current_site)
+    path[:] = [entry for entry in path if normpath(entry) != normalized_site]
+
+    if _check_for_double_instrumentation(current_site):
+        return
+
+    _log_debug("no double instrumentation detected")
+    _log_debug("checking for dependency conflicts")
+
+    path.append(current_site)
+
+    version_conflicts = {}
+    requirements_to_check = _read_all_dependencies()
+    if requirements_to_check is None:
+        _self_deactivate(current_site)
+        _log_cannot_auto_instrument_warning("cannot read all-dependencies.txt for dependency conflict checking")
+        return
+
+    # Check every requirement, not just up to the first conflict.
+    for req_string in requirements_to_check:
+        _check_dependency_version_conflict(req_string, version_conflicts)
+
+    if not version_conflicts:
+        if not config_file:
+            # Select the bundled pure-Python OTLP exporter matching each
+            # signal's protocol (otlp_proto_grpc or otlp_proto_http), both
+            # registered as drop-in replacements under the standard entry
+            # points. Per signal, because the protocol is resolved per signal:
+            # a deployment can ask for http/protobuf traces and grpc metrics.
+            # No-ops if the user already set these. Skipped under
+            # OTEL_CONFIG_FILE, where the configuration file drives exporter
+            # selection and these are ignored.
+            for signal in otlp_signals:
+                environ.setdefault("OTEL_{}_EXPORTER".format(signal), exporter_by_signal[signal])
+        try:
+            _log_debug("importing and initializing the Python auto-instrumentation now")
+            from opentelemetry.instrumentation import auto_instrumentation
+            # swallow_exceptions=False is what makes the handler below reachable.
+            # initialize() defaults to logging any failure of the distro, the
+            # configurators, or the instrumentors and returning normally, which
+            # would leave this site activated around an SDK that never
+            # initialized: no telemetry, no message from us, and every child
+            # process repeating it. The parameter exists since
+            # opentelemetry-instrumentation 0.55b0.
+            auto_instrumentation.initialize(swallow_exceptions=False)
+        except Exception as e:
+            _self_deactivate(current_site)
+            _log_cannot_auto_instrument_warning(
+                "error when importing/initializing Python OpenTelemetry auto-instrumentation: {}: {}".format(
+                    type(e).__name__, e))
+    else:
+        _self_deactivate(current_site)
+        _log_cannot_auto_instrument_warning(
+            "dependency conflicts: {}".format(_render_version_conflicts(version_conflicts)))
+
+
+# Every guard above exists to leave the process in a known state, and an
+# exception escaping import_distro() is the one path that leaves it in the
+# state they prevent: the site still on PYTHONPATH and the injector prefix
+# still set, so every child process that execs an interpreter retries the same
+# failure, while site.execsitecustomize() reports a single line that does not
+# name this agent and carries no traceback unless PYTHONVERBOSE is set.
+try:
+    import_distro()
+except Exception as unexpected_error:
+    try:
+        _log_cannot_auto_instrument_warning(
+            "unexpected error while deciding whether to auto-instrument: {}: {}".format(
+                type(unexpected_error).__name__, unexpected_error))
+    except Exception:
+        pass
+    try:
+        # The reporting is itself guarded, because the step that failed can be the one
+        # that reports.
+        _self_deactivate(dirname(__file__))
+    except Exception:
+        pass

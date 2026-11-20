@@ -252,6 +252,30 @@ jobs:
           PY_NODOT="py$(echo '${{ matrix.python-version }}' | tr -d '.')"
           tox -c cloudwatch-plugin-otel/tox.ini -e "${PY_NODOT}-test-cloudwatch-plugin-otel-${{ matrix.otel }}" -- -ra
 
+  otel-packaging-python-tests:
+    name: otel-packaging-python ${{ matrix.python-version }}
+    # Fork PRs run on GitHub-hosted runners; the CodeBuild webhook requires approval for them.
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(format('["codebuild-adot-python-runner-{0}-{1}", "image:ubuntu-8.0", "instance-size:large"]', github.run_id, github.run_attempt)) }}
+    # Skip on draft PRs and on label-only events; neither affects the tests.
+    if: ${{ github.event.pull_request.draft == false }}
+    strategy:
+      fail-fast: false # ensures the entire test matrix is run, even if one permutation fails
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - name: Checkout Repo @ SHA - ${{ github.sha }}
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c #v6.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run tox
+        # The old-interpreter tests start python:2.7-slim to python:3.9-slim containers; once is enough.
+        env:
+          RUN_DOCKER_TESTS: ${{ matrix.python-version == '3.11' && '1' || '' }}
+        run: |
+          pip install tox
+          tox -e ${{ matrix.python-version }}-otel-packaging-python -- -ra
+
   contract-tests:
     needs: build-wheel
     # Skip on draft PRs and on label-only events; neither affects the tests.
@@ -321,7 +345,7 @@ jobs:
   all-pr-checks-pass:
     # Fork PRs run on GitHub-hosted runners; the CodeBuild webhook requires approval for them.
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON(format('["codebuild-adot-python-runner-{0}-{1}", "image:ubuntu-8.0", "instance-size:small"]', github.run_id, github.run_attempt)) }}
-    needs: [static-code-checks, lint, spotless, unit-tests, cloudwatch-plugin-otel-unit-tests, build-wheel, build-cloudwatch-plugin-otel, build-and-scan-image, contract-tests, build-lambda]
+    needs: [static-code-checks, lint, spotless, unit-tests, cloudwatch-plugin-otel-unit-tests, otel-packaging-python-tests, build-wheel, build-cloudwatch-plugin-otel, build-and-scan-image, contract-tests, build-lambda]
     if: always()
     steps:
       - name: Checkout to get workflow file

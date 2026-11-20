@@ -19,6 +19,9 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   generates fully random trace and span IDs, but reads them from `os.urandom`, so sessions restored from the same
   memory snapshot don't repeat IDs. An explicitly set `OTEL_PYTHON_ID_GENERATOR` still takes precedence.
   ([#985](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/985))
+- fix: the operator auto-instrumentation image skips auto-instrumentation instead of breaking the application when it
+  cannot start safely, for example on Python older than 3.10, using the OpenTelemetry Packaging bootstrap
+  ([#986](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/986))
 
 ## v0.23.0 - 2026-11-18
 - fix(crewai): record full tool definitions (name, description, and parameters) on CrewAI `chat`,
