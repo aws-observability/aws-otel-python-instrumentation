@@ -64,6 +64,7 @@ class TestAwsOpenTelemetryDistro(TestCase):
             AWS_GENAI_INSTRUMENTATION,
             AWS_AGENTIC_INSTRUMENTATION,
             "CREWAI_DISABLE_TELEMETRY",
+            "AWS_EXECUTION_ENV",
         ]
 
         # First, save all current values
@@ -119,6 +120,28 @@ class TestAwsOpenTelemetryDistro(TestCase):
 
         # Verify patches were applied
         mock_apply_patches.assert_called_once()
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.apply_instrumentation_patches")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.OpenTelemetryDistro._configure")
+    def test_configure_sets_snapshot_safe_id_generator_on_agentcore(self, mock_super_configure, mock_apply_patches):
+        os.environ["AWS_EXECUTION_ENV"] = "AWS_BedrockAgentCore_Runtime"
+        AwsOpenTelemetryDistro()._configure()
+        self.assertEqual(os.environ.get(OTEL_PYTHON_ID_GENERATOR), "snapshot_safe")
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.apply_instrumentation_patches")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.OpenTelemetryDistro._configure")
+    def test_configure_keeps_user_id_generator_on_agentcore(self, mock_super_configure, mock_apply_patches):
+        os.environ["AWS_EXECUTION_ENV"] = "AWS_BedrockAgentCore_Runtime"
+        os.environ[OTEL_PYTHON_ID_GENERATOR] = "random"
+        AwsOpenTelemetryDistro()._configure()
+        self.assertEqual(os.environ.get(OTEL_PYTHON_ID_GENERATOR), "random")
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.apply_instrumentation_patches")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.OpenTelemetryDistro._configure")
+    def test_configure_keeps_xray_id_generator_outside_agentcore(self, mock_super_configure, mock_apply_patches):
+        os.environ["AWS_EXECUTION_ENV"] = "AWS_Lambda_python3.12"
+        AwsOpenTelemetryDistro()._configure()
+        self.assertEqual(os.environ.get(OTEL_PYTHON_ID_GENERATOR), "xray")
 
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.apply_instrumentation_patches")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.OpenTelemetryDistro._configure")
