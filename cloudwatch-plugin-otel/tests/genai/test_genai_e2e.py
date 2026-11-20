@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from genai_helpers import OLD, child_env, plugin_entry_points
+from genai_helpers import EVALUABLE, OLD, child_env, plugin_entry_points, summary_parts
 
 pytest.importorskip("opentelemetry.instrumentation.genai.langchain")
 pytest.importorskip("langchain_core")
@@ -84,6 +84,9 @@ def test_summary_line_reaches_stderr(child_run):
     assert not any("WARNING" in line for line in plugin_lines), stderr  # `true` just works: no warning
     summary = [line for line in plugin_lines if " INFO " in line]
     assert len(summary) == 1, f"expected exactly one INFO line (the summary): {plugin_lines}"
-    assert summary[0].endswith(
-        "CW-PLUGIN genai: content capture=SPAN_ONLY (translated from true); langchain=activated (langchain-core only)"
-    ), summary
+    parts = summary_parts(summary[0][summary[0].index("CW-PLUGIN genai: ") :])
+    assert parts == {
+        "content capture": "SPAN_ONLY (translated from true)",
+        "langchain": "activated (langchain-core only)",
+        **EVALUABLE,
+    }, summary

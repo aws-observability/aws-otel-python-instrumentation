@@ -22,11 +22,15 @@ GENAI_ENV = (
     "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT",
     "OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT",
     "OTEL_PYTHON_LOG_LEVEL",
+    "OTEL_RESOURCE_ATTRIBUTES",
+    "AGENTCORE_RUNTIME_URL",
 )
 
 OLD = "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"
 NEW = "OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT"
 PLUGIN_DIST = "cloudwatch-plugin-otel"
+# The session.id, demotion and resource steps, with an SDK TracerProvider and an active LangChain instrumentor.
+EVALUABLE = {"session.id": "on", "nested chat demotion": "on", "agent identity": "service.type"}
 HERE = Path(__file__).parent
 
 

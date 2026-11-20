@@ -22,14 +22,14 @@ PLUGIN_DIST = "cloudwatch-plugin-otel"
 AGENT_NAME = "weather_agent"
 
 
-def _restrict_entry_points():
+def _restrict_entry_points(instrumentors=("langchain",)):
     real_entry_points = _load.entry_points
 
     def restricted(**params):
         group = params.get("group")
         eps = real_entry_points(**params)
         if group == "opentelemetry_instrumentor":
-            return [ep for ep in eps if ep.name == "langchain"]
+            return [ep for ep in eps if ep.name in instrumentors]
         if group in ("opentelemetry_pre_instrument", "opentelemetry_post_instrument"):
             return [ep for ep in eps if ep.dist is not None and ep.dist.name == PLUGIN_DIST]
         return []

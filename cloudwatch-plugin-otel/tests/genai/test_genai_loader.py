@@ -7,7 +7,7 @@ import logging
 import os
 
 import pytest
-from genai_helpers import OLD, messages, plugin_entry_points, run_child, summary_parts, write_stub_dist
+from genai_helpers import EVALUABLE, OLD, messages, plugin_entry_points, run_child, summary_parts, write_stub_dist
 from plugins.opentelemetry.cloudwatch.genai import langchain as lc
 
 from opentelemetry.instrumentation.auto_instrumentation import _load
@@ -79,7 +79,11 @@ def test_loader_skips_upstream_and_the_post_hook_activates_it(
     assert _instrumented()
     assert dict(os.environ) == before  # `true` is honored without touching the environment
     (line,) = messages(caplog, logging.INFO)
-    assert summary_parts(line) == {"content capture": "SPAN_ONLY (translated from true)", "langchain": lc.ACTIVATED}
+    assert summary_parts(line) == {
+        "content capture": "SPAN_ONLY (translated from true)",
+        "langchain": lc.ACTIVATED,
+        **EVALUABLE,
+    }
     assert messages(caplog, logging.WARNING) == []
 
     _chat_once()
@@ -92,7 +96,7 @@ def test_unset_content_capture_stays_off(restricted_entry_points, span_exporter,
     _load._load_instrumentors(DefaultDistro())
 
     (line,) = messages(caplog, logging.INFO)
-    assert summary_parts(line) == {"content capture": "NO_CONTENT (unset)", "langchain": lc.ACTIVATED}
+    assert summary_parts(line) == {"content capture": "NO_CONTENT (unset)", "langchain": lc.ACTIVATED, **EVALUABLE}
     _chat_once()
     (chat,) = [s for s in span_exporter.get_finished_spans() if s.attributes.get("gen_ai.operation.name") == "chat"]
     assert "gen_ai.input.messages" not in chat.attributes  # the plugin never turns content capture on
@@ -119,7 +123,8 @@ def _plugin(report, level):
 
 @pytest.mark.parametrize(
     "version,instrumented,langchain_part",
-    [("0.3.25", True, {"langchain": "instrumented"}), ("2.0.0", False, {})],  # in / out of the declared range
+    # in / out of the declared range; the evaluable steps apply only while the instrumentor is active
+    [("0.3.25", True, {"langchain": "instrumented", **EVALUABLE}), ("2.0.0", False, {})],
 )
 def test_installed_langchain_leaves_the_decision_to_the_loader(tmp_path, version, instrumented, langchain_part):
     plugin_entry_points(PRE)

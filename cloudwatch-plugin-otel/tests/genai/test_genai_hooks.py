@@ -12,6 +12,7 @@ from pathlib import Path
 import cloudwatch_plugin_otel_hooks as shim
 import pytest
 from genai_helpers import (
+    EVALUABLE,
     NEW,
     OLD,
     FakeLangChainInstrumentor,
@@ -23,6 +24,8 @@ from genai_helpers import (
 from plugins.opentelemetry.cloudwatch import _auto_instrumentation
 from plugins.opentelemetry.cloudwatch.genai import _settings
 from plugins.opentelemetry.cloudwatch.genai import langchain as lc
+
+from opentelemetry.test.globals_test import reset_trace_globals
 
 _IMPL = "plugins.opentelemetry.cloudwatch._auto_instrumentation"
 
@@ -235,7 +238,12 @@ def test_shim_lets_base_exceptions_from_the_import_propagate(failing_import):
 
 def test_step_lists():
     assert [name for name, _ in _auto_instrumentation._PRE_STEPS] == ["content capture"]
-    assert [name for name, _ in _auto_instrumentation._POST_STEPS] == ["langchain"]
+    assert [name for name, _ in _auto_instrumentation._POST_STEPS] == [
+        "langchain",
+        "session.id",
+        "nested chat demotion",
+        "agent identity",
+    ]
 
 
 def test_a_failing_step_logs_one_warning_and_the_next_step_runs(monkeypatch, caplog):
@@ -278,8 +286,8 @@ def test_run_records_the_step_result():
 
 
 @pytest.fixture
-def fake_discovery(monkeypatch):
-    """langchain-core and the upstream instrumentor (a fake) installed, `langchain` not."""
+def fake_discovery(monkeypatch, span_exporter):
+    """langchain-core and the upstream instrumentor (a fake) installed, `langchain` not; an SDK TracerProvider."""
     monkeypatch.setattr(lc, "_langchain_core_present", lambda: True)
     monkeypatch.setitem(sys.modules, lc.UPSTREAM_MODULE, fake_upstream_module())
     monkeypatch.setattr(lc, "distribution_version", lambda name: "1.3b0" if name == lc.UPSTREAM_DIST else None)
@@ -305,15 +313,30 @@ def _run_hooks():
 def test_exactly_one_info_line_after_a_full_run(fake_discovery, stand_in_util_genai, caplog):
     _run_hooks()
     (line,) = _summary(caplog)
-    assert line == f"CW-PLUGIN genai: content capture=NO_CONTENT (unset); langchain={lc.ACTIVATED}"
+    assert summary_parts(line) == {"content capture": "NO_CONTENT (unset)", "langchain": lc.ACTIVATED, **EVALUABLE}
+
+
+def test_summary_without_an_sdk_tracer_provider(fake_discovery, stand_in_util_genai, caplog):
+    reset_trace_globals()  # the global provider is the API's proxy again
+    _run_hooks()
+    (line,) = _summary(caplog)
+    skipped = "skipped (not an SDK TracerProvider)"
+    assert summary_parts(line) == {
+        "content capture": "NO_CONTENT (unset)",
+        "langchain": lc.ACTIVATED,
+        **{name: skipped for name in EVALUABLE},
+    }
 
 
 @pytest.mark.parametrize(
     "env,expected",
     [
-        ({OLD: "true"}, {"content capture": "SPAN_ONLY (translated from true)", "langchain": lc.ACTIVATED}),
-        ({OLD: "span_and_event"}, {"content capture": "SPAN_AND_EVENT", "langchain": lc.ACTIVATED}),
         (
+            {OLD: "true"},
+            {"content capture": "SPAN_ONLY (translated from true)", "langchain": lc.ACTIVATED, **EVALUABLE},
+        ),
+        ({OLD: "span_and_event"}, {"content capture": "SPAN_AND_EVENT", "langchain": lc.ACTIVATED, **EVALUABLE}),
+        (  # no active GenAI instrumentation: the evaluable steps do not apply
             {"OTEL_PYTHON_DISABLED_INSTRUMENTATIONS": "langchain"},
             {"content capture": "NO_CONTENT (unset)", "langchain": lc.DISABLED},
         ),
@@ -330,13 +353,17 @@ def test_summary_line_reflects_the_outcomes(fake_discovery, stand_in_util_genai,
 def test_summary_when_already_instrumented(fake_discovery, stand_in_util_genai, caplog):
     FakeLangChainInstrumentor().instrument(skip_dep_check=True)
     _run_hooks()
-    assert _summary(caplog)[0].endswith("langchain=instrumented")
+    assert summary_parts(_summary(caplog)[0]) == {
+        "content capture": "NO_CONTENT (unset)",
+        "langchain": lc.INSTRUMENTED,
+        **EVALUABLE,
+    }
 
 
 def test_summary_when_activation_fails(fake_discovery, stand_in_util_genai, caplog):
     FakeLangChainInstrumentor.fail = True
     _run_hooks()
-    assert _summary(caplog)[0].endswith("langchain=failed")
+    assert _summary(caplog)[0].endswith("langchain=failed")  # nothing instrumenting: no evaluable steps
 
 
 def test_summary_has_only_the_steps_that_applied(fake_discovery, stand_in_util_genai, monkeypatch, caplog):
@@ -359,7 +386,7 @@ def test_summary_omits_steps_that_raised(fake_discovery, monkeypatch, caplog):
     monkeypatch.setattr(_auto_instrumentation, "_PRE_STEPS", [("content capture", boom)])
     _run_hooks()
 
-    assert _summary(caplog) == [f"CW-PLUGIN genai: langchain={lc.ACTIVATED}"]
+    assert summary_parts(_summary(caplog)[0]) == {"langchain": lc.ACTIVATED, **EVALUABLE}
     assert len([r for r in caplog.records if r.levelno == logging.WARNING]) == 1
 
 
