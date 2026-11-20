@@ -84,6 +84,26 @@ are recorded:
 
 For AgentCore Evaluations, set `true` or `SPAN_ONLY`.
 
+### Sessions and agent identity
+
+Spans get `session.id` from W3C baggage `session.id` (this needs the `baggage` propagator, on by default). Like any
+baggage, it is also sent to downstream calls. In a server, the session id must arrive with the request: the caller
+sends a `baggage: session.id=<id>` header (AgentCore Runtime does this for you), or your middleware sets the baggage
+before OpenTelemetry's server middleware runs. Set inside a handler, it misses the SERVER span, and AgentCore
+Evaluations then splits the session. Code that starts its own root spans (scripts, workers) can attach it:
+
+```python
+from opentelemetry import baggage, context
+token = context.attach(baggage.set_baggage("session.id", session_id))
+...  # start the spans of this session
+context.detach(token)
+```
+
+Spans and logs get the resource attribute `aws.service.type=gen_ai_agent` (and, on AgentCore Runtime,
+`cloud.resource_id` and `cloud.platform`) unless you set them yourself, for example in `OTEL_RESOURCE_ATTRIBUTES`.
+`cloud.resource_id` assumes the `DEFAULT` runtime endpoint; for another endpoint, set
+`OTEL_RESOURCE_ATTRIBUTES=cloud.resource_id=arn:aws:bedrock-agentcore:<region>:<account>:runtime/<runtime-id>/runtime-endpoint/<endpoint>:<endpoint>`.
+
 ### Settings
 
 `CW_PLUGIN_GENAI_ENABLED=false` turns off the plugin's GenAI features. Plugin log lines start with `CW-PLUGIN`.

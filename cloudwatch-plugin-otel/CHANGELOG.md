@@ -14,6 +14,12 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   and honor `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true` for util-genai instrumentations (content capture
   is never enabled by default). Privacy: if you already set it to `true`, util-genai instrumentations now capture
   prompts and responses on spans ([#979](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/979))
+- Make LangChain/LangGraph agents evaluable in CloudWatch: set `session.id` on spans from W3C baggage, and set the
+  `aws.service.type` resource attribute (plus the AgentCore Runtime identity on AgentCore Runtime) unless already
+  set. A CLIENT span with a GenAI inference operation (`chat`, `text_completion`, `generate_content`, `embeddings`)
+  that has a nested inference CLIENT span, such as LangChain's `chat` over botocore's, is now INTERNAL, so tokens
+  count once; this changes its span kind in queries, dashboards and span-metric series
+  ([#TBD](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/TBD))
 - Fix unbounded span metrics cardinality on SERVER spans: the legacy fallback for
   `server.address`/`server.port` now uses `net.host.name`/`net.host.port` on SERVER spans instead of
   `net.peer.name`/`net.peer.port`, which describe the client (including its ephemeral port)
