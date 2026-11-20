@@ -11,6 +11,8 @@ For any change that affects end users of this package, please add an entry under
 If your change does not need a CHANGELOG entry, add the "skip changelog" label to your PR.
 
 ## Unreleased
+
+## v0.23.0 - 2026-11-18
 - fix(crewai): record full tool definitions (name, description, and parameters) on CrewAI `chat`,
   `invoke_agent`, and `invoke_workflow` spans
   ([#972](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/972))
