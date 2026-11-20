@@ -13,6 +13,7 @@ from amazon.opentelemetry.distro._utils import (
     get_aws_region,
     get_aws_session,
     is_agent_observability_enabled,
+    is_agentcore_runtime_environment,
     is_genai_content_extraction_opted_out,
     is_installed,
 )
@@ -110,6 +111,21 @@ class TestUtils(TestCase):
         if AGENT_OBSERVABILITY_ENABLED in os.environ:
             del os.environ[AGENT_OBSERVABILITY_ENABLED]
         self.assertFalse(is_agent_observability_enabled())
+
+    def test_is_agentcore_runtime_environment(self):
+        cases = {
+            "AWS_BedrockAgentCore_Runtime": True,
+            "AWS_BedrockAgentCore_Runtime_Other": False,
+            "AWS_BedrockAgentCore": False,
+            "AWS_Lambda_python3.12": False,
+            "AWS_ECS_FARGATE": False,
+            "": False,
+        }
+        for value, expected in cases.items():
+            with self.subTest(value=value), patch.dict(os.environ, {"AWS_EXECUTION_ENV": value}):
+                self.assertEqual(is_agentcore_runtime_environment(), expected)
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertFalse(is_agentcore_runtime_environment())
 
     def test_get_aws_session_with_botocore(self):
         """Test get_aws_session when botocore is installed"""

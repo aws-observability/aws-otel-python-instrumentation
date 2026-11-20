@@ -112,6 +112,9 @@ test = []
 [project.entry-points.opentelemetry_configurator]
 aws_configurator = "amazon.opentelemetry.distro.aws_opentelemetry_configurator:AwsOpenTelemetryConfigurator"
 
+[project.entry-points.opentelemetry_id_generator]
+snapshot_safe = "amazon.opentelemetry.distro.snapshot_safe_id_generator:SnapshotSafeIdGenerator"
+
 [project.entry-points.opentelemetry_distro]
 aws_distro = "amazon.opentelemetry.distro.aws_opentelemetry_distro:AwsOpenTelemetryDistro"
 
