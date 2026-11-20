@@ -1,6 +1,6 @@
 [tool.black]
 line-length = 120
-extend-exclude = '''.*pb2.*|/(lambda-layer/src/opentelemetry/instrumentation/aws_lambda/)''' # Exclude grpc-created files
+extend-exclude = '''.*pb2.*|/(lambda-layer/src/opentelemetry/instrumentation/aws_lambda/|tools/otel-packaging-python/vendor/)''' # Exclude grpc-created files
 
 [tool.isort]
-skip = ["lambda-layer/src/opentelemetry/instrumentation/aws_lambda/"]
+skip = ["lambda-layer/src/opentelemetry/instrumentation/aws_lambda/", "tools/otel-packaging-python/vendor/"]

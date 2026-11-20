@@ -2,6 +2,7 @@
 
 ** opentelemetry-python; version 1.22.0 -- https://github.com/open-telemetry/opentelemetry-python
 ** opentelemetry-python-contrib; version 0.43b0 -- https://github.com/open-telemetry/opentelemetry-python-contrib
+** opentelemetry-packaging (packaging/common/python/sitecustomize.py); commit f18883d7ed3490aab9e3539360c0ded8b2f2b06e -- https://github.com/open-telemetry/opentelemetry-packaging
  
                                  Apache License
                            Version 2.0, January 2004
@@ -232,6 +233,20 @@
     # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
     # See the License for the specific language governing permissions and
     # limitations under the License.
+* For opentelemetry-packaging see also this required NOTICE:
+    OpenTelemetry Packaging
+    Copyright The OpenTelemetry Authors
+
+    This product includes software developed at Dash0 (https://www.dash0.com/).
+
+    The following files are derived from the Dash0 operator
+    (https://github.com/dash0hq/dash0-operator),
+    Copyright 2026 Dash0 Inc., licensed under the Apache License, Version 2.0:
+
+    - packaging/common/python/sitecustomize.py
+      (derived from images/instrumentation/python/sitecustomize.py)
+    - packaging/common/python/requirements.txt
+      (modelled after images/instrumentation/python/requirements.txt)
 
 ------
 
