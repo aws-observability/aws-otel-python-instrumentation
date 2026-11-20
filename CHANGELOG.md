@@ -11,6 +11,12 @@ For any change that affects end users of this package, please add an entry under
 If your change does not need a CHANGELOG entry, add the "skip changelog" label to your PR.
 
 ## Unreleased
+- feat: add `UrandomIdGenerator`, which generates trace and span IDs from `os.urandom` so instances restored from
+  the same memory snapshot (for example, Amazon Bedrock AgentCore Runtime V2) do not generate the same IDs.
+  Enable it with `OTEL_PYTHON_ID_GENERATOR=urandom`.
+  **Breaking:** the default `OTEL_PYTHON_ID_GENERATOR` changes from `xray` to the upstream OpenTelemetry `random`,
+  so trace IDs no longer start with a timestamp.
+  ([#982](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/982))
 - fix(crewai): record full tool definitions (name, description, and parameters) on CrewAI `chat`,
   `invoke_agent`, and `invoke_workflow` spans
   ([#972](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/972))

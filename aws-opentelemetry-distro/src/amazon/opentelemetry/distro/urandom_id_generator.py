@@ -10,8 +10,8 @@ class UrandomIdGenerator(IdGenerator):
     """ID generator that reads every trace and span ID from ``os.urandom``.
 
     The upstream ``RandomIdGenerator`` uses ``random.getrandbits``, a Mersenne Twister whose state is held in process
-    memory. When a process is restored from a memory snapshot (for example, Amazon Bedrock AgentCore Runtime), every
-    restored instance inherits the same state and generates the same IDs.
+    memory. When a process is restored from a memory snapshot (for example, Amazon Bedrock AgentCore Runtime V2),
+    every restored instance inherits the same state and generates the same IDs.
     ``os.urandom`` reads from the operating system's CSPRNG, which the kernel reseeds, so restored instances do not
     produce colliding IDs.
     """

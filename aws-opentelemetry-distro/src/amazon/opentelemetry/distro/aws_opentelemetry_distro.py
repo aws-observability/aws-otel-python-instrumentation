@@ -122,10 +122,6 @@ AWS_GENAI_INSTRUMENTATION = "AWS_GENAI_INSTRUMENTATION"
 # Legacy: use AWS_GENAI_INSTRUMENTATION.
 AWS_AGENTIC_INSTRUMENTATION = "AWS_AGENTIC_INSTRUMENTATION"
 
-# When "true", the default OTEL_PYTHON_ID_GENERATOR is "urandom" (UrandomIdGenerator, backed by os.urandom) instead of
-# upstream's "random" (RandomIdGenerator, backed by random.getrandbits). An explicit OTEL_PYTHON_ID_GENERATOR wins.
-OTEL_AWS_SECURE_ID_GENERATOR_ENABLED = "OTEL_AWS_SECURE_ID_GENERATOR_ENABLED"
-
 # Maps third-party instrumentor entry point names to their AWS native equivalents.
 # Used for mutual exclusion: only one side instruments each library at a time.
 _THIRDPARTY_TO_AWS_NATIVE = {
@@ -149,8 +145,8 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
         https://github.com/open-telemetry/opentelemetry-operator/blob/461ba68e80e8ac6bf2603eb353547cd026119ed2/autoinstrumentation/python/requirements.txt#L2-L3)
 
         Also sets default OTEL_PROPAGATORS and OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION to ensure good
-        compatibility with X-Ray and Application Signals, and sets the default OTEL_PYTHON_ID_GENERATOR to "random", or
-        to "urandom" when OTEL_AWS_SECURE_ID_GENERATOR_ENABLED=true.
+        compatibility with X-Ray and Application Signals, and sets the default OTEL_PYTHON_ID_GENERATOR to "random".
+        Set OTEL_PYTHON_ID_GENERATOR=urandom to use UrandomIdGenerator instead.
 
         Also applies patches to upstream instrumentation - usually these are stopgap measures until we can contribute
         long-term changes to upstream.
@@ -206,8 +202,7 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
             # override the default propagators.
             importlib.reload(propagate)
 
-        secure_id_generator_enabled = os.environ.get(OTEL_AWS_SECURE_ID_GENERATOR_ENABLED, "false").lower() == "true"
-        os.environ.setdefault(OTEL_PYTHON_ID_GENERATOR, "urandom" if secure_id_generator_enabled else "random")
+        os.environ.setdefault(OTEL_PYTHON_ID_GENERATOR, "random")
         os.environ.setdefault(
             OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION, "base2_exponential_bucket_histogram"
         )

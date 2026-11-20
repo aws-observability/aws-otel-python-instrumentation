@@ -12,7 +12,6 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import APPLICATI
 from amazon.opentelemetry.distro.aws_opentelemetry_distro import (
     AWS_AGENTIC_INSTRUMENTATION,
     AWS_GENAI_INSTRUMENTATION,
-    OTEL_AWS_SECURE_ID_GENERATOR_ENABLED,
     AwsOpenTelemetryDistro,
 )
 from opentelemetry import propagate
@@ -47,7 +46,6 @@ class TestAwsOpenTelemetryDistro(TestCase):
             OTEL_EXPORTER_OTLP_PROTOCOL,
             OTEL_PROPAGATORS,
             OTEL_PYTHON_ID_GENERATOR,
-            OTEL_AWS_SECURE_ID_GENERATOR_ENABLED,
             OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION,
             "AGENT_OBSERVABILITY_ENABLED",
             OTEL_TRACES_EXPORTER,
@@ -121,23 +119,6 @@ class TestAwsOpenTelemetryDistro(TestCase):
 
         # Verify patches were applied
         mock_apply_patches.assert_called_once()
-
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.apply_instrumentation_patches")
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.OpenTelemetryDistro._configure")
-    def test_configure_id_generator_secure_toggle(self, mock_super_configure, mock_apply_patches):
-        """OTEL_AWS_SECURE_ID_GENERATOR_ENABLED=true switches the default ID generator to urandom"""
-        os.environ[OTEL_AWS_SECURE_ID_GENERATOR_ENABLED] = "true"
-        AwsOpenTelemetryDistro()._configure(apply_patches=False)
-        self.assertEqual(os.environ.get(OTEL_PYTHON_ID_GENERATOR), "urandom")
-
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.apply_instrumentation_patches")
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.OpenTelemetryDistro._configure")
-    def test_configure_id_generator_respects_user_value(self, mock_super_configure, mock_apply_patches):
-        """An explicit OTEL_PYTHON_ID_GENERATOR is not overridden, even with the secure toggle enabled"""
-        os.environ[OTEL_PYTHON_ID_GENERATOR] = "random"
-        os.environ[OTEL_AWS_SECURE_ID_GENERATOR_ENABLED] = "true"
-        AwsOpenTelemetryDistro()._configure(apply_patches=False)
-        self.assertEqual(os.environ.get(OTEL_PYTHON_ID_GENERATOR), "random")
 
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.apply_instrumentation_patches")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.OpenTelemetryDistro._configure")
