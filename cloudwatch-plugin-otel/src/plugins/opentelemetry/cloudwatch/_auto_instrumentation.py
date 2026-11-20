@@ -34,7 +34,14 @@ def _lazy(module: str, function: str):
 
 # (name in the summary line, step)
 _PRE_STEPS = [("content capture", _lazy("content_capture", "content_capture_step"))]
-_POST_STEPS = [("langchain", _lazy("langchain", "langchain_step"))]
+# After the LangChain step, which may start the instrumentor these steps depend on. The providers exist by now and
+# no application span has started.
+_POST_STEPS = [
+    ("langchain", _lazy("langchain", "langchain_step")),
+    ("session.id", _lazy("session", "session_step")),
+    ("nested chat demotion", _lazy("nested_client", "nested_client_step")),
+    ("agent identity", _lazy("resource", "agent_identity_step")),
+]
 
 _results: Dict[str, Any] = {}  # step name -> return value, for the summary
 

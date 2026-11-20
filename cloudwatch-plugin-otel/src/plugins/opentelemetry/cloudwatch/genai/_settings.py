@@ -74,7 +74,8 @@ def get_logger() -> logging.Logger:
     return genai_logger
 
 
-_warned: Set[str] = set()
+_warned: Set[str] = set()  # keys already logged by warn_once
+_debugged: Set[str] = set()  # keys already logged by debug_once
 
 
 def warn_once(key: str, msg: str, *args) -> None:
@@ -82,3 +83,10 @@ def warn_once(key: str, msg: str, *args) -> None:
     if key not in _warned:
         _warned.add(key)
         get_logger().warning(LOG_PREFIX + msg, *args)
+
+
+def debug_once(key: str, msg: str, *args) -> None:
+    """Logs ``LOG_PREFIX + msg`` at DEBUG the first time ``key`` is seen in this process."""
+    if key not in _debugged:
+        _debugged.add(key)
+        get_logger().debug(LOG_PREFIX + msg, *args)
