@@ -882,12 +882,9 @@ def _has_custom_otlp_traces_endpoint():
     """Check if a custom OTLP traces endpoint is configured.
 
     Per OpenTelemetry OTLP Exporter specification, check for signal-specific
-    endpoint first, then fall back to generic endpoint.
+    endpoint first, then fall back to generic endpoint. Empty values are treated as unset.
     """
-    return (
-        os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT) is not None
-        or os.environ.get(OTEL_EXPORTER_OTLP_ENDPOINT) is not None
-    )
+    return bool(os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT) or os.environ.get(OTEL_EXPORTER_OTLP_ENDPOINT))
 
 
 def _is_aws_otlp_endpoint(otlp_endpoint: Optional[str], service: str) -> bool:
