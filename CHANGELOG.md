@@ -13,7 +13,7 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 ## Unreleased
 - fix: in Lambda, treat empty `OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` values as
   unset, so traces fall back to the X-Ray UDP exporter again instead of being dropped
-  ([#985](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/985))
+  ([#987](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/987))
 
 ## v0.23.0 - 2026-11-18
 - fix(crewai): record full tool definitions (name, description, and parameters) on CrewAI `chat`,
