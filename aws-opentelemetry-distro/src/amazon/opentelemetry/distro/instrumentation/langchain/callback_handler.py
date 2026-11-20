@@ -1077,6 +1077,14 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             "content_filter": "content_filter",
         }
         metadata: dict = getattr(message, "response_metadata", None) or {}
+        # langchain-openai >= 1.8.5 puts the Responses API status ("completed", "incomplete", ...) in
+        # finish_reason and adds normalized_finish_reason ("stop", "tool_call", "length", ...). Prefer the
+        # normalized value; skip "other" so the raw provider value is kept instead.
+        normalized: str | None = (generation_info or {}).get("normalized_finish_reason") or metadata.get(
+            "normalized_finish_reason"
+        )
+        if normalized and normalized != "other":
+            return normalized
         raw: str | None = (
             (generation_info or {}).get("finish_reason") or metadata.get("finish_reason") or metadata.get("stop_reason")
         )

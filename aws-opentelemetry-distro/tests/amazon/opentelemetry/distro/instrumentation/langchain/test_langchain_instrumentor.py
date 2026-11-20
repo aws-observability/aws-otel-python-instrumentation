@@ -44,6 +44,7 @@ from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 from langchain_core.tools import StructuredTool, tool
 
 from amazon.opentelemetry.distro.instrumentation.langchain import LangChainInstrumentor
+from amazon.opentelemetry.distro.instrumentation.langchain.callback_handler import OpenTelemetryCallbackHandler
 from amazon.opentelemetry.distro.instrumentation.langchain.wrapper import PregelWrapper
 from opentelemetry import context, trace
 from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY
@@ -226,6 +227,27 @@ class TestLangChainInstrumentor(TestCase):
         self.assertEqual(span.attributes[GEN_AI_USAGE_INPUT_TOKENS], 10)
         self.assertEqual(span.attributes[GEN_AI_USAGE_OUTPUT_TOKENS], 20)
         self.assertEqual(span.attributes.get(GEN_AI_RESPONSE_FINISH_REASONS), ("stop",))
+
+    def test_extract_finish_reason_prefers_normalized_finish_reason(self):
+        extract = OpenTelemetryCallbackHandler._extract_finish_reason
+        # langchain-openai >= 1.8.5 Responses API: finish_reason is the response status.
+        cases = [
+            ({"finish_reason": "completed", "normalized_finish_reason": "stop"}, "stop"),
+            ({"finish_reason": "completed", "normalized_finish_reason": "tool_call"}, "tool_call"),
+            ({"finish_reason": "incomplete", "normalized_finish_reason": "length"}, "length"),
+            ({"finish_reason": "failed", "normalized_finish_reason": "error"}, "error"),
+            # "other" is lossy, so the raw value is kept.
+            ({"finish_reason": "function_call", "normalized_finish_reason": "other"}, "function_call"),
+            # Older versions without normalized_finish_reason still go through the mapping.
+            ({"finish_reason": "tool_calls"}, "tool_call"),
+            ({"stop_reason": "end_turn"}, "stop"),
+            ({}, "stop"),
+        ]
+        for metadata, expected in cases:
+            with self.subTest(source="response_metadata", metadata=metadata):
+                self.assertEqual(extract(AIMessage(content="ok", response_metadata=metadata)), expected)
+            with self.subTest(source="generation_info", metadata=metadata):
+                self.assertEqual(extract(AIMessage(content="ok"), metadata), expected)
 
     def test_create_agent_creates_invoke_agent_span(self):
         @tool
