@@ -4,7 +4,6 @@
 # pylint: disable=too-many-lines
 
 import os
-import time
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
@@ -94,6 +93,7 @@ from opentelemetry.sdk.metrics.view import LastValueAggregation
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import Span, SpanProcessor, Tracer, TracerProvider
 from opentelemetry.sdk.trace.export import SpanExporter
+from opentelemetry.sdk.trace.id_generator import RandomIdGenerator
 from opentelemetry.sdk.trace.sampling import DEFAULT_ON, Sampler
 from opentelemetry.semconv.resource import ResourceAttributes
 from opentelemetry.trace import get_tracer_provider
@@ -174,18 +174,10 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             else:
                 os.environ[OTEL_METRICS_EXPORTER] = original_exporter
 
-    # The probability of this passing once without correct IDs is low, 20 times is inconceivable.
-    def test_provide_generate_xray_ids(self):
-        for _ in range(20):
-            tracer: Tracer = self.tracer_provider.get_tracer("test")
-            start_time_sec: int = int(time.time())
-            span: Span = tracer.start_span("test")
-            trace_id: int = span.get_span_context().trace_id
-            trace_id_4_byte_hex: str = hex(trace_id)[2:10]
-            trace_id_4_byte_int: int = int(trace_id_4_byte_hex, 16)
-            self.assertGreaterEqual(trace_id_4_byte_int, start_time_sec)
+    def test_default_id_generator_is_random(self):
+        self.assertIsInstance(self.tracer_provider.id_generator, RandomIdGenerator)
 
-    # Sanity check that the trace ID ratio sampler works fine with the x-ray generator.
+    # Sanity check that the trace ID ratio sampler works fine with the default generator.
     def test_trace_id_ratio_sampler(self):
         for _ in range(20):
             num_spans: int = 100000
@@ -1845,7 +1837,7 @@ def validate_distro_environ():
         "base2_exponential_bucket_histogram", os.environ.get("OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION")
     )
     tc.assertEqual("baggage,xray,tracecontext", os.environ.get("OTEL_PROPAGATORS"))
-    tc.assertEqual("xray", os.environ.get("OTEL_PYTHON_ID_GENERATOR"))
+    tc.assertEqual("random", os.environ.get("OTEL_PYTHON_ID_GENERATOR"))
 
     # Not set
     tc.assertEqual(None, os.environ.get("OTEL_TRACES_SAMPLER"))
