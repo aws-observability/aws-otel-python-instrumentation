@@ -16,6 +16,7 @@ class UrandomIdGenerator(IdGenerator):
     produce colliding IDs.
     """
 
+    # pylint: disable=no-self-use
     def generate_span_id(self) -> int:
         span_id = int.from_bytes(os.urandom(8), "big")
         while span_id == trace.INVALID_SPAN_ID:
