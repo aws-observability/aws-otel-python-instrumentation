@@ -604,7 +604,8 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
                     if isinstance(msg, AIMessage) and isinstance(content, list):
                         # Chat models keep each tool call in content as a provider block and also parse it into
                         # msg.tool_calls, which middleware such as HumanInTheLoopMiddleware edits in place. Tool calls
-                        # are recorded from msg.tool_calls below, so drop the content copies.
+                        # are recorded from msg.tool_calls below, so drop a content block whose ID is in msg.tool_calls.
+                        # Keep the rest: msg.tool_calls lacks them, e.g. in history messages built from content only.
                         tool_call_block_types = {
                             # Bedrock Converse and Anthropic, default output_version
                             # https://github.com/langchain-ai/langchain-aws/blob/28cd7f70b943e1aa71a8d8903d7fb1251317d104/libs/aws/langchain_aws/chat_models/bedrock_converse.py#L3549-L3551
@@ -621,10 +622,16 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
                             "function_call",
                             "custom_tool_call",
                         }
+                        tool_call_ids = {tc.get("id") for tc in msg.tool_calls if tc.get("id")}
                         content = [
                             block
                             for block in content
-                            if not (isinstance(block, dict) and block.get("type") in tool_call_block_types)
+                            if not (
+                                isinstance(block, dict)
+                                and block.get("type") in tool_call_block_types
+                                # OpenAI Responses blocks carry the tool call ID in call_id; their id is the item ID.
+                                and (block.get("call_id") or block.get("id")) in tool_call_ids
+                            )
                         ]
                     parts.extend(content_to_parts(content))
                 tool_calls: list[dict] = getattr(msg, "tool_calls", None) or []

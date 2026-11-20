@@ -1182,21 +1182,56 @@ class TestLangChainInstrumentor(TestCase):
     def test_tool_calls_in_content_and_message_are_recorded_once(self):
         first_call = {"type": "tool_call", "id": "call_1", "name": "get_weather", "args": {"city": "Paris"}}
         second_call = {"type": "tool_call", "id": "call_2", "name": "get_weather", "args": {"city": "Rome"}}
-        message = AIMessage(
-            content=[{"type": "text", "text": "Let me check."}, first_call],
-            tool_calls=[first_call, second_call],
-        )
+        # first_call as each provider keeps it in content
+        content_copies = {
+            "tool_call": first_call,
+            "tool_call_chunk": {"type": "tool_call_chunk", "id": "call_1", "name": "get_weather", "args": "{}"},
+            "tool_use": {"type": "tool_use", "id": "call_1", "name": "get_weather", "input": {"city": "Paris"}},
+            "function_call": {
+                "type": "function_call",
+                "id": "fc_1",
+                "call_id": "call_1",
+                "name": "get_weather",
+                "arguments": '{"city": "Paris"}',
+            },
+            "custom_tool_call": {
+                "type": "custom_tool_call",
+                "id": "ctc_1",
+                "call_id": "call_1",
+                "name": "get_weather",
+                "input": "Paris",
+            },
+        }
+        # Tool calls are recorded from tool_calls after the content parts; second_call is only in tool_calls.
         expected_parts = [
             {"type": "text", "content": "Let me check."},
+            {"type": "text", "content": "One moment."},
             {"type": "tool_call", "id": "call_1", "name": "get_weather", "arguments": {"city": "Paris"}},
             {"type": "tool_call", "id": "call_2", "name": "get_weather", "arguments": {"city": "Rome"}},
         ]
+        for block_type, block in content_copies.items():
+            with self.subTest(block_type=block_type):
+                message = AIMessage(
+                    content=[{"type": "text", "text": "Let me check."}, block, {"type": "text", "text": "One moment."}],
+                    tool_calls=[first_call, second_call],
+                )
 
-        _, input_messages = OpenTelemetryCallbackHandler._format_lc_messages([[message]])
-        output_messages = OpenTelemetryCallbackHandler._format_lc_llm_output([[ChatGeneration(message=message)]])
+                _, input_messages = OpenTelemetryCallbackHandler._format_lc_messages([[message]])
+                output_messages = OpenTelemetryCallbackHandler._format_lc_llm_output(
+                    [[ChatGeneration(message=message)]]
+                )
 
-        self.assertEqual(input_messages[0]["parts"], expected_parts)
-        self.assertEqual(output_messages[0]["parts"], expected_parts)
+                self.assertEqual(input_messages[0]["parts"], expected_parts)
+                self.assertEqual(output_messages[0]["parts"], expected_parts)
+
+        with self.subTest("tool call only in content"):
+            # e.g. a history message built from content, which LangChain does not parse into tool_calls
+            block = content_copies["tool_use"]
+            message = AIMessage(content=[block])
+
+            _, input_messages = OpenTelemetryCallbackHandler._format_lc_messages([[message]])
+
+            self.assertEqual(input_messages[0]["parts"], [block])
 
     def test_tool_span_has_all_attributes(self):
         def add_numbers(a: int, b: int) -> int:
