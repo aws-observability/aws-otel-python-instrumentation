@@ -39,6 +39,15 @@ test = []
 [project.entry-points.opentelemetry_instrumentor]
 span_metrics = "plugins.opentelemetry.cloudwatch.span_metrics.instrumentor:SpanMetricsInstrumentor"
 
+# The OTel loader calls these hooks without error handling, so an import error here would stop all
+# auto-instrumentation. They point at a tiny top-level module that can't fail to import, rather than at
+# `plugins.…`, which an application's own `plugins` package could shadow.
+[project.entry-points.opentelemetry_pre_instrument]
+cloudwatch_plugin = "cloudwatch_plugin_otel_hooks:pre_instrument"
+
+[project.entry-points.opentelemetry_post_instrument]
+cloudwatch_plugin = "cloudwatch_plugin_otel_hooks:post_instrument"
+
 [project.urls]
 Homepage = "https://github.com/aws-observability/aws-otel-python-instrumentation/tree/main/cloudwatch-plugin-otel"
 
@@ -53,3 +62,7 @@ include = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/plugins"]
+
+# The wheel otherwise ships only src/plugins; this adds the top-level hook module.
+[tool.hatch.build.targets.wheel.force-include]
+"src/cloudwatch_plugin_otel_hooks.py" = "cloudwatch_plugin_otel_hooks.py"

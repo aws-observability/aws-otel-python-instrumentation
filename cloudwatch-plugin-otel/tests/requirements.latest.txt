@@ -8,3 +8,6 @@ opentelemetry-instrumentation-flask
 opentelemetry-instrumentation-requests
 opentelemetry-instrumentation-sqlalchemy
 opentelemetry-instrumentation-sqlite3
+opentelemetry-instrumentation-genai-langchain
+langchain-core
+langgraph
