@@ -236,8 +236,15 @@ class TestLangChainInstrumentor(TestCase):
             ({"finish_reason": "completed", "normalized_finish_reason": "tool_call"}, "tool_call"),
             ({"finish_reason": "incomplete", "normalized_finish_reason": "length"}, "length"),
             ({"finish_reason": "failed", "normalized_finish_reason": "error"}, "error"),
-            # "other" is lossy, so the raw value is kept.
+            # Refusals keep LangChain's value, matching the raw "refusal" Anthropic already reports.
+            ({"finish_reason": "completed", "normalized_finish_reason": "refusal"}, "refusal"),
+            # "other" is lossy, so the raw value goes through the mapping, or is kept if unmapped.
+            ({"finish_reason": "incomplete", "normalized_finish_reason": "other"}, "length"),
+            ({"finish_reason": "cancelled", "normalized_finish_reason": "other"}, "error"),
             ({"finish_reason": "function_call", "normalized_finish_reason": "other"}, "function_call"),
+            # Responses statuses without normalized_finish_reason still map to semconv values.
+            ({"finish_reason": "completed"}, "stop"),
+            ({"finish_reason": "failed"}, "error"),
             # Older versions without normalized_finish_reason still go through the mapping.
             ({"finish_reason": "tool_calls"}, "tool_call"),
             ({"stop_reason": "end_turn"}, "stop"),
