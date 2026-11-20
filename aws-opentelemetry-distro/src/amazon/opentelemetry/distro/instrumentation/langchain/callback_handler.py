@@ -1075,8 +1075,23 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             "max_tokens": "length",
             "length": "length",
             "content_filter": "content_filter",
+            # OpenAI Responses API statuses (langchain-openai >= 1.8.5 reports the status as finish_reason).
+            # Only reached when normalized_finish_reason is missing or "other".
+            "completed": "stop",
+            "incomplete": "length",
+            "failed": "error",
+            "cancelled": "error",
         }
         metadata: dict = getattr(message, "response_metadata", None) or {}
+        # langchain-openai >= 1.8.5 puts the Responses API status ("completed", "incomplete", ...) in
+        # finish_reason and adds normalized_finish_reason ("stop", "tool_call", "length", ...). Prefer the
+        # normalized value, which also accounts for tool calls, refusals and incomplete_details. Skip "other"
+        # so the raw provider value goes through finish_reason_map instead.
+        normalized: str | None = (generation_info or {}).get("normalized_finish_reason") or metadata.get(
+            "normalized_finish_reason"
+        )
+        if normalized and normalized != "other":
+            return normalized
         raw: str | None = (
             (generation_info or {}).get("finish_reason") or metadata.get("finish_reason") or metadata.get("stop_reason")
         )
