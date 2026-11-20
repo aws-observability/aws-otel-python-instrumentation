@@ -15,7 +15,7 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   `OTEL_PYTHON_ID_GENERATOR` to the new `snapshot_safe` ID generator. It reads trace and span IDs from `os.urandom`,
   so sessions restored from the same memory snapshot don't repeat IDs. Trace IDs keep the X-Ray format. An explicitly
   set `OTEL_PYTHON_ID_GENERATOR` still takes precedence.
-  ([#PR_NUMBER](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/PR_NUMBER))
+  ([#985](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/985))
 
 ## v0.23.0 - 2026-11-18
 - fix(crewai): record full tool definitions (name, description, and parameters) on CrewAI `chat`,
