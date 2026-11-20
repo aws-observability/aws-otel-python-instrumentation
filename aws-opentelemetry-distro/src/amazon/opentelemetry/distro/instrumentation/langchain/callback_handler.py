@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, Literal, Optional
 from uuid import UUID
 
 from langchain_core.callbacks import BaseCallbackHandler
-from langchain_core.messages import convert_to_messages
+from langchain_core.messages import AIMessage, convert_to_messages
 from langchain_core.outputs import ChatGenerationChunk, GenerationChunk
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
@@ -601,6 +601,38 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
                         }
                     )
                 elif content:
+                    if isinstance(msg, AIMessage) and isinstance(content, list):
+                        # Chat models keep each tool call in content as a provider block and also parse it into
+                        # msg.tool_calls, which middleware such as HumanInTheLoopMiddleware edits in place. Tool calls
+                        # are recorded from msg.tool_calls below, so drop a content block whose ID is in msg.tool_calls.
+                        # Keep the rest: msg.tool_calls lacks them, e.g. in history messages built from content only.
+                        tool_call_block_types = {
+                            # Bedrock Converse and Anthropic, default output_version
+                            # https://github.com/langchain-ai/langchain-aws/blob/28cd7f70b943e1aa71a8d8903d7fb1251317d104/libs/aws/langchain_aws/chat_models/bedrock_converse.py#L3549-L3551
+                            # https://github.com/langchain-ai/langchain-aws/blob/28cd7f70b943e1aa71a8d8903d7fb1251317d104/libs/aws/langchain_aws/chat_models/bedrock_converse.py#L3818-L3826
+                            # https://github.com/langchain-ai/langchain/blob/bbcdd568cd02b81e5ede5aa525744e79e67c2278/libs/partners/anthropic/langchain_anthropic/chat_models.py#L2539-L2589
+                            "tool_use",
+                            # output_version="v1"; "tool_call_chunk" until the last streamed chunk
+                            # https://github.com/langchain-ai/langchain/blob/1a41b51b0295d7cc6df45cdede199b4a34649b1d/libs/core/langchain_core/messages/block_translators/bedrock_converse.py#L213-L256
+                            # https://github.com/langchain-ai/langchain/blob/1a41b51b0295d7cc6df45cdede199b4a34649b1d/libs/core/langchain_core/messages/ai.py#L573-L596
+                            "tool_call",
+                            "tool_call_chunk",
+                            # OpenAI Responses API
+                            # https://github.com/langchain-ai/langchain/blob/16a08bda1247010c23fcfa887e421259a5fced5e/libs/partners/openai/langchain_openai/chat_models/base.py#L5278-L5315
+                            "function_call",
+                            "custom_tool_call",
+                        }
+                        tool_call_ids = {tc.get("id") for tc in msg.tool_calls if tc.get("id")}
+                        content = [
+                            block
+                            for block in content
+                            if not (
+                                isinstance(block, dict)
+                                and block.get("type") in tool_call_block_types
+                                # OpenAI Responses blocks carry the tool call ID in call_id; their id is the item ID.
+                                and (block.get("call_id") or block.get("id")) in tool_call_ids
+                            )
+                        ]
                     parts.extend(content_to_parts(content))
                 tool_calls: list[dict] = getattr(msg, "tool_calls", None) or []
                 for tc in tool_calls:
