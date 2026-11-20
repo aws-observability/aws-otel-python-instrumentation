@@ -115,6 +115,8 @@ class TestUtils(TestCase):
     def test_is_agentcore_runtime_environment(self):
         cases = {
             "AWS_BedrockAgentCore_Runtime": True,
+            "AWS_BedrockAgentCore_Runtime_Other": False,
+            "AWS_BedrockAgentCore": False,
             "AWS_Lambda_python3.12": False,
             "AWS_ECS_FARGATE": False,
             "": False,

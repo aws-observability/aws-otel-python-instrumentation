@@ -207,7 +207,8 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
             # AgentCore Runtime can start sessions from a memory snapshot, which repeats the state of Python's
             # `random` module in every session. Read IDs from the OS instead, so sessions don't repeat IDs.
             os.environ.setdefault(OTEL_PYTHON_ID_GENERATOR, "snapshot_safe")
-        os.environ.setdefault(OTEL_PYTHON_ID_GENERATOR, "xray")
+        else:
+            os.environ.setdefault(OTEL_PYTHON_ID_GENERATOR, "xray")
         os.environ.setdefault(
             OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION, "base2_exponential_bucket_histogram"
         )

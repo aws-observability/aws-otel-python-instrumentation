@@ -12,9 +12,9 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 - feat: in Amazon Bedrock AgentCore Runtime (`AWS_EXECUTION_ENV=AWS_BedrockAgentCore_Runtime`), default
-  `OTEL_PYTHON_ID_GENERATOR` to the new `snapshot_safe` ID generator. It reads trace and span IDs from `os.urandom`,
-  so sessions restored from the same memory snapshot don't repeat IDs. Trace IDs keep the X-Ray format. An explicitly
-  set `OTEL_PYTHON_ID_GENERATOR` still takes precedence.
+  `OTEL_PYTHON_ID_GENERATOR` to the new `snapshot_safe` ID generator. Like the upstream `random` generator, it
+  generates fully random trace and span IDs, but reads them from `os.urandom`, so sessions restored from the same
+  memory snapshot don't repeat IDs. An explicitly set `OTEL_PYTHON_ID_GENERATOR` still takes precedence.
   ([#985](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/985))
 
 ## v0.23.0 - 2026-11-18

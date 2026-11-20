@@ -1,7 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import random
-import time
 from importlib.metadata import entry_points
 from unittest import TestCase
 from unittest.mock import patch
@@ -33,12 +32,11 @@ class TestSnapshotSafeIdGenerator(TestCase):
             self.generator.generate_trace_id()
             self.generator.generate_span_id()
 
-    def test_trace_id_has_xray_timestamp_prefix(self):
-        before = int(time.time())
+    def test_trace_id_is_random_128_bits(self):
         trace_id = self.generator.generate_trace_id()
-        after = int(time.time())
-        self.assertTrue(before <= trace_id >> 96 <= after)
+        self.assertNotEqual(trace_id, INVALID_TRACE_ID)
         self.assertLess(trace_id, 2**128)
+        self.assertTrue(self.generator.is_trace_id_random())
 
     def test_span_id_fits_64_bits(self):
         span_id = self.generator.generate_span_id()
@@ -49,11 +47,9 @@ class TestSnapshotSafeIdGenerator(TestCase):
         with patch(f"{_MODULE}.os.urandom", side_effect=[bytes(8), b"\x00" * 7 + b"\x01"]):
             self.assertEqual(self.generator.generate_span_id(), 1)
 
-    def test_retries_invalid_trace_identifier(self):
-        with patch(f"{_MODULE}.os.urandom", side_effect=[bytes(12), b"\x00" * 11 + b"\x01"]):
-            trace_id = self.generator.generate_trace_id()
-        self.assertNotEqual(trace_id, INVALID_TRACE_ID)
-        self.assertEqual(trace_id & (2**96 - 1), 1)
+    def test_retries_invalid_trace_id(self):
+        with patch(f"{_MODULE}.os.urandom", side_effect=[bytes(16), b"\x00" * 15 + b"\x01"]):
+            self.assertEqual(self.generator.generate_trace_id(), 1)
 
     def test_registered_as_snapshot_safe_entry_point(self):
         names = [ep.name for ep in entry_points(group="opentelemetry_id_generator")]
