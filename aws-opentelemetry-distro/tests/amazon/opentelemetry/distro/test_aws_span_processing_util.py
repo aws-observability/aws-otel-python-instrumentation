@@ -526,7 +526,7 @@ class TestOperationPaths(TestCase):
         result = apply_operation_path_span_name(self.span_mock)
         self.assertEqual(result._name, "GET /api/contests/{id}/leaderboard")
 
-    @patch.dict(os.environ, {"OTEL_AWS_HTTP_OPERATION_PATHS": "/smart/v1/getAppraisers, /smart/v1"})
+    @patch.dict(os.environ, {"OTEL_AWS_HTTP_OPERATION_PATHS": "/api/v1/orders, /api/v1"})
     def test_apply_is_idempotent(self):
         from amazon.opentelemetry.distro._aws_span_processing_util import (
             apply_operation_path_span_name,
@@ -534,11 +534,11 @@ class TestOperationPaths(TestCase):
         )
 
         reset_operation_paths()
-        self.span_mock.attributes = {"url.path": "/smart/v1/getAppraisers", "http.request.method": "POST"}
+        self.span_mock.attributes = {"url.path": "/api/v1/orders", "http.request.method": "POST"}
         once = apply_operation_path_span_name(self.span_mock)
-        self.assertEqual(once._name, "POST /smart/v1/getAppraisers")
+        self.assertEqual(once._name, "POST /api/v1/orders")
         twice = apply_operation_path_span_name(once)
-        self.assertEqual(twice._name, "POST /smart/v1/getAppraisers")
+        self.assertEqual(twice._name, "POST /api/v1/orders")
 
     @patch.dict(os.environ, {"OTEL_AWS_HTTP_OPERATION_PATHS": "/api/teams/{id}, /api/teams"})
     def test_apply_matches_http_target_with_query(self):
