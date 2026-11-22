@@ -19,7 +19,7 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   set. A CLIENT span with a GenAI inference operation (`chat`, `text_completion`, `generate_content`, `embeddings`)
   that has a nested inference CLIENT span, such as LangChain's `chat` over botocore's, is now INTERNAL, so tokens
   count once; this changes its span kind in queries, dashboards and span-metric series
-  ([#TBD](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/TBD))
+  ([#991](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/991))
 - Fix unbounded span metrics cardinality on SERVER spans: the legacy fallback for
   `server.address`/`server.port` now uses `net.host.name`/`net.host.port` on SERVER spans instead of
   `net.peer.name`/`net.peer.port`, which describe the client (including its ephemeral port)
