@@ -37,12 +37,12 @@ ALREADY_SET = "already set"
 NO_SDK_RESOURCE = "skipped (no SDK Resource)"
 
 
-# CW-PLUGIN-WORKAROUND(expires: 2027-03-31; retire-when: the CloudWatch GenAI console and online evaluation discover
+# CW-PLUGIN-WORKAROUND(retire-when: the CloudWatch GenAI console and online evaluation discover
 # agents from invoke_agent spans)
 SERVICE_TYPE = {AWS_SERVICE_TYPE: "gen_ai_agent"}
 
 
-# CW-PLUGIN-WORKAROUND(expires: 2027-03-31; retire-when: AgentCore Runtime injects cloud.resource_id/cloud.platform
+# CW-PLUGIN-WORKAROUND(retire-when: AgentCore Runtime injects cloud.resource_id/cloud.platform
 # for containers that disable ADOT. The endpoint is assumed to be DEFAULT, which is wrong for other endpoints)
 def _runtime_identity() -> Dict[str, str]:
     """The AgentCore Runtime identity, from the runtime URL AgentCore Runtime sets, or {} if it is unset or not

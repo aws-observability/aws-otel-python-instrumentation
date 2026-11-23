@@ -40,7 +40,7 @@ def _is_inference_client(span: Span) -> bool:
     return span.kind is SpanKind.CLIENT and (span.attributes or {}).get(GEN_AI_OPERATION_NAME) in INFERENCE_OPERATIONS
 
 
-# CW-PLUGIN-WORKAROUND(expires: 2027-03-31; retire-when: botocore Bedrock spans defer to an upstream GenAI Bedrock
+# CW-PLUGIN-WORKAROUND(retire-when: botocore Bedrock spans defer to an upstream GenAI Bedrock
 # instrumentation (one CLIENT span per call, open-telemetry/opentelemetry-python-contrib#5266), or the CloudWatch
 # console sums tokens over leaf CLIENT spans only)
 class NestedGenAIClientSpanProcessor(SpanProcessor):
