@@ -23,6 +23,7 @@ from amazon.opentelemetry.distro._utils import (
     is_agent_observability_enabled,
     is_lambda_environment,
 )
+from amazon.opentelemetry.distro.additional_otlp_span_processor import add_additional_span_processors
 from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSampler
 from amazon.opentelemetry.distro.attribute_propagating_span_processor_builder import (
     AttributePropagatingSpanProcessorBuilder,
@@ -347,8 +348,15 @@ def _init_tracing(
     if is_agent_observability_enabled():
         trace_provider.add_span_processor(GenAINestedClientSpanProcessor())
 
-    # This processor modifies attributes in on_end, so it must run before batch
-    # processors to ensure exporters observe the redacted values.
+    if exporters:
+        add_additional_span_processors(
+            trace_provider,
+            include_unsampled=is_agent_observability_enabled()
+            or (is_lambda_environment() and _is_application_signals_enabled()),
+        )
+
+    # This processor modifies attributes in on_end, so it must run before primary
+    # batch processors. Additional delivery uses its own optional filtering.
     trace_provider.add_span_processor(AttributeRedactingSpanProcessor())
 
     for _, exporter_class in exporters.items():

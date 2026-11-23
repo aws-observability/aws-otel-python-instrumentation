@@ -90,7 +90,7 @@ class TestLLOHandlerProcessing(LLOHandlerTestBase):
             mock_filter.assert_called_once_with(attributes)
 
             self.assertEqual(len(result), 1)
-            self.assertEqual(result[0], span)
+            self.assertIsNot(result[0], span)
             self.assertEqual(result[0]._attributes, filtered_attributes)
 
     def test_process_spans_with_bounded_attributes(self):
@@ -123,7 +123,7 @@ class TestLLOHandlerProcessing(LLOHandlerTestBase):
             mock_filter.assert_called_once_with(bounded_attrs)
 
             self.assertEqual(len(result), 1)
-            self.assertEqual(result[0], span)
+            self.assertIsNot(result[0], span)
             self.assertIsInstance(result[0]._attributes, BoundedAttributes)
             self.assertEqual(dict(result[0]._attributes), filtered_attributes)
 

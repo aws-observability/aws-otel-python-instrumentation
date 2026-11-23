@@ -1,5 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+import copy
 import logging
 import re
 from enum import Enum
@@ -386,20 +387,19 @@ class LLOHandler:
             if all_llo_attributes:
                 self._emit_llo_attributes(span, all_llo_attributes)
 
-            # Filter span attributes
-            filtered_attributes = None
-            if span.attributes is not None:
-                filtered_attributes = self._filter_attributes(span.attributes)
-
-            # Update span attributes
-            self._update_span_attributes(span, filtered_attributes)
-
-            # Filter span events
-            self._filter_span_events(span)
-
-            modified_spans.append(span)
+            modified_spans.append(self.filter_span(span))
 
         return modified_spans
+
+    def filter_span(self, span: ReadableSpan) -> ReadableSpan:
+        """Return a content-filtered copy without emitting content into logs."""
+        filtered_attributes = None
+        if span.attributes is not None:
+            filtered_attributes = self._filter_attributes(span.attributes)
+        modified_span = copy.copy(span)
+        self._update_span_attributes(modified_span, filtered_attributes)
+        self._filter_span_events(modified_span)
+        return modified_span
 
     def _filter_span_events(self, span: ReadableSpan) -> None:
         """
