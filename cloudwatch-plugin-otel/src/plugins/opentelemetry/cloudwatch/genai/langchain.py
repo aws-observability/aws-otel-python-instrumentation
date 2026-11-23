@@ -62,7 +62,7 @@ def langchain_step() -> Optional[str]:
     return _activate()
 
 
-# CW-PLUGIN-WORKAROUND(expires: 2027-03-31; retire-when: open-telemetry/opentelemetry-python-genai#915 is fixed
+# CW-PLUGIN-WORKAROUND(retire-when: open-telemetry/opentelemetry-python-genai#915 is fixed
 # (PR #916) so the dependency check accepts langchain-core alone)
 def _activate() -> str:
     """``instrument(skip_dep_check=True)`` with the global providers, as the loader does. Never raises."""

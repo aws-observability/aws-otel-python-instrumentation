@@ -53,7 +53,7 @@ def _translates() -> bool:
     return _value().lower() == "true" and not os.environ.get(CAPTURE_CONTENT, "").strip()
 
 
-# CW-PLUGIN-WORKAROUND(expires: 2027-03-31; retire-when: util-genai resolves `true` itself (the patch then defers
+# CW-PLUGIN-WORKAROUND(retire-when: util-genai resolves `true` itself (the patch then defers
 # automatically) or stops reading OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT (the patch then installs
 # nothing); or contrib botocore/openai-v2 accept the mode names and the AgentCore docs and ADOT's agent-mode
 # default switch to SPAN_ONLY)
