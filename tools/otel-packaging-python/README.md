@@ -30,7 +30,9 @@ The operator sets `PYTHONPATH=<payload>/opentelemetry/instrumentation/auto_instr
 2. It runs `<payload>/_otel_packaging_sitecustomize.py`, the patched upstream bootstrap. The file is not named
    `sitecustomize.py`: upstream `initialize()` stops child processes it starts from re-running auto-instrumentation by
    removing the `auto_instrumentation` directory from `PYTHONPATH`, which only works if no other `sitecustomize.py` is
-   on it.
+   on it. The shim executes it under the module name `_otel_packaging_sitecustomize`, so upstream code must not rely
+   on running as `__main__`: an `if __name__ == "__main__":` block would not run. The upstream file has none today, and
+   the tests check that the bootstrap's top-level code runs (it initializes on a supported Python).
 3. The bootstrap checks the Python version, the OTLP protocol, and the payload's OpenTelemetry distributions
    (`<payload>/cp3<minor>/all-dependencies.txt`), then calls `initialize(swallow_exceptions=False)`, which loads the ADOT
    distro. On a failed check or an initialization error it removes the payload from `sys.path` and `PYTHONPATH`, clears
@@ -67,3 +69,6 @@ tox -e 3.11-otel-packaging-python
 ```
 
 `RUN_DOCKER_TESTS=1` also runs the old-interpreter tests, which start `python:2.7-slim` to `python:3.9-slim` containers.
+
+Run the tests on a Python the payload supports (`SUPPORTED_PYTHON_MINORS` in `UPSTREAM`). On any other version the
+bootstrap skips auto-instrumentation by design, so the tests fail on purpose rather than pass for the wrong reason.

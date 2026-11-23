@@ -47,20 +47,21 @@ EOF
 
 cp "$here/vendor/sitecustomize.py" "$work/sitecustomize.py"
 for patch_file in "$here"/patches/*.patch; do
-  patch --quiet --batch --forward --directory="$work" -p1 < "$patch_file"
+  # No --forward: a patch that is already applied (for example, duplicated during a rebase) must fail the build.
+  patch --quiet --batch --directory="$work" -p1 < "$patch_file"
 done
 
 # Written the way the upstream build writes it (packaging/builder/download.go), into the marker line the file carries.
 python3 - "$work/sitecustomize.py" "$SUPPORTED_PYTHON_MINORS" <<'EOF'
 import re, sys
 path, minors = sys.argv[1], sys.argv[2].split()
-with open(path) as f:
+with open(path, encoding="utf-8") as f:
     text = f.read()
 pattern = re.compile(r"_SUPPORTED_PYTHON_MINORS = \([0-9, ]*\)  # supported-python-minors")
 if len(pattern.findall(text)) != 1:
     sys.exit("%s: expected exactly one supported-python-minors marker" % path)
 text = pattern.sub("_SUPPORTED_PYTHON_MINORS = (%s,)  # supported-python-minors" % ", ".join(minors), text)
-with open(path, "w") as f:
+with open(path, "w", encoding="utf-8") as f:
     f.write(text)
 EOF
 
