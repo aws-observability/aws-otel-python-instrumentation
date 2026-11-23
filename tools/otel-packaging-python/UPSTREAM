@@ -1,0 +1,13 @@
+# Upstream OpenTelemetry Packaging Python bootstrap that the ADOT auto-instrumentation image is based on. build.sh
+# verifies vendor/sitecustomize.py against UPSTREAM_SHA256 before it applies patches/.
+# To move to a new upstream commit: copy UPSTREAM_PATH at that commit to vendor/sitecustomize.py (and the repository's
+# NOTICE to vendor/NOTICE), update UPSTREAM_COMMIT and UPSTREAM_SHA256, and re-apply patches/ (drop any that upstream
+# has absorbed).
+UPSTREAM_REPO=https://github.com/open-telemetry/opentelemetry-packaging
+UPSTREAM_COMMIT=f18883d7ed3490aab9e3539360c0ded8b2f2b06e
+UPSTREAM_PATH=packaging/common/python/sitecustomize.py
+UPSTREAM_SHA256=ec4e4e23789a8ace75352473ab69dc95ebc5c282811e0f6d6c98cdb41ea49c84
+
+# Python minor versions (3.x) that the ADOT payload supports. build.sh writes them into the upstream version allowlist,
+# the same way the upstream build does. Must match the classifiers in aws-opentelemetry-distro/pyproject.toml.
+SUPPORTED_PYTHON_MINORS="10 11 12 13 14"

@@ -24,3 +24,5 @@ exclude =
   mock_collector_service_pb2.py
   mock_collector_service_pb2.pyi
   mock_collector_service_pb2_grpc.py
+  # vendored upstream file, pinned by SHA-256 (tools/otel-packaging-python/UPSTREAM)
+  tools/otel-packaging-python/vendor

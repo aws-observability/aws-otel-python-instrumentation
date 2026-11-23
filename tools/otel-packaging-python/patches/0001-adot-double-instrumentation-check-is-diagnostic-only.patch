@@ -1,0 +1,33 @@
+--- a/sitecustomize.py
++++ b/sitecustomize.py
+@@ -226,6 +226,12 @@
+ 
+ 
+ def _check_for_double_instrumentation(current_site):
++    # ADOT patch 0001: never deactivate for double instrumentation. Applications commonly depend on OpenTelemetry
++    # packages without instrumenting themselves (Apache Airflow, for one, depends on opentelemetry-exporter-otlp), and
++    # the bundle's OpenTelemetry packages take precedence anyway (patch 0002). The scan only feeds a debug diagnostic,
++    # so it is skipped outside debug runs.
++    if not debug_enabled:
++        return False
+     from importlib.metadata import distributions
+     offending_packages = []
+     for dist in distributions():
+@@ -257,14 +263,9 @@
+             # they will see in pip list, not the normalized one matched above.
+             offending_packages.append("{} {} ({})".format(name, dist.version, dist.locate_file("")))
+     if offending_packages:
+-        _self_deactivate(current_site)
+-        _log_cannot_auto_instrument_warning(
+-            "The application has OpenTelemetry dependencies which indicate that it is already instrumented. "
+-            "The following problematic dependencies have been found: {}. ".format(", ".join(offending_packages)) +
+-            "Skipping Python auto-instrumentation to avoid double instrumentation. Remove the mentioned "
+-            "dependencies and make sure the opentelemetry-instrument wrapper is not used if you want to "
+-            "use the system-package Python auto-instrumentation.")
+-        return True
++        _log_debug(
++            "The application has OpenTelemetry dependencies, which can indicate that it is already instrumented: {}. "
++            "Continuing with auto-instrumentation.".format(", ".join(offending_packages)))
+     return False
+ 
+ 

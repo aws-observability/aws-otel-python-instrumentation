@@ -11,6 +11,9 @@ For any change that affects end users of this package, please add an entry under
 If your change does not need a CHANGELOG entry, add the "skip changelog" label to your PR.
 
 ## Unreleased
+- fix: the operator auto-instrumentation image skips auto-instrumentation instead of breaking the application when it
+  cannot start safely, for example on Python older than 3.10, using the OpenTelemetry Packaging bootstrap
+  ([#986](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/986))
 
 ## v0.24.0 - 2026-11-20
 - fix(langchain): report `stop` / `tool_call` / `length` instead of the raw Responses API status (`completed`)
