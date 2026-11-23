@@ -348,26 +348,37 @@ def _init_tracing(
     if is_agent_observability_enabled():
         trace_provider.add_span_processor(GenAINestedClientSpanProcessor())
 
+    additional_lifecycle = None
     if exporters:
-        add_additional_span_processors(
+        additional_lifecycle = add_additional_span_processors(
             trace_provider,
             include_unsampled=is_agent_observability_enabled()
             or (is_lambda_environment() and _is_application_signals_enabled()),
+            max_export_batch_size=_span_export_batch_size(),
         )
 
     # This processor modifies attributes in on_end, so it must run before primary
     # batch processors. Additional delivery uses its own optional filtering.
     trace_provider.add_span_processor(AttributeRedactingSpanProcessor())
 
-    for _, exporter_class in exporters.items():
-        exporter_args: Dict[str, any] = {}
-        span_exporter: SpanExporter = exporter_class(**exporter_args)
-        span_exporter = _customize_span_exporter(span_exporter, resource, original_sampler)
-        trace_provider.add_span_processor(
-            BatchSpanProcessor(span_exporter=span_exporter, max_export_batch_size=_span_export_batch_size())
-        )
+    additional_registered = False
+    try:
+        for _, exporter_class in exporters.items():
+            exporter_args: Dict[str, any] = {}
+            span_exporter: SpanExporter = exporter_class(**exporter_args)
+            span_exporter = _customize_span_exporter(span_exporter, resource, original_sampler)
+            trace_provider.add_span_processor(
+                BatchSpanProcessor(span_exporter=span_exporter, max_export_batch_size=_span_export_batch_size())
+            )
 
-    _customize_span_processors(trace_provider, resource, original_sampler)
+        _customize_span_processors(trace_provider, resource, original_sampler)
+
+        if additional_lifecycle is not None:
+            trace_provider.add_span_processor(additional_lifecycle)
+            additional_registered = True
+    finally:
+        if additional_lifecycle is not None and not additional_registered:
+            additional_lifecycle.shutdown()
 
     set_tracer_provider(trace_provider)
 

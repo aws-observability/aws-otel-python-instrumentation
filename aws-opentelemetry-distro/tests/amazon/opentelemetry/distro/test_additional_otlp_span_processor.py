@@ -6,6 +6,7 @@ import gzip
 import json
 import os
 import threading
+import time
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest import TestCase
@@ -22,7 +23,11 @@ from amazon.opentelemetry.distro.additional_otlp_span_processor import (
     OTEL_AWS_ADDITIONAL_TRACES_HEADERS,
     OTEL_AWS_ADDITIONAL_TRACES_REDACTION_ENABLED,
     OTEL_AWS_ADDITIONAL_TRACES_TIMEOUT,
-    add_additional_span_processors,
+    _AdditionalExportLifecycle,
+    _AdditionalSession,
+)
+from amazon.opentelemetry.distro.additional_otlp_span_processor import (
+    add_additional_span_processors as register_additional_span_processors,
 )
 from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSampler
 from amazon.opentelemetry.distro.attribute_redacting_span_processor import AttributeRedactingSpanProcessor
@@ -35,7 +40,7 @@ from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExport
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
 from opentelemetry.proto.trace.v1.trace_pb2 import Span as OtlpSpan
 from opentelemetry.sdk._logs import LoggerProvider
-from opentelemetry.sdk.trace import Event, ReadableSpan, TracerProvider
+from opentelemetry.sdk.trace import Event, ReadableSpan, SynchronousMultiSpanProcessor, TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExportResult
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.sdk.trace.sampling import ALWAYS_OFF, ALWAYS_ON, ParentBased
@@ -44,6 +49,12 @@ from opentelemetry.trace import Link, NonRecordingSpan, SpanContext, SpanKind, T
 
 MODULE = "amazon.opentelemetry.distro.additional_otlp_span_processor"
 CONFIGURATOR = "amazon.opentelemetry.distro.aws_opentelemetry_configurator"
+
+
+def add_additional_span_processors(provider, include_unsampled=False, max_export_batch_size=None):
+    lifecycle = register_additional_span_processors(provider, include_unsampled, max_export_batch_size)
+    if lifecycle is not None:
+        provider.add_span_processor(lifecycle)
 
 
 @contextmanager
@@ -358,11 +369,208 @@ class TestAdditionalOtlpSpanProcessor(TestCase):
             release.set()
             self.provider.force_flush()
 
+    def test_provider_flush_delivers_primary_before_slow_additional_export(self):
+        os.environ.update(
+            {
+                OTEL_AWS_ADDITIONAL_TRACES_ENDPOINT: "https://example.com/v1/traces",
+                "OTEL_AWS_APPLICATION_SIGNALS_ENABLED": "false",
+                "OTEL_BSP_SCHEDULE_DELAY": "60000",
+            }
+        )
+        primary_exporter = InMemorySpanExporter()
+        additional_exporter = MagicMock()
+
+        def slow_export(_spans):
+            time.sleep(0.12)
+            return SpanExportResult.SUCCESS
+
+        additional_exporter.export.side_effect = slow_export
+        with patch(f"{MODULE}.OTLPSpanExporter", return_value=additional_exporter), patch(
+            f"{CONFIGURATOR}.set_tracer_provider"
+        ) as set_provider:
+            _init_tracing({"memory": lambda: primary_exporter}, sampler=ALWAYS_ON)
+        provider = set_provider.call_args.args[0]
+        self.addCleanup(provider.shutdown)
+        with provider.get_tracer("test").start_as_current_span("provider-flush"):
+            pass
+        started = time.monotonic()
+        self.assertFalse(provider.force_flush(timeout_millis=10))
+        elapsed = time.monotonic() - started
+        self.assertEqual(len(primary_exporter.get_finished_spans()), 1)
+        self.assertLess(elapsed, 0.08)
+
+    def test_lambda_queue_size_100_keeps_primary_and_additional_initialization_valid(self):
+        os.environ.update(
+            {
+                OTEL_AWS_ADDITIONAL_TRACES_ENDPOINT: "https://example.com/v1/traces",
+                "AWS_LAMBDA_FUNCTION_NAME": "fixture-function",
+                "OTEL_BSP_MAX_QUEUE_SIZE": "100",
+                "OTEL_AWS_APPLICATION_SIGNALS_ENABLED": "false",
+            }
+        )
+        primary_exporter = InMemorySpanExporter()
+        additional_exporter = InMemorySpanExporter()
+        with patch(f"{MODULE}.OTLPSpanExporter", return_value=additional_exporter), patch(
+            f"{CONFIGURATOR}.set_tracer_provider"
+        ) as set_provider:
+            _init_tracing({"memory": lambda: primary_exporter}, sampler=ALWAYS_ON)
+        provider = set_provider.call_args.args[0]
+        self.addCleanup(provider.shutdown)
+        with provider.get_tracer("test").start_as_current_span("lambda-queue"):
+            pass
+        self.assertTrue(provider.force_flush())
+        self.assertEqual(len(primary_exporter.get_finished_spans()), 1)
+        self.assertEqual(len(additional_exporter.get_finished_spans()), 1)
+
+    def test_lambda_batch_size_applies_to_sampled_and_unsampled_additional_processors(self):
+        os.environ.update(
+            {
+                OTEL_AWS_ADDITIONAL_TRACES_ENDPOINT: "https://example.com/v1/traces",
+                "OTEL_BSP_MAX_QUEUE_SIZE": "100",
+            }
+        )
+        exporters = [InMemorySpanExporter(), InMemorySpanExporter()]
+        with patch(f"{MODULE}.OTLPSpanExporter", side_effect=exporters):
+            lifecycle = register_additional_span_processors(
+                self.provider, include_unsampled=True, max_export_batch_size=10
+            )
+        self.assertIsNotNone(lifecycle)
+        self.provider.add_span_processor(lifecycle)
+        batch_processors = lifecycle._processors._span_processors
+        self.assertEqual(len(batch_processors), 2)
+        for processor in batch_processors:
+            self.assertEqual(processor._batch_processor._max_export_batch_size, 10)
+            self.assertEqual(processor._batch_processor._max_queue_size, 100)
+
+    def test_repeated_timed_out_flushes_keep_only_one_inflight_task(self):
+        processors = SynchronousMultiSpanProcessor()
+        processor = MagicMock()
+        release = threading.Event()
+        started = threading.Event()
+
+        def flush(_timeout_millis):
+            started.set()
+            release.wait(timeout=5)
+            return True
+
+        processor.force_flush.side_effect = flush
+        processors.add_span_processor(processor)
+        lifecycle = _AdditionalExportLifecycle(processors)
+        try:
+            self.assertFalse(lifecycle.force_flush(timeout_millis=10))
+            self.assertTrue(started.wait(timeout=1))
+            future = lifecycle._flush_future
+            for _ in range(3):
+                self.assertFalse(lifecycle.force_flush(timeout_millis=10))
+                self.assertIs(lifecycle._flush_future, future)
+            self.assertEqual(processor.force_flush.call_count, 1)
+            release.set()
+            self.assertTrue(lifecycle.force_flush(timeout_millis=1000))
+            self.assertEqual(processor.force_flush.call_count, 2)
+        finally:
+            release.set()
+            lifecycle.shutdown()
+        self.assertFalse(lifecycle.force_flush(timeout_millis=100))
+
+    def test_provider_shuts_down_primary_before_additional_delivery(self):
+        os.environ.update(
+            {
+                OTEL_AWS_ADDITIONAL_TRACES_ENDPOINT: "https://example.com/v1/traces",
+                "OTEL_AWS_APPLICATION_SIGNALS_ENABLED": "false",
+            }
+        )
+        order = []
+        primary_exporter = InMemorySpanExporter()
+        additional_exporter = MagicMock()
+        additional_exporter.shutdown.side_effect = lambda: order.append("additional")
+        with patch.object(primary_exporter, "shutdown", side_effect=lambda: order.append("primary")), patch(
+            f"{MODULE}.OTLPSpanExporter", return_value=additional_exporter
+        ), patch(f"{CONFIGURATOR}.set_tracer_provider") as set_provider:
+            _init_tracing({"memory": lambda: primary_exporter}, sampler=ALWAYS_ON)
+            set_provider.call_args.args[0].shutdown()
+        self.assertEqual(order, ["primary", "additional"])
+
+    def test_partial_batch_initialization_failure_closes_both_http_sessions(self):
+        os.environ[OTEL_AWS_ADDITIONAL_TRACES_ENDPOINT] = "https://example.com/v1/traces"
+        sessions = []
+
+        def session_factory(*args):
+            session = _AdditionalSession(*args)
+            session.close = MagicMock(wraps=session.close)
+            sessions.append(session)
+            return session
+
+        with patch(f"{MODULE}._AdditionalSession", side_effect=session_factory), patch(
+            f"{MODULE}.BatchUnsampledSpanProcessor", side_effect=ValueError("fixture-secret")
+        ), self.assertLogs(MODULE, level="WARNING") as logs:
+            lifecycle = register_additional_span_processors(self.provider, include_unsampled=True)
+        self.assertIsNone(lifecycle)
+        self.assertEqual(self.provider._active_span_processor._span_processors, ())
+        self.assertEqual(len(sessions), 2)
+        for session in sessions:
+            session.close.assert_called_once()
+        self.assertNotIn("fixture-secret", "".join(logs.output))
+
+    def test_additional_exporter_initialization_failure_keeps_primary_delivery(self):
+        os.environ.update(
+            {
+                OTEL_AWS_ADDITIONAL_TRACES_ENDPOINT: "https://example.com/v1/traces",
+                "OTEL_AWS_APPLICATION_SIGNALS_ENABLED": "false",
+            }
+        )
+        primary_exporter = InMemorySpanExporter()
+        with patch(f"{MODULE}.OTLPSpanExporter", side_effect=ValueError("fixture-secret")), patch(
+            f"{CONFIGURATOR}.set_tracer_provider"
+        ) as set_provider, self.assertLogs(MODULE, level="WARNING") as logs:
+            _init_tracing({"memory": lambda: primary_exporter}, sampler=ALWAYS_ON)
+        provider = set_provider.call_args.args[0]
+        self.addCleanup(provider.shutdown)
+        with provider.get_tracer("test").start_as_current_span("primary-after-setup-failure"):
+            pass
+        self.assertTrue(provider.force_flush(timeout_millis=1000))
+        self.assertEqual(len(primary_exporter.get_finished_spans()), 1)
+        self.assertNotIn("fixture-secret", "".join(logs.output))
+
+    def test_primary_initialization_failure_closes_prepared_additional_export(self):
+        os.environ[OTEL_AWS_ADDITIONAL_TRACES_ENDPOINT] = "https://example.com/v1/traces"
+        additional_exporter = MagicMock()
+        providers = []
+
+        def provider_factory(**kwargs):
+            provider = TracerProvider(**kwargs)
+            providers.append(provider)
+            return provider
+
+        with patch(f"{MODULE}.OTLPSpanExporter", return_value=additional_exporter), patch(
+            f"{CONFIGURATOR}.TracerProvider", side_effect=provider_factory
+        ):
+            with self.assertRaisesRegex(ValueError, "fixture-primary-failure"):
+                _init_tracing(
+                    {"failure": MagicMock(side_effect=ValueError("fixture-primary-failure"))}, sampler=ALWAYS_ON
+                )
+        additional_exporter.shutdown.assert_called_once()
+        # The snapshot processor has no lifecycle side effects after cleanup.
+        providers[0].shutdown()
+
+    def test_flush_exception_is_surfaced_and_failed_task_is_cleared(self):
+        processors = SynchronousMultiSpanProcessor()
+        processor = MagicMock()
+        processor.force_flush.side_effect = [ValueError("fixture-failure"), True]
+        processors.add_span_processor(processor)
+        lifecycle = _AdditionalExportLifecycle(processors)
+        try:
+            with self.assertRaisesRegex(ValueError, "fixture-failure"):
+                lifecycle.force_flush(timeout_millis=1000)
+            self.assertIsNone(lifecycle._flush_future)
+            self.assertTrue(lifecycle.force_flush(timeout_millis=1000))
+        finally:
+            lifecycle.shutdown()
+
     def test_configurator_wires_additional_export_before_primary_redaction(self):
         os.environ[OTEL_AWS_ADDITIONAL_TRACES_ENDPOINT] = "https://example.com/v1/traces"
         registered_processors = []
 
-        def capture_registration(provider, include_unsampled):
+        def capture_registration(provider, include_unsampled, max_export_batch_size):
             registered_processors.extend(provider._active_span_processor._span_processors)
 
         with patch(f"{CONFIGURATOR}.set_tracer_provider") as set_provider, patch(
@@ -371,7 +579,7 @@ class TestAdditionalOtlpSpanProcessor(TestCase):
             _init_tracing({"memory": InMemorySpanExporter}, sampler=ALWAYS_ON)
         provider = set_provider.call_args.args[0]
         self.addCleanup(provider.shutdown)
-        add.assert_called_once_with(provider, include_unsampled=False)
+        add.assert_called_once_with(provider, include_unsampled=False, max_export_batch_size=None)
         self.assertFalse(any(isinstance(p, AttributeRedactingSpanProcessor) for p in registered_processors))
         self.assertTrue(
             any(isinstance(p, BatchSpanProcessor) for p in provider._active_span_processor._span_processors)

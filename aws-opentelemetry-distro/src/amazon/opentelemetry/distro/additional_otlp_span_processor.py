@@ -6,7 +6,12 @@ import copy
 import logging
 import math
 import os
-from typing import Mapping
+import threading
+import time
+import weakref
+from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
+from typing import Mapping, NamedTuple, Optional
 from urllib.parse import urlsplit
 
 from requests import Session
@@ -59,7 +64,7 @@ class _AdditionalSession(Session):
         return super().request(method, url, *args, headers=additional_headers, **kwargs)
 
 
-class _AdditionalSpanProcessor(SpanProcessor):
+class _AdditionalSpanSnapshotProcessor(SpanProcessor):
     def __init__(self, processors: SynchronousMultiSpanProcessor, redact: bool, filter_content: bool):
         self._processors = processors
         self._redactor = AttributeRedactingSpanProcessor() if redact else None
@@ -80,11 +85,68 @@ class _AdditionalSpanProcessor(SpanProcessor):
             additional_span = self._content_filter.filter_span(additional_span)
         self._processors.on_end(additional_span)
 
-    def shutdown(self) -> None:
-        self._processors.shutdown()
+
+class _AdditionalExportLifecycle(SpanProcessor):
+    """Register after primary processors so optional flushes cannot starve them."""
+
+    def __init__(self, processors: SynchronousMultiSpanProcessor):
+        self._processors = processors
+        self._shutdown = False
+        self._flush_future: Optional[Future] = None
+        self._reset_flush_state()
+        if hasattr(os, "register_at_fork"):
+            weak_reset = weakref.WeakMethod(self._reset_flush_state)
+
+            def after_fork():
+                reset = weak_reset()
+                if reset is not None:
+                    reset()
+
+            os.register_at_fork(after_in_child=after_fork)
+
+    def _reset_flush_state(self) -> None:
+        self._flush_lock = threading.Lock()
+        self._flush_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="AdditionalOtlpFlush")
+        self._flush_future = None
 
     def force_flush(self, timeout_millis: int = 30000) -> bool:
-        return self._processors.force_flush(timeout_millis)
+        deadline = time.monotonic() + max(timeout_millis, 0) / 1000
+        while time.monotonic() < deadline:
+            with self._flush_lock:
+                if self._shutdown:
+                    return False
+                future = self._flush_future
+                owns_flush = future is None
+                if future is None:
+                    # The pinned BatchSpanProcessor ignores its flush timeout.
+                    future = self._flush_executor.submit(
+                        self._processors.force_flush, max(0, int((deadline - time.monotonic()) * 1000))
+                    )
+                    self._flush_future = future
+            try:
+                flushed = future.result(timeout=max(0, deadline - time.monotonic()))
+            except FutureTimeoutError:
+                _logger.warning("Additional OTLP trace flush timed out.")
+                return False
+            finally:
+                with self._flush_lock:
+                    if self._flush_future is future and future.done():
+                        self._flush_future = None
+            if owns_flush or not flushed:
+                return flushed
+            # An older timed-out flush may not cover spans queued for this call.
+            # Finish it before starting another, keeping at most one flush task.
+        return False
+
+    def shutdown(self) -> None:
+        with self._flush_lock:
+            if self._shutdown:
+                return
+            self._shutdown = True
+        try:
+            self._processors.shutdown()
+        finally:
+            self._flush_executor.shutdown(wait=True)
 
 
 def _parse_flag(name: str) -> bool:
@@ -108,11 +170,19 @@ def _parse_additional_headers(value: str) -> Mapping[str, str]:
     return headers
 
 
-def add_additional_span_processors(provider: TracerProvider, include_unsampled: bool = False) -> None:
-    """Register before primary redaction, after any span-kind adjustment."""
+class _AdditionalTraceConfiguration(NamedTuple):
+    endpoint: str
+    headers: Mapping[str, str]
+    timeout: float
+    compression: Compression
+    redact: bool
+    filter_content: bool
+
+
+def _read_additional_configuration() -> Optional[_AdditionalTraceConfiguration]:
     endpoint = os.environ.get(OTEL_AWS_ADDITIONAL_TRACES_ENDPOINT)
     if endpoint is None:
-        return
+        return None
 
     try:
         parsed = urlsplit(endpoint)
@@ -139,23 +209,62 @@ def add_additional_span_processors(provider: TracerProvider, include_unsampled: 
             raise ValueError("Invalid additional trace compression")
         redact = _parse_flag(OTEL_AWS_ADDITIONAL_TRACES_REDACTION_ENABLED)
         filter_content = _parse_flag(OTEL_AWS_ADDITIONAL_TRACES_CONTENT_FILTERING_ENABLED)
+        return _AdditionalTraceConfiguration(endpoint, headers, timeout, compression, redact, filter_content)
     except (ValueError, InvalidHeader):
         _logger.warning("Invalid additional OTLP trace configuration; additional export is disabled.")
-        return
+        return None
 
+
+def add_additional_span_processors(
+    provider: TracerProvider, include_unsampled: bool = False, max_export_batch_size: Optional[int] = None
+) -> Optional[SpanProcessor]:
+    """Register snapshot capture and return lifecycle to register after primary."""
+    config = _read_additional_configuration()
+    if config is None:
+        return None
     processor_types = [BatchSpanProcessor]
     if include_unsampled:
         processor_types.append(BatchUnsampledSpanProcessor)
 
     processors = SynchronousMultiSpanProcessor()
-    for processor_type in processor_types:
-        session = _AdditionalSession(headers, compression)
-        exporter = OTLPSpanExporter(
-            endpoint=endpoint, headers=headers, timeout=timeout, compression=compression, session=session
-        )
-        # The upstream transport applies the primary OTLP TLS environment to
-        # supplied sessions. Keep this destination's trust and identity separate.
-        session.verify = os.environ.get(OTEL_AWS_ADDITIONAL_TRACES_CERTIFICATE) or True
-        session.cert = None
-        processors.add_span_processor(processor_type(exporter))
-    provider.add_span_processor(_AdditionalSpanProcessor(processors, redact, filter_content))
+    session = None
+    exporter = None
+    lifecycle = None
+    registered = False
+    try:
+        for processor_type in processor_types:
+            session = _AdditionalSession(config.headers, config.compression)
+            exporter = OTLPSpanExporter(
+                endpoint=config.endpoint,
+                headers=config.headers,
+                timeout=config.timeout,
+                compression=config.compression,
+                session=session,
+            )
+            # The upstream transport applies the primary OTLP TLS environment to
+            # supplied sessions. Keep this destination's trust and identity separate.
+            session.verify = os.environ.get(OTEL_AWS_ADDITIONAL_TRACES_CERTIFICATE) or True
+            session.cert = None
+            processors.add_span_processor(processor_type(exporter, max_export_batch_size=max_export_batch_size))
+            session = None
+            exporter = None
+        snapshot = _AdditionalSpanSnapshotProcessor(processors, config.redact, config.filter_content)
+        lifecycle = _AdditionalExportLifecycle(processors)
+        provider.add_span_processor(snapshot)
+        registered = True
+        return lifecycle
+    except (ValueError, InvalidHeader):
+        _logger.warning("Failed to initialize additional OTLP trace export; additional export is disabled.")
+        return None
+    finally:
+        if not registered:
+            try:
+                if exporter is not None:
+                    exporter.shutdown()
+                elif session is not None:
+                    session.close()
+            finally:
+                if lifecycle is not None:
+                    lifecycle.shutdown()
+                else:
+                    processors.shutdown()

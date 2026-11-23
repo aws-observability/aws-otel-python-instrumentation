@@ -47,6 +47,10 @@ not commit them to source control.
 | `OTEL_AWS_ADDITIONAL_TRACES_CONTENT_FILTERING_ENABLED` | `false` | Remove supported GenAI content attributes and content events from the additional copy, without sending removed content to logs. |
 
 The additional destination has its own batch processors and export workers.
+On Lambda it uses the same batch size of 10 as primary trace delivery, including
+the additional recorded-unsampled processor. If additional initialization fails
+with invalid configuration, its partially created exporters are closed and
+primary tracing remains enabled.
 It respects the existing sampler and includes recorded, unsampled spans when
 the distribution enables their export for agent observability or Lambda
 Application Signals. Explicitly disabling primary trace exporters also leaves
@@ -81,8 +85,13 @@ privacy requirements before enabling export.
 This feature requires a distribution version containing the additional-export
 support and a process restart or runtime deployment. It does not configure
 separate AWS service telemetry or classic Bedrock Agent traces. Delivery is
-best-effort: queues are bounded, outages can cause drops, and flush/shutdown
-still share the process's time budget. The feature does not provide durable
+best-effort: queues are bounded and outages can cause drops. Primary processors
+flush and shut down first, while snapshot capture still precedes primary
+redaction. Additional flush waits are bounded by the provider's remaining time
+budget, even when the underlying batch processor ignores its flush timeout.
+A timed-out additional flush may continue in the background; repeated requests
+do not accumulate flush tasks. Secondary shutdown still waits for its workers
+after primary shutdown has completed. The feature does not provide durable
 buffering or an exactly-once delivery guarantee.
 
 ## Supported Python libraries and frameworks
