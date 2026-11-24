@@ -12,6 +12,36 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+## v0.24.0 - 2026-11-20
+- fix(langchain): report `stop` / `tool_call` / `length` instead of the raw Responses API status (`completed`)
+  in `gen_ai.response.finish_reasons` with langchain-openai >= 1.8.5, using LangChain's `normalized_finish_reason`
+  ([#983](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/983))
+- feat: in Amazon Bedrock AgentCore Runtime (`AWS_EXECUTION_ENV=AWS_BedrockAgentCore_Runtime`), default
+  `OTEL_PYTHON_ID_GENERATOR` to the new `snapshot_safe` ID generator. Like the upstream `random` generator, it
+  generates fully random trace and span IDs, but reads them from `os.urandom`, so sessions restored from the same
+  memory snapshot don't repeat IDs. An explicitly set `OTEL_PYTHON_ID_GENERATOR` still takes precedence.
+  ([#985](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/985))
+- fix: in Lambda, treat empty `OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` values as
+  unset, so traces fall back to the X-Ray UDP exporter again instead of being dropped. A non-empty
+  `OTEL_EXPORTER_OTLP_ENDPOINT` still selects the OTLP exporter instead of X-Ray UDP, a behavior change
+  since v0.23.0 ([#562](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/562))
+  ([#987](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/987))
+
+## v0.23.0 - 2026-11-18
+- fix(crewai): record full tool definitions (name, description, and parameters) on CrewAI `chat`,
+  `invoke_agent`, and `invoke_workflow` spans
+  ([#972](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/972))
+- fix: add the experimental opt-in `OTEL_AWS_EXPERIMENTAL_LOGS_SIZE_ESTIMATE_UNLIMITED_DEPTH=true` to include
+  content nested beyond three levels when estimating CloudWatch Logs batch sizes. The default depth remains 3.
+  This interim workaround reduces depth-related underestimation while legacy Gen AI log paths are migrated.
+  ([#944](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/944))
+
+- feat: support disabling Bedrock SDK instrumentation
+  Setting `OTEL_PYTHON_DISABLED_INSTRUMENTATIONS=bedrock` skips SDK telemetry from Bedrock GenAI operations
+  in botocore and aiobotocore, while keeping AgentCore and other AWS services instrumented.
+  ([#976](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/976))
+- fix(langchain): resolve response model and ID from generation metadata
+  ([#974](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/974))
 - feat: add CrewAI LiteAgent support. The CrewAI instrumentor now handles the `LiteAgentExecution*` events emitted
   by standalone `Agent.kickoff()` / `kickoff_async()`, so these runs produce an `invoke_agent` span and their LLM
   and tool spans stay in the caller's trace instead of each starting a new trace.

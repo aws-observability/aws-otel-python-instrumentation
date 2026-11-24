@@ -227,6 +227,131 @@ class TestLangChainInstrumentor(TestCase):
         self.assertEqual(span.attributes[GEN_AI_USAGE_OUTPUT_TOKENS], 20)
         self.assertEqual(span.attributes.get(GEN_AI_RESPONSE_FINISH_REASONS), ("stop",))
 
+    def _assert_chat_span_finish_reason(self, expected):
+        chat_spans = [s for s in self.span_exporter.get_finished_spans() if "chat" in s.name]
+        self.assertEqual(len(chat_spans), 1)
+        attrs = chat_spans[0].attributes
+        self.assertEqual(attrs.get(GEN_AI_RESPONSE_FINISH_REASONS), (expected,))
+        output_messages = json.loads(attrs[GEN_AI_OUTPUT_MESSAGES])
+        validate_otel_genai_schema(output_messages, "gen-ai-output-messages")
+        self.assertEqual(output_messages[0]["finish_reason"], expected)
+
+    # langchain-openai 1.8.5 reports the Responses API status as finish_reason and adds normalized_finish_reason:
+    # https://github.com/langchain-ai/langchain/pull/41926
+    @unittest.skipIf(
+        Version(importlib.metadata.version("langchain-openai")) < Version("1.8.5"),
+        "langchain-openai < 1.8.5 does not set finish_reason for the Responses API",
+    )
+    def test_openai_responses_api_finish_reasons(self):
+        from langchain_openai import ChatOpenAI
+
+        def response_body(status="completed", incomplete_details=None, output=None):
+            return {
+                "id": "resp-mock",
+                "object": "response",
+                "created_at": 1234567890,
+                "status": status,
+                "error": None,
+                "incomplete_details": incomplete_details,
+                "model": "gpt-5.6-sol",
+                "output": output
+                or [
+                    {
+                        "type": "message",
+                        "id": "msg-mock",
+                        "status": "completed",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "Hello", "annotations": []}],
+                    }
+                ],
+                "parallel_tool_calls": True,
+                "tool_choice": "auto",
+                "tools": [],
+                "usage": {
+                    "input_tokens": 10,
+                    "input_tokens_details": {"cached_tokens": 0},
+                    "output_tokens": 20,
+                    "output_tokens_details": {"reasoning_tokens": 0},
+                    "total_tokens": 30,
+                },
+            }
+
+        function_call_output = [
+            {
+                "type": "function_call",
+                "id": "fc-mock",
+                "call_id": "call-mock",
+                "name": "get_weather",
+                "arguments": '{"city": "Seattle"}',
+                "status": "completed",
+            }
+        ]
+        refusal_output = [
+            {
+                "type": "message",
+                "id": "msg-mock",
+                "status": "completed",
+                "role": "assistant",
+                "content": [{"type": "refusal", "refusal": "I can't help with that."}],
+            }
+        ]
+        # The "failed" status is not covered: langchain-openai raises on it, so no finish reason is recorded.
+        cases = [
+            ("completed", response_body(), "stop"),
+            ("completed_tool_call", response_body(output=function_call_output), "tool_call"),
+            # Refusals keep LangChain's value, matching the raw "refusal" stop_reason Anthropic reports.
+            ("completed_refusal", response_body(output=refusal_output), "refusal"),
+            (
+                "incomplete_max_output_tokens",
+                response_body(status="incomplete", incomplete_details={"reason": "max_output_tokens"}),
+                "length",
+            ),
+            # LangChain normalizes these to "other", so the status is mapped by the instrumentation.
+            (
+                "incomplete_max_messages",
+                response_body(status="incomplete", incomplete_details={"reason": "max_messages"}),
+                "length",
+            ),
+            ("cancelled", response_body(status="cancelled"), "error"),
+        ]
+        for name, body, expected in cases:
+            with self.subTest(case=name):
+                self.span_exporter.clear()
+
+                def invoke_openai(client):
+                    ChatOpenAI(
+                        model="gpt-5.6-sol",
+                        api_key="fake-key",
+                        client=client.chat.completions,
+                        root_client=client,
+                        streaming=False,
+                        use_responses_api=True,
+                    ).invoke("What is the weather in Seattle?")
+
+                call_mock_llm("openai", invoke_llm_callback=invoke_openai, responses=[body])
+                self._assert_chat_span_finish_reason(expected)
+
+    def test_finish_reason_without_normalized_finish_reason(self):
+        cases = [
+            # Responses API statuses from a message without normalized_finish_reason.
+            ({"finish_reason": "completed"}, "stop"),
+            ({"finish_reason": "failed"}, "error"),
+            # Provider values from versions that predate normalized_finish_reason.
+            ({"finish_reason": "tool_calls"}, "tool_call"),
+            ({"stop_reason": "end_turn"}, "stop"),
+            # "other" falls through to the raw value, which is kept when it is not mapped.
+            ({"finish_reason": "function_call", "normalized_finish_reason": "other"}, "function_call"),
+            ({}, "stop"),
+        ]
+        for response_metadata, expected in cases:
+            with self.subTest(response_metadata=response_metadata):
+                self.span_exporter.clear()
+                llm = GenericFakeChatModel(
+                    messages=iter([AIMessage(content="ok", response_metadata=response_metadata)])
+                )
+                llm.invoke("test")
+                self._assert_chat_span_finish_reason(expected)
+
     def test_create_agent_creates_invoke_agent_span(self):
         @tool
         def get_weather(query: str) -> str:
@@ -1398,6 +1523,7 @@ class TestLangChainInstrumentor(TestCase):
             generations=[ChatGeneration(message=AIMessage(content="ok"), generation_info={"finish_reason": "stop"})],
             llm_output={
                 "model_name": "test",
+                "id": " test-response-id ",
                 "token_usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
             },
         )
@@ -1553,6 +1679,7 @@ class TestLangChainInstrumentor(TestCase):
             with self.subTest(**subtest_kwargs):
                 self.span_exporter.clear()
                 expected_request_attributes = {}
+                expected_response_attributes = {}
 
                 if model_cls is ChatOpenAI:
                     use_responses_api = init_kwargs["use_responses_api"]
@@ -1582,7 +1709,11 @@ class TestLangChainInstrumentor(TestCase):
                             **chat_completions_kwargs,
                         ).invoke(messages)
 
-                    call_mock_llm("openai", invoke_llm_callback=invoke_openai)
+                    call_mock_llm("openai", invoke_llm_callback=invoke_openai, model=" gpt-5.6-sol ")
+                    expected_response_attributes = {
+                        GEN_AI_RESPONSE_MODEL: "gpt-5.6-sol",
+                        GEN_AI_RESPONSE_ID: "resp-mock" if use_responses_api else "chatcmpl-mock",
+                    }
                     expected_request_attributes = {
                         GEN_AI_REQUEST_MODEL: "gpt-5.6-sol",
                         GEN_AI_REQUEST_TEMPERATURE: 1.0,
@@ -1617,7 +1748,11 @@ class TestLangChainInstrumentor(TestCase):
                         llm._client = client
                         llm.invoke(messages)
 
-                    call_mock_llm("anthropic", invoke_llm_callback=invoke_anthropic)
+                    call_mock_llm("anthropic", invoke_llm_callback=invoke_anthropic, model=" claude-fable-5 ")
+                    expected_response_attributes = {
+                        GEN_AI_RESPONSE_MODEL: "claude-fable-5",
+                        GEN_AI_RESPONSE_ID: "msg_mock",
+                    }
                     expected_request_attributes = {
                         GEN_AI_REQUEST_MODEL: "claude-opus-5",
                         GEN_AI_REQUEST_TEMPERATURE: 1.0,
@@ -1641,6 +1776,12 @@ class TestLangChainInstrumentor(TestCase):
                         ).invoke(messages)
 
                     call_mock_llm("bedrock", invoke_llm_callback=invoke_bedrock)
+                    expected_response_attributes = {
+                        GEN_AI_RESPONSE_MODEL: "anthropic.claude-fable-5",
+                        # Converse's standard response has no completion ID.
+                        # https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html
+                        GEN_AI_RESPONSE_ID: None,
+                    }
                     expected_request_attributes = {
                         GEN_AI_REQUEST_MODEL: "anthropic.claude-fable-5",
                         GEN_AI_REQUEST_TEMPERATURE: 0.7,
@@ -1650,6 +1791,10 @@ class TestLangChainInstrumentor(TestCase):
                         GEN_AI_REQUEST_STOP_SEQUENCES: ("STOP",),
                     }
                 else:
+                    expected_response_attributes = {
+                        GEN_AI_RESPONSE_MODEL: "test",
+                        GEN_AI_RESPONSE_ID: "test-response-id",
+                    }
                     llm = model_cls(**init_kwargs)
                     with (
                         patch.object(type(llm), "_generate", return_value=fake_result),
@@ -1749,7 +1894,7 @@ class TestLangChainInstrumentor(TestCase):
                 validate_otel_genai_schema(json.loads(attrs[GEN_AI_INPUT_MESSAGES]), "gen-ai-input-messages")
                 validate_otel_genai_schema(json.loads(attrs[GEN_AI_OUTPUT_MESSAGES]), "gen-ai-output-messages")
                 self.assertEqual(attrs.get(GEN_AI_RESPONSE_FINISH_REASONS), ("stop",))
-                for attribute, value in expected_request_attributes.items():
+                for attribute, value in {**expected_request_attributes, **expected_response_attributes}.items():
                     self.assertEqual(attrs.get(attribute), value)
 
     def test_llm_span_records_tool_definitions(self):

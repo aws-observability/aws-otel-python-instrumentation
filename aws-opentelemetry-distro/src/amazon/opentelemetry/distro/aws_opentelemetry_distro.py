@@ -72,6 +72,7 @@ from amazon.opentelemetry.distro._utils import (
     get_aws_region,
     get_env,
     is_agent_observability_enabled,
+    is_agentcore_runtime_environment,
     is_installed,
 )
 from amazon.opentelemetry.distro.aws_opentelemetry_configurator import APPLICATION_SIGNALS_ENABLED_CONFIG
@@ -202,7 +203,12 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
             # override the default propagators.
             importlib.reload(propagate)
 
-        os.environ.setdefault(OTEL_PYTHON_ID_GENERATOR, "xray")
+        if is_agentcore_runtime_environment():
+            # AgentCore Runtime can start sessions from a memory snapshot, which repeats the state of Python's
+            # `random` module in every session. Read IDs from the OS instead, so sessions don't repeat IDs.
+            os.environ.setdefault(OTEL_PYTHON_ID_GENERATOR, "snapshot_safe")
+        else:
+            os.environ.setdefault(OTEL_PYTHON_ID_GENERATOR, "xray")
         os.environ.setdefault(
             OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION, "base2_exponential_bucket_histogram"
         )
