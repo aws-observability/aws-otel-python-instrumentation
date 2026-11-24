@@ -11,6 +11,8 @@ For any change that affects end users of this package, please add an entry under
 If your change does not need a CHANGELOG entry, add the "skip changelog" label to your PR.
 
 ## Unreleased
+- fix(langchain): record each tool call once when it appears in both message content and the tool call list
+  ([#968](https://github.com/aws-observability/aws-otel-python-instrumentation/issues/968))
 
 ## v0.24.0 - 2026-11-20
 - fix(langchain): report `stop` / `tool_call` / `length` instead of the raw Responses API status (`completed`)
