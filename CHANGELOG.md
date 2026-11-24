@@ -13,6 +13,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 ## Unreleased
 - fix(langchain): record each tool call once when it appears in both message content and the tool call list
   ([#968](https://github.com/aws-observability/aws-otel-python-instrumentation/issues/968))
+
+## v0.24.0 - 2026-11-20
 - fix(langchain): report `stop` / `tool_call` / `length` instead of the raw Responses API status (`completed`)
   in `gen_ai.response.finish_reasons` with langchain-openai >= 1.8.5, using LangChain's `normalized_finish_reason`
   ([#983](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/983))
