@@ -51,6 +51,43 @@ The connector binds its meter when it is created. Configure the global
 `MeterProvider`, or pass `meter_provider`, before instrumenting so the derived
 metrics are recorded.
 
+## GenAI observability
+
+The plugin bridges OpenTelemetry GenAI instrumentations to the CloudWatch GenAI observability console and
+AgentCore Evaluations.
+
+Supported:
+
+- LangChain / LangGraph, with the upstream `opentelemetry-instrumentation-genai-langchain`, which you install. It
+  works with only `langchain-core` installed.
+
+### Usage
+
+Install the instrumentation alongside the plugin. GenAI features apply under auto-instrumentation
+(`opentelemetry-instrument`).
+
+```shell
+pip install opentelemetry-instrumentation-genai-langchain
+```
+
+### Content capture
+
+`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` controls whether prompts, responses and tool arguments/results
+are recorded:
+
+| Value | Content is recorded |
+|---|---|
+| unset or `NO_CONTENT` | nowhere |
+| `true` or `SPAN_ONLY` | on span attributes |
+| `EVENT_ONLY` | in log events |
+| `SPAN_AND_EVENT` | on span attributes and in log events |
+
+For AgentCore Evaluations, set `true` or `SPAN_ONLY`.
+
+### Settings
+
+`CW_PLUGIN_GENAI_ENABLED=false` turns off the plugin's GenAI features. Plugin log lines start with `CW-PLUGIN`.
+
 ## License
 
 This project is licensed under the Apache-2.0 License. See [LICENSE](./LICENSE).
