@@ -246,3 +246,15 @@ def test_warn_once_emits_each_key_once(caplog):
         (logging.WARNING, "CW-PLUGIN genai: other"),
     ]
     assert all(r.name == _settings.LOGGER_NAME for r in caplog.records)
+
+
+def test_debug_once_has_its_own_keys(caplog):
+    caplog.set_level(logging.DEBUG, logger=_settings.LOGGER_NAME)
+    _settings.warn_once("k", "a warning")
+    _settings.debug_once("k", "a debug line")
+    _settings.debug_once("k", "again")
+
+    assert [(r.levelno, r.getMessage()) for r in caplog.records] == [
+        (logging.WARNING, "CW-PLUGIN genai: a warning"),
+        (logging.DEBUG, "CW-PLUGIN genai: a debug line"),
+    ]

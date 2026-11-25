@@ -34,7 +34,7 @@ def _langchain_core_present() -> bool:
         return False
 
 
-def _upstream_instrumented() -> bool:
+def upstream_instrumented() -> bool:
     """Read from the instrumentor singleton without importing the module (if the loader never imported it, it is
     not instrumenting) or calling the class (that would re-run ``__init__`` on it)."""
     cls = getattr(sys.modules.get(UPSTREAM_MODULE), "LangChainInstrumentor", None)
@@ -53,7 +53,7 @@ def langchain_step() -> Optional[str]:
             UPSTREAM_DIST,
         )
         return NOT_INSTALLED
-    if _upstream_instrumented():
+    if upstream_instrumented():
         return INSTRUMENTED
     if instrumentation_disabled(ENTRY_POINT_NAME):
         return DISABLED

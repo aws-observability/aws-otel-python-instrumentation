@@ -89,7 +89,7 @@ def test_upstream_is_imported_only_when_forcing(discovery, monkeypatch):
     monkeypatch.delitem(sys.modules, lc.UPSTREAM_MODULE)
     monkeypatch.setenv("OTEL_PYTHON_DISABLED_INSTRUMENTATIONS", "langchain")
 
-    assert lc._upstream_instrumented() is False  # not imported by the loader: cannot be instrumented
+    assert lc.upstream_instrumented() is False  # not imported by the loader: cannot be instrumented
     assert lc.langchain_step() == lc.DISABLED
     assert lc.UPSTREAM_MODULE not in sys.modules
 
