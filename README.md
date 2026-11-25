@@ -18,6 +18,82 @@ data from a Python application without any code changes.
 
 Check out the [getting started documentation](https://aws-otel.github.io/docs/getting-started/python-sdk/auto-instr).
 
+### Additional trace destination
+
+An optional additional OTLP/HTTP protobuf destination can receive application
+spans alongside the existing trace exporters. Leave the primary exporter
+configuration unchanged and set the following variables before starting the
+instrumented process:
+
+```sh
+export OTEL_AWS_ADDITIONAL_TRACES_ENDPOINT='https://collector.example.com/v1/traces'
+export OTEL_AWS_ADDITIONAL_TRACES_HEADERS='authorization=Bearer%20example-token'
+```
+
+The endpoint is the complete traces URL; `/v1/traces` is not appended. The
+additional destination does not use AWS SigV4 authentication or inherit primary
+OTLP credentials. Header values use the same comma-separated, URL-encoded format
+as standard OTLP headers. Protect credentials in deployment configuration and do
+not commit them to source control.
+
+| Environment variable | Default | Description |
+|---|---|---|
+| `OTEL_AWS_ADDITIONAL_TRACES_ENDPOINT` | Unset (disabled) | Full HTTP or HTTPS traces URL. Use HTTPS for remote destinations. |
+| `OTEL_AWS_ADDITIONAL_TRACES_HEADERS` | Empty | Headers sent only to the additional destination. |
+| `OTEL_AWS_ADDITIONAL_TRACES_TIMEOUT` | `10000` | Positive, finite export timeout in milliseconds, including retries. |
+| `OTEL_AWS_ADDITIONAL_TRACES_COMPRESSION` | `none` | `none` or `gzip`. |
+| `OTEL_AWS_ADDITIONAL_TRACES_CERTIFICATE` | Default TLS trust | Optional CA certificate file for the additional destination. Primary OTLP CA and client certificates are not inherited. |
+| `OTEL_AWS_ADDITIONAL_TRACES_REDACTION_ENABLED` | `false` | Apply `AWS_REDACT_SPAN_ATTRIBUTES` patterns to the additional copy's span, event and link attributes. |
+| `OTEL_AWS_ADDITIONAL_TRACES_CONTENT_FILTERING_ENABLED` | `false` | Remove supported GenAI content attributes and content events from the additional copy, without sending removed content to logs. |
+
+The additional destination has its own batch processors and export workers.
+On Lambda it uses the same batch size of 10 as primary trace delivery, including
+the additional recorded-unsampled processor. If additional initialization fails
+with invalid configuration, its partially created exporters are closed and
+primary tracing remains enabled.
+It respects the existing sampler and includes recorded, unsampled spans when
+the distribution enables their export for agent observability or Lambda
+Application Signals. Explicitly disabling primary trace exporters also leaves
+the additional destination disabled. Logs and metrics are not duplicated.
+Boolean flags accept `true` or `false` (case-insensitive). Invalid additional
+endpoint, header, timeout, compression or boolean configuration emits
+a warning without logging configured values and leaves primary export intact.
+
+The additional destination snapshots completed spans after span-kind adjustment
+and before primary AWS redaction or content extraction. By default, it sends the
+recorded attributes and events unchanged, including captured content, even when
+primary AWS filtering is configured. Redaction and content removal for this copy
+are independent, opt-in settings; neither changes AWS's existing filtering or
+content-extraction behavior. Content removal uses the distribution's existing
+LLO pattern registry and applies to span attributes and events, not arbitrary
+resource, scope or link content.
+
+To enable both options for the additional destination:
+
+```sh
+export OTEL_AWS_ADDITIONAL_TRACES_REDACTION_ENABLED=true
+export OTEL_AWS_ADDITIONAL_TRACES_CONTENT_FILTERING_ENABLED=true
+```
+
+Redaction uses the configured `AWS_REDACT_SPAN_ATTRIBUTES` patterns; with no
+patterns set, it has nothing to redact. These options do not enable content
+capture or recover content already omitted by instrumentation. **Enabling the
+additional destination with the default filtering settings can export sensitive
+recorded content.** Obtain appropriate consent and review the destination's
+privacy requirements before enabling export.
+
+This feature requires a distribution version containing the additional-export
+support and a process restart or runtime deployment. It does not configure
+separate AWS service telemetry or classic Bedrock Agent traces. Delivery is
+best-effort: queues are bounded and outages can cause drops. Primary processors
+flush and shut down first, while snapshot capture still precedes primary
+redaction. Additional flush waits are bounded by the provider's remaining time
+budget, even when the underlying batch processor ignores its flush timeout.
+A timed-out additional flush may continue in the background; repeated requests
+do not accumulate flush tasks. Secondary shutdown still waits for its workers
+after primary shutdown has completed. The feature does not provide durable
+buffering or an exactly-once delivery guarantee.
+
 ## Supported Python libraries and frameworks
 For the complete list of supported frameworks, please refer to the [OpenTelemetry for Python documentation](https://github.com/open-telemetry/opentelemetry-python-contrib/blob/main/instrumentation/README.md).
 
